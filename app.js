@@ -4,7 +4,7 @@ import {
   acceptMission, getSite, getSiteProgress, operateSite, exportMissionResult, submitMission,
   processTimedEvents, bankStatus, bankRisk, attemptBankSimulation, saveEditorFile, validateNbs, runNbs,
   recordHistory, addBookmark, idempotencyKey,
-  PLUGIN_SHELLS, runPluginShellCommand, pluginShellBootLines, resolveSiteRef
+  PLUGIN_SHELLS, PLUGIN_ANIM, runPluginShellCommand, pluginShellBootLines, resolveSiteRef
 } from './engine.js';
 import { loadSavedGame, saveGame } from './storage.js';
 
@@ -37,7 +37,7 @@ const APPS = [
   {id:'profile',title:'Профиль',path:'user://operator',ram:1,description:'Оператор и прогресс'},
   {id:'computer',title:'My Computer',path:'system://hardware',ram:1,description:'Компьютер и файлы'}
 ];
-const state = {opened:new Map(),z:20,drag:null,active:null,game:null,provider:'LOCAL SAVE',saveWarning:'',saveTimer:null,terminalLines:[],terminalPlugin:null,browserTabs:[],selectedMail:null,selectedFileId:null,selectedMissionId:null,editorText:'',editorName:'mission_report',nbsOutput:'Поддерживается только фиксированный список игровых деклараций.',modalConfirm:null,bootDone:false,persisting:false,persistPending:false,saveBlocked:false};
+const state = {opened:new Map(),z:20,drag:null,active:null,game:null,provider:'LOCAL SAVE',saveWarning:'',saveTimer:null,terminalLines:[],terminalPlugin:null,terminalBusy:false,terminalScrollPin:true,browserTabs:[],selectedMail:null,selectedFileId:null,selectedMissionId:null,editorText:'',editorName:'mission_report',nbsOutput:'Поддерживается только фиксированный список игровых деклараций.',modalConfirm:null,bootDone:false,persisting:false,persistPending:false,saveBlocked:false};
 
 function icon(id,cls='') { return `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${svg[id]||svg.help}</svg>`; }
 function appInfo(id) { return APPS.find(a=>a.id===id); }
@@ -224,7 +224,24 @@ function renderWindow(id) {const el=document.querySelector(`[data-window="${id}"
 function refreshOpenApps(ids=null) {for(const id of (ids||[...state.opened.keys()]))if(state.opened.has(id))renderWindow(id);renderTaskbar();}
 function wireAppContent(id,el) {
   if(id==='terminal'){
-    const form=el.querySelector('#terminalForm');form?.addEventListener('submit',e=>{e.preventDefault();runTerminalCommand(form.elements.command.value);form.elements.command.value='';renderWindow('terminal');document.querySelector('#terminalForm input')?.focus({preventScroll:true});});
+    const out=el.querySelector('#terminalOutput');
+    if(out){
+      out.addEventListener('scroll',()=>{
+        const nearBottom=(out.scrollHeight-out.scrollTop-out.clientHeight)<48;
+        state.terminalScrollPin=nearBottom;
+      },{passive:true});
+      scrollTerminalBottom(true);
+    }
+    const form=el.querySelector('#terminalForm');
+    form?.addEventListener('submit',async e=>{
+      e.preventDefault();
+      if(state.terminalBusy)return;
+      const input=form.elements.command;
+      const val=input?.value||'';
+      if(input)input.value='';
+      await runTerminalCommand(val);
+      queueMicrotask(()=>{const i=document.querySelector('#terminalForm input');if(i&&!state.terminalBusy)i.focus({preventScroll:true});scrollTerminalBottom(true);});
+    });
   }
   if(id==='browser'){
     const form=el.querySelector('#browserForm');
@@ -474,59 +491,194 @@ function renderBank(g) {
 function terminalPrompt() {
   if (state.terminalPlugin) {
     const p = getPlugin(state.terminalPlugin);
-    return `${(p?.name || state.terminalPlugin).toLowerCase().replace(/\s+/g,'-')}>`;
+    const short = (p?.id || state.terminalPlugin).replace(/[^a-z0-9]/gi, '').slice(0, 10);
+    return `${short}>`;
   }
   return 'operator@nullbyte $';
+}
+
+function scrollTerminalBottom(force = false) {
+  const out = $('terminalOutput');
+  if (!out) return;
+  const pin = force || state.terminalScrollPin;
+  if (!pin) return;
+  requestAnimationFrame(() => {
+    out.scrollTop = out.scrollHeight + 200;
+    requestAnimationFrame(() => { out.scrollTop = out.scrollHeight + 200; });
+  });
+}
+
+function termAdd(text, type = '') {
+  state.terminalLines.push({ text, type });
+  state.terminalLines = state.terminalLines.slice(-180);
+  // Live-append if terminal is open — avoid full window remount when possible
+  const out = $('terminalOutput');
+  if (out && state.opened.has('terminal')) {
+    const row = document.createElement('div');
+    if (type) row.className = type;
+    row.textContent = text;
+    out.appendChild(row);
+    while (out.children.length > 180) out.removeChild(out.firstChild);
+    scrollTerminalBottom(true);
+  }
+}
+
+function pluginBanner(pluginId) {
+  const p = getPlugin(pluginId);
+  const name = (p?.name || pluginId).toUpperCase();
+  const id = pluginId;
+  const bar = '═'.repeat(Math.min(42, Math.max(28, name.length + 8)));
+  return [
+    { text: `╔${bar}╗`, type: 'blue' },
+    { text: `║  ░▒▓ ${name} ▓▒░`.padEnd(bar.length + 1) + '║', type: 'blue' },
+    { text: `║  module://${id}`.padEnd(bar.length + 1) + '║', type: 'muted' },
+    { text: `║  ${(p?.version || 'v1')} · sandbox=ON · net=SIM`.padEnd(bar.length + 1) + '║', type: 'muted' },
+    { text: `╚${bar}╝`, type: 'blue' },
+    { text: '  .·°·. 01001110 01010101 01001100 01001100  .·°·.', type: 'muted' }
+  ];
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function animatePluginBoot(pluginId) {
+  const frames = [
+    { text: '[······] init runtime', type: 'muted' },
+    { text: '[=·····] verify package signature', type: 'muted' },
+    { text: '[==····] map memory pages', type: 'muted' },
+    { text: '[===···] load opcode table', type: 'muted' },
+    { text: '[====··] attach sandbox tty', type: 'muted' },
+    { text: '[=====·] link operator session', type: 'muted' },
+    { text: '[======] module ready', type: 'green' }
+  ];
+  for (const f of frames) {
+    termAdd(f.text, f.type);
+    await sleep(90 + Math.random() * 70);
+  }
+  for (const line of pluginBanner(pluginId)) {
+    termAdd(line.text, line.type);
+    await sleep(30);
+  }
+  for (const line of pluginShellBootLines(pluginId)) {
+    termAdd(line.text, line.type);
+    await sleep(40);
+  }
+}
+
+async function animateWork(pluginId, prefix = 'work') {
+  const steps = PLUGIN_ANIM[pluginId] || ['processing…', 'almost…', 'done'];
+  const totalMs = 4200 + Math.random() * 1200;
+  const stepMs = totalMs / (steps.length + 2);
+  termAdd(`┌─ ${prefix}`, 'blue');
+  for (let i = 0; i < steps.length; i++) {
+    const pct = Math.round(((i + 1) / steps.length) * 100);
+    const filled = Math.round(pct / 5);
+    const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);
+    termAdd(`│ ${bar} ${String(pct).padStart(3)}%  ${steps[i]}`, 'muted');
+    await sleep(stepMs);
+  }
+  termAdd('└─ complete', 'green');
+  await sleep(120);
+}
+
+async function enterPlugin(pluginId) {
+  const p = getPlugin(pluginId) || PLUGINS.find(x => x.id === pluginId || x.name.toLowerCase() === pluginId.toLowerCase());
+  if (!p) { termAdd('Плагин не найден. plugins — список.', 'error'); return; }
+  if (!getInstalledPlugin(state.game, p.id)) { termAdd(`«${p.name}» не установлен. Купи в NULForge.`, 'error'); return; }
+  if (!PLUGIN_SHELLS[p.id]) { termAdd('У этого плагина нет интерактивной оболочки.', 'error'); return; }
+  if (state.terminalBusy) { termAdd('Подожди, модуль ещё грузится…', 'error'); return; }
+  state.terminalBusy = true;
+  try {
+    termAdd(`$ run ${p.id}`, 'prompt');
+    await animatePluginBoot(p.id);
+    state.terminalPlugin = p.id;
+    if (state.opened.has('terminal')) {
+      // refresh prompt only
+      renderWindow('terminal');
+      scrollTerminalBottom(true);
+    }
+  } finally {
+    state.terminalBusy = false;
+  }
 }
 
 function renderTerminal(g) {
   if (!state.terminalLines.length) {
     state.terminalLines = [
-      { text: 'NULLBYTE NBSHELL 1.0 — игровой терминал.', type: 'blue' },
-      { text: 'Плагины запускаются здесь: run <plugin-id>', type: 'muted' },
-      { text: 'help — список команд · plugins — модули', type: 'muted' }
+      { text: 'NULLBYTE NBSHELL 1.0', type: 'blue' },
+      { text: 'run <plugin-id> — войти в модуль · plugins — список · help', type: 'muted' }
     ];
   }
   const plug = state.terminalPlugin ? getPlugin(state.terminalPlugin) : null;
-  return `<div class="app-heading"><div><div class="eyebrow">NULLBYTE / COMMAND INTERFACE</div><h2>Terminal</h2><p>${plug ? `Модуль: <b>${esc(plug.name)}</b> · exit чтобы выйти` : 'Операции с целями выполняются через установленные плагины.'}</p></div><span class="badge ${plug ? 'amber' : 'green'}">${plug ? 'PLUGIN SESSION' : 'SHELL'}</span></div>
-  <div class="terminal-shell"><div class="terminal-toolbar"><span>${esc(terminalPrompt())}</span><span>${plug ? esc(plug.id) : 'VIRTUAL TTY'}</span></div><div class="terminal-output" id="terminalOutput">${state.terminalLines.map(l => `<div class="${esc(l.type || '')}">${esc(l.text)}</div>`).join('')}</div><form class="terminal-input-row" id="terminalForm"><span>${esc(terminalPrompt())}</span><input name="command" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${plug ? 'help | exit' : 'help'}" aria-label="Игровая команда"></form></div>`;
+  return `<div class="app-heading"><div><div class="eyebrow">NULLBYTE / COMMAND INTERFACE</div><h2>Terminal</h2><p>${plug ? `Модуль <b>${esc(plug.name)}</b> · exit` : 'Операции через плагины. Не системная оболочка.'}</p></div><span class="badge ${plug ? 'amber' : 'green'}">${plug ? 'PLUGIN' : 'SHELL'}</span></div>
+  <div class="terminal-shell"><div class="terminal-toolbar"><span>${esc(terminalPrompt())}</span><span>${plug ? esc(plug.id) : 'TTY-0'}${state.terminalBusy ? ' · BUSY' : ''}</span></div><div class="terminal-output" id="terminalOutput">${state.terminalLines.map(l => `<div class="${esc(l.type || '')}">${esc(l.text)}</div>`).join('')}</div><form class="terminal-input-row" id="terminalForm"><span>${esc(terminalPrompt())}</span><input name="command" autocomplete="off" autocapitalize="off" spellcheck="false" ${state.terminalBusy ? 'disabled' : ''} placeholder="${plug ? 'help | exit' : 'run site-analyzer'}" aria-label="Игровая команда"></form></div>`;
 }
 
-function termAdd(text, type = '') {
-  state.terminalLines.push({ text, type });
-}
-
-function enterPlugin(pluginId) {
-  const p = getPlugin(pluginId) || PLUGINS.find(x => x.id === pluginId || x.name.toLowerCase() === pluginId.toLowerCase());
-  if (!p) { termAdd('Плагин не найден. plugins — список.', 'error'); return; }
-  if (!getInstalledPlugin(state.game, p.id)) { termAdd(`«${p.name}» не установлен. Купи в NULForge.`, 'error'); return; }
-  if (!PLUGIN_SHELLS[p.id]) { termAdd('У этого плагина нет интерактивной оболочки.', 'error'); return; }
-  termAdd(`loading ${p.name} …`, 'muted');
-  termAdd('checking signature / sandbox …', 'muted');
-  state.terminalPlugin = p.id;
-  for (const line of pluginShellBootLines(p.id)) termAdd(line.text, line.type);
-}
-
-function runTerminalCommand(raw) {
+async function runTerminalCommand(raw) {
   const cmd = String(raw || '').trim();
   if (!cmd) return;
+  if (state.terminalBusy) {
+    termAdd('busy — дождись окончания операции', 'error');
+    return;
+  }
+
   const prompt = terminalPrompt();
   termAdd(`${prompt} ${cmd}`, 'prompt');
+  state.terminalScrollPin = true;
 
   // Inside plugin session
   if (state.terminalPlugin) {
-    const result = runPluginShellCommand(state.game, state.terminalPlugin, cmd);
-    for (const line of result.lines || []) termAdd(line.text, line.type || '');
-    if (result.exit) state.terminalPlugin = null;
-    if (result.progressUpdated || result.exportFile) scheduleSave();
-    if (result.exportFile) toast('Файл результата готов. Проверь N-Mail.', 'success');
-    state.terminalLines = state.terminalLines.slice(-140);
-    if (state.opened.has('terminal')) {
-      renderWindow('terminal');
-      const out = $('terminalOutput');
-      if (out) out.scrollTop = out.scrollHeight;
+    const lower = cmd.toLowerCase();
+    if (lower === 'exit' || lower === 'quit') {
+      const result = runPluginShellCommand(state.game, state.terminalPlugin, 'exit');
+      for (const line of result.lines || []) termAdd(line.text, line.type || '');
+      state.terminalPlugin = null;
+      if (state.opened.has('terminal')) {
+        renderWindow('terminal');
+        scrollTerminalBottom(true);
+      }
+      return;
     }
-    if (result.progressUpdated) refreshOpenApps(['browser', 'mail', 'blackwire', 'computer']);
+    if (lower === 'help' || lower === 'clear') {
+      const result = runPluginShellCommand(state.game, state.terminalPlugin, cmd);
+      if (lower === 'clear') state.terminalLines = [];
+      else for (const line of result.lines || []) termAdd(line.text, line.type || '');
+      if (state.opened.has('terminal')) {
+        renderWindow('terminal');
+        scrollTerminalBottom(true);
+      }
+      return;
+    }
+
+    // Animated work for real ops
+    state.terminalBusy = true;
+    try {
+      const isOp = !['help', 'exit', 'quit', 'clear'].includes(cmd.split(/\s+/)[0].toLowerCase());
+      if (isOp) await animateWork(state.terminalPlugin, state.terminalPlugin);
+      const result = runPluginShellCommand(state.game, state.terminalPlugin, cmd);
+      for (const line of result.lines || []) {
+        termAdd(line.text, line.type || '');
+        await sleep(25);
+      }
+      if (result.exit) state.terminalPlugin = null;
+      if (result.progressUpdated || result.exportFile) scheduleSave();
+      if (result.exportFile) toast('Файл результата готов → N-Mail', 'success');
+      if (state.opened.has('terminal')) {
+        // Keep lines; only refresh prompt chrome if session ended
+        if (result.exit) renderWindow('terminal');
+        else {
+          // re-enable input after busy
+          const input = document.querySelector('#terminalForm input');
+          if (input) { input.disabled = false; input.focus({ preventScroll: true }); }
+          const tb = document.querySelector('.terminal-toolbar span:last-child');
+        }
+        scrollTerminalBottom(true);
+      }
+      if (result.progressUpdated) refreshOpenApps(['browser', 'mail', 'blackwire', 'computer']);
+    } finally {
+      state.terminalBusy = false;
+      const input = document.querySelector('#terminalForm input');
+      if (input) input.disabled = false;
+    }
     return;
   }
 
@@ -535,20 +687,20 @@ function runTerminalCommand(raw) {
   const one = (parts[0] || '').toLowerCase();
 
   if (lower === 'help') {
-    termAdd('help | clear | info | whoami | status | plugins | pkg list | plugin info <id>', 'blue');
-    termAdd('run <plugin> | use <plugin> — войти в оболочку плагина', 'blue');
+    termAdd('help | clear | info | whoami | status | plugins | plugin info <id>', 'blue');
+    termAdd('run <plugin> | use <plugin> — оболочка модуля', 'blue');
     termAdd('ls | cat <file> | mission list | map', 'blue');
-    termAdd('Цепочка: analyzer → decoder → node-radar → weakness-lab → sim-exploit → data-exporter', 'muted');
   } else if (lower === 'clear') {
     state.terminalLines = [];
+    if (state.opened.has('terminal')) renderWindow('terminal');
   } else if (lower === 'whoami') termAdd(state.game.player.nickname);
   else if (lower === 'date') termAdd(new Date().toString());
   else if (lower === 'uptime') termAdd(`${Math.floor((Date.now() - state.game.computer.uptimeStartedAt) / 60000)} virtual minutes`);
   else if (lower === 'info') {
     const g = state.game, ram = HARDWARE.ram.find(x => x.level === g.computer.ram), cpu = HARDWARE.cpu.find(x => x.level === g.computer.cpu), storage = getHardwareUsage(g);
-    termAdd(`OPERATOR: ${g.player.nickname}\nTELEGRAM_ID: ${g.player.telegramId || 'UNAVAILABLE'}\nCPU: ${cpu.name}\nRAM: ${ram.gb} GB\nGPU: ${HARDWARE.gpu.find(x => x.level === g.computer.gpu).name}\nOS: NULLBYTE OS ${g.computer.os}.0\nSTORAGE: ${fmt(storage.used / 1024)} / ${storage.total / 1024} GB\nMODE: FICTIONAL SIMULATION`);
+    termAdd(`OPERATOR: ${g.player.nickname}\nCPU: ${cpu.name}\nRAM: ${ram.gb} GB\nSTORAGE: ${fmt(storage.used / 1024)} / ${storage.total / 1024} GB`);
   } else if (lower === 'status') {
-    termAdd(`LEVEL ${state.game.player.level} · XP ${state.game.player.xp} · PLUGINS ${state.game.computer.installedPlugins.length} · OPS ${state.game.stats.operations}`);
+    termAdd(`LEVEL ${state.game.player.level} · XP ${state.game.player.xp} · PLUGINS ${state.game.computer.installedPlugins.length}`);
   } else if (lower === 'plugins' || lower === 'pkg list') {
     termAdd(PLUGINS.map(p => {
       const on = state.game.computer.installedPlugins.includes(p.id);
@@ -561,11 +713,11 @@ function runTerminalCommand(raw) {
     if (!p) termAdd('Плагин не найден.', 'error');
     else {
       const shell = PLUGIN_SHELLS[p.id];
-      termAdd(`${p.name}\nID: ${p.id}\n${p.description}\nSTATUS: ${getInstalledPlugin(state.game, p.id) ? 'INSTALLED' : 'NOT INSTALLED'}`);
+      termAdd(`${p.name}\nID: ${p.id}\n${p.description}`);
       if (shell) termAdd(`SHELL: ${shell.help}`, 'blue');
     }
   } else if (one === 'run' || one === 'use') {
-    enterPlugin(parts.slice(1).join(' ').trim());
+    await enterPlugin(parts.slice(1).join(' ').trim());
   } else if (lower === 'ls') {
     const files = [...state.game.computer.files, ...state.game.editor.files];
     termAdd(files.length ? files.map(f => `${f.name} (${f.size} KB)`).join('\n') : 'Пусто.');
@@ -574,15 +726,12 @@ function runTerminalCommand(raw) {
     const f = [...state.game.computer.files, ...state.game.editor.files].find(x => x.name === name);
     termAdd(f ? String(f.content).slice(0, 1800) : 'Файл не найден.', f ? '' : 'error');
   } else if (lower === 'mission list') {
-    termAdd(state.game.missions.items.filter(m => ['accepted', 'submitted', 'available'].includes(m.status)).map(m => `${m.id} | ${m.status} | ${m.title} | target:${m.target}`).join('\n') || 'Нет контрактов.');
+    termAdd(state.game.missions.items.filter(m => ['accepted', 'submitted', 'available'].includes(m.status)).map(m => `${m.id} | ${m.status} | ${m.title} | ${m.target}`).join('\n') || 'Нет контрактов.');
   } else if (lower === 'map') termAdd(LOCATIONS.map(l => `${l.name} / ${l.city}`).join('\n'));
   else termAdd('Команда не зарегистрирована. help', 'error');
 
-  state.terminalLines = state.terminalLines.slice(-140);
-  if (state.opened.has('terminal')) {
-    renderWindow('terminal');
-    const out = $('terminalOutput');
-    if (out) out.scrollTop = out.scrollHeight;
+  if (state.opened.has('terminal') && one !== 'run' && one !== 'use' && lower !== 'clear') {
+    scrollTerminalBottom(true);
   }
 }
 
@@ -835,11 +984,17 @@ document.addEventListener('submit',event=>{
   }
   if(form.id==='terminalForm'){
     event.preventDefault();
+    if(state.terminalBusy)return;
     const input=form.elements.command;
-    runTerminalCommand(input?.value||'');
+    const val=input?.value||'';
     if(input)input.value='';
-    renderWindow('terminal');
-    queueMicrotask(()=>document.querySelector('#terminalForm input')?.focus({preventScroll:true}));
+    runTerminalCommand(val).then(()=>{
+      queueMicrotask(()=>{
+        const i=document.querySelector('#terminalForm input');
+        if(i&&!state.terminalBusy)i.focus({preventScroll:true});
+        scrollTerminalBottom(true);
+      });
+    });
   }
 });
 boot();

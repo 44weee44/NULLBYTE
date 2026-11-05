@@ -44,3 +44,11 @@
 .confirm-check{display:flex!important;align-items:center;gap:9px;margin-top:15px!important;padding:10px;border:1px solid #554c36;border-radius:4px;background:#211f19;color:#d7c18b!important;font:9px/1.5 var(--sans)!important}
 .confirm-check input{width:16px!important;height:16px!important;flex:0 0 16px;padding:0!important;margin:0;accent-color:var(--blue)}
 .hardware-upgrade .list-main small{display:block;margin-top:4px;line-height:1.45}.browser-tab-wrap{display:inline-flex;align-items:center;border:1px solid #2c414e;border-radius:4px 4px 0 0;background:#101c25}.browser-tab-wrap.active{border-color:#3b667e;background:#183040}.browser-tab-wrap .browser-tab{border:0;border-radius:0;background:transparent}.browser-tab-close{width:25px;height:27px;border:0;background:transparent;color:#7f96a5;cursor:pointer}.browser-tab-close:hover{color:#fff;background:#87434b}.file-preview{max-height:260px;overflow:auto;margin:10px 0 0;padding:10px;border:1px solid #293e4a;border-radius:4px;background:#09121a;color:#9fb8c7;font:9px/1.6 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* Input interaction and zoom lock: NULLBYTE behaves as a fixed desktop UI. */
+html, body, .desktop-shell { overscroll-behavior: none; }
+button, .map-point, .desktop-icon { touch-action: manipulation; }
+input, textarea, select, [contenteditable="true"] { pointer-events: auto; user-select: text; -webkit-user-select: text; }
+.window-content { pointer-events: auto; }
+.map-canvas::before { pointer-events: none; }
+.map-point { pointer-events: auto; }

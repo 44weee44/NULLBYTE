@@ -23,7 +23,7 @@ const svg = {
   computer:'<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/>'
 };
 const APPS = [
-  {id:'profile',title:'Профиль',path:'user://operator',ram:1,description:'Оператор и прогресс'},
+  {id:'bank',title:'Aster Bank',path:'bank://account',ram:1,description:'Игровые кредиты'},
   {id:'terminal',title:'Терминал',path:'terminal://nbshell',ram:1,description:'Командный интерфейс'},
   {id:'darkshop',title:'DarkShop',path:'shop://hardware',ram:1,description:'Комплектующие ПК'},
   {id:'browser',title:'Browser',path:'net://fictional-web',ram:2,description:'Вымышленный интернет'},
@@ -33,7 +33,7 @@ const APPS = [
   {id:'blackwire',title:'BlackWire',path:'board://contracts',ram:1,description:'Биржа контрактов NPC'},
   {id:'help',title:'Help / Docs',path:'docs://manual',ram:1,description:'Справка по игре'},
   {id:'ide',title:'NBS IDE',path:'ide://workspace',ram:2,description:'Редактор игровых скриптов'},
-  {id:'bank',title:'Aster Bank',path:'bank://account',ram:1,description:'Игровые кредиты'},
+  {id:'profile',title:'Профиль',path:'user://operator',ram:1,description:'Оператор и прогресс'},
   {id:'computer',title:'My Computer',path:'system://hardware',ram:1,description:'Компьютер и файлы'}
 ];
 const state = {opened:new Map(),z:20,drag:null,active:null,game:null,provider:'LOCAL SAVE',saveWarning:'',saveTimer:null,terminalLines:[],browserTabs:[],selectedMail:null,selectedFileId:null,editorText:'',editorName:'mission_report',nbsOutput:'Поддерживается только фиксированный список игровых деклараций.',modalConfirm:null,bootDone:false,persisting:false,persistPending:false,saveBlocked:false};
@@ -133,7 +133,7 @@ function openApp(id) {
   const existing=state.opened.get(id);
   if(existing){existing.minimized=false;focusWindow(id);return;}
   const ram=currentRam();if(ram.used+app.ram>ram.total){toast(`Недостаточно RAM: ${app.title} требует ${app.ram} GB. Закрой или сверни другое окно либо обнови RAM.`,'error');return;}
-  const area=$('desktopWorkspace'),width=Math.min(880,Math.max(320,area.clientWidth-42)),height=Math.min(650,Math.max(290,area.clientHeight-42)),offset=(state.opened.size%5)*24;
+  const area=$('desktopWorkspace'),width=Math.min(880,Math.max(Math.min(320,area.clientWidth-12),area.clientWidth-42)),height=Math.min(650,Math.max(Math.min(290,area.clientHeight-12),area.clientHeight-42)),offset=(state.opened.size%5)*24;
   const win={id,title:app.title,path:app.path,ram:app.ram,minimized:false,maximized:false,left:Math.max(8,(area.clientWidth-width)/2+offset-45),top:Math.max(8,(area.clientHeight-height)/2+offset-40),oldRect:null};
   state.opened.set(id,win);
   const element=document.createElement('section');element.className='app-window';element.dataset.window=id;element.setAttribute('role','dialog');element.setAttribute('aria-label',app.title);
@@ -476,7 +476,16 @@ function handleAction(action,el) {
     case 'file-open':state.selectedFileId=id;renderWindow('mail');break;
     case 'file-close':state.selectedFileId=null;renderWindow('mail');break;
     case 'mail-mark':{const m=state.game.mail.messages.find(x=>x.id===id);if(m)m.status='read';scheduleSave();renderWindow('mail');break;}
-    case 'map-location':{const loc=LOCATIONS.find(x=>x.id===el.dataset.location);if(loc){const s=state.game.world.sites.find(x=>loc.pois.includes(x.id));if(s){ensureBrowserTab(s.id);openApp('browser');renderWindow('browser');}else toast(`${loc.name}: POI пока не опубликованы.`);}break;}
+    case 'map-location':{
+      const loc=LOCATIONS.find(x=>x.id===el.dataset.location);
+      if(loc){
+        const s=state.game.world.sites.find(x=>loc.pois.includes(x.id));
+        const residents=state.game.world.npc.filter(n=>n.location===loc.id);
+        if(s){ensureBrowserTab(s.id);openApp('browser');renderWindow('browser');}
+        else showModal({title:loc.name,eyebrow:'NULLATLAS / LOCATION',body:`Район игрового мира: ${esc(loc.city||'NULLBYTE')} . Здесь сейчас ${residents.length} NPC.`,fields:`<div class="panel"><div class="panel-title"><span>ПЕРСОНАЖИ В РАЙОНЕ</span></div>${residents.map(n=>`<div class="list-row"><div class="list-main"><strong>${esc(n.name)}</strong><small>${esc(n.role)} · ${esc(n.device||'Виртуальное устройство')}</small></div></div>`).join('')||'<div class="muted small">Сейчас персонажей нет.</div>'}</div>`,confirm:'ЗАКРЫТЬ',cancel:'',onConfirm:()=>true});
+      }
+      break;
+    }
     case 'bank-attempt':{const risk=bankRisk(state.game);confirm('Запустить банковскую симуляцию?',`Вероятность виртуальной трассировки: <b>${Math.round(risk.traceChance*100)}%</b>.<br>При неудаче будут конфискованы все <b>${fmt(state.game.economy.credits)} CR</b>, а Aster Bank заблокируется на <b>24 часа</b> реального времени. Другие контракты останутся доступны, но их награды во время блокировки будут конфискованы. Продолжить?`,()=>actionResult(attemptBankSimulation(state.game,true)),{danger:true,confirmText:'ПОДТВЕРЖДАЮ РИСК'});break;}
     case 'nbs-template':case 'nbs-validate':case 'nbs-save':case 'nbs-run':runNbsAction(action.replace('nbs-',''));break;
     case 'editor-open':{const f=state.game.editor.files.find(x=>x.id===id);if(f){state.editorText=f.content;state.editorName=f.name.replace(/\.nbs$/,'');renderWindow('ide');}break;}
@@ -491,8 +500,16 @@ function handleAction(action,el) {
 }
 
 document.addEventListener('click',event=>{
-  const button=event.target.closest('[data-action]');if(button){event.preventDefault();handleAction(button.dataset.action,button);}
+  const button=event.target.closest('[data-action]');
+  if(button){event.preventDefault();handleAction(button.dataset.action,button);}
 });
+document.addEventListener('pointerdown',event=>{
+  const editable=event.target.closest('input,textarea,select,[contenteditable="true"]');
+  if(editable){
+    const win=editable.closest('.app-window');
+    if(win)focusWindow(win.dataset.window);
+  }
+},true);
 $('startButton').addEventListener('click',()=>{$('startMenu').hidden=!$('startMenu').hidden;$('startButton').setAttribute('aria-expanded',String(!$('startMenu').hidden));});
 document.addEventListener('pointerdown',e=>{if(!$('startMenu').hidden&&!$('startMenu').contains(e.target)&&!e.target.closest('#startButton')){$('startMenu').hidden=true;$('startButton').setAttribute('aria-expanded','false');}});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(!$('modalBackdrop').hidden)closeModal();else if(!$('startMenu').hidden){$('startMenu').hidden=true;$('startButton').setAttribute('aria-expanded','false');}}});
@@ -513,4 +530,12 @@ setInterval(()=>{
   wasBankLocked=bankLocked;
 },1000);
 
+// Prevent browser zoom gestures/shortcuts so the desktop layout stays stable.
+document.addEventListener('wheel',event=>{if(event.ctrlKey||event.metaKey)event.preventDefault();},{passive:false});
+document.addEventListener('keydown',event=>{
+  if((event.ctrlKey||event.metaKey)&&['+','=','-','0'].includes(event.key))event.preventDefault();
+});
+for(const name of ['gesturestart','gesturechange','gestureend']){
+  document.addEventListener(name,event=>event.preventDefault(),{passive:false});
+}
 boot();

@@ -395,7 +395,7 @@ function updateNpcSchedule(state,now) {
   for(const npc of state.world.npc){
     const previous=npc.location;
     while(npc.nextAt&&npc.nextAt<=now){const locs=['north','oldport','industrial','center'];const index=locs.indexOf(npc.location);npc.location=locs[(index+1+locs.length)%locs.length];npc.nextAt+=20*60*1000;}
-    if(previous!==npc.location){const place=LOCATIONS.find(x=>x.id===npc.location)?.name||npc.location;notices.push(`${npc.name} переместился: ${place}.`);}
+    if(previous!==npc.location){const place=LOCATIONS.find(x=>x.id===npc.location)?.name||npc.location;notices.push(`NPC: ${npc.name} сменил район → ${place}.`);}
   }
   return notices;
 }

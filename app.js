@@ -128,29 +128,38 @@ async function finishBoot() {
   try {
     const tg = window.Telegram?.WebApp;
     if(tg){
-      tg.ready();
-      tg.expand();
+      tg.ready?.();
+      tg.expand?.();
       tg.setHeaderColor?.('#0c151d');
       tg.setBackgroundColor?.('#0b1219');
-      if(tg.CloudStorage) console.log('[NULLBYTE] CloudStorage available');
-      else console.warn('[NULLBYTE] CloudStorage NOT available');
+      console.log('[NULLBYTE] CloudStorage', tg.CloudStorage ? 'YES' : 'NO');
+    } else {
+      console.warn('[NULLBYTE] Telegram.WebApp missing — local only');
     }
   } catch(e) {
     console.warn('[NULLBYTE] Telegram init error', e);
   }
-  // Give Telegram CloudStorage a moment to become ready before first load.
-  await new Promise(r => setTimeout(r, 250));
+  await new Promise(r => setTimeout(r, 400));
   const tgUser=window.Telegram?.WebApp?.initDataUnsafe?.user||null;
-  const loaded=await loadSavedGame(tgUser);
+  let loaded=await loadSavedGame(tgUser);
+  // Second attempt if cloud failed and no nickname (common Telegram race).
+  if(!loaded.state?.player?.nickname && window.Telegram?.WebApp?.CloudStorage){
+    await new Promise(r => setTimeout(r, 500));
+    const retry=await loadSavedGame(tgUser);
+    if(retry.state?.player?.nickname) loaded=retry;
+  }
   state.game=loaded.state;state.provider=loaded.provider;state.saveWarning=loaded.warning;state.saveBlocked=Boolean(loaded.blocked);
   $('bootScreen').hidden=true;$('desktopShell').hidden=false;
   renderDesktopIcons();renderTaskbar();updateClock();
   processTimedEvents(state.game);
+  $('saveStatus').textContent=state.provider;
   if(!state.game.player.nickname) {showNicknameModal();if(loaded.warning)toast(loaded.warning,'error');}
   else {toast(`С возвращением, ${state.game.player.nickname}.`, 'success');if(loaded.warning)toast(loaded.warning,'error');}
-  // Immediate persist so CloudStorage gets a fresh write after successful load.
-  if(state.game.player.nickname && !state.saveBlocked) await persist();
-  else scheduleSave();
+  if(state.game.player.nickname && !state.saveBlocked) {
+    await persist();
+  } else {
+    scheduleSave();
+  }
 }
 function showNicknameModal() {
   const tgId=state.game.player.telegramId;
@@ -160,7 +169,7 @@ function showNicknameModal() {
     const input=$('nicknameInput');const value=input?.value?.trim()||'';
     if(!validNickname(value)){const err=$('nicknameError');if(err){err.textContent='Ник должен содержать 2–12 латинских букв или цифр.';err.hidden=false;}return false;}
     if(state.saveBlocked&&!$('confirmNewSave')?.checked){const err=$('nicknameError');if(err){err.textContent='Подтверди запуск новой игры, чтобы продолжить.';err.hidden=false;}return false;}
-    state.saveBlocked=false;state.game.player.nickname=value;refreshSystem();toast(`Профиль ${value} создан.`,'success');persist();
+    state.saveBlocked=false;state.game.player.nickname=value;refreshSystem();toast(`Профиль ${value} создан. Сохраняю…`,'success');persist().then(()=>{toast(state.provider==='TELEGRAM CLOUD'?'Сохранено в Telegram Cloud.':'Локальное сохранение.','success');refreshSystem();});
   }});
   const input=$('nicknameInput');input?.addEventListener('keydown',e=>{if(e.key==='Enter')finishModal();});
 }
@@ -214,10 +223,11 @@ function renderWindow(id) {const el=document.querySelector(`[data-window="${id}"
 function refreshOpenApps(ids=null) {for(const id of (ids||[...state.opened.keys()]))if(state.opened.has(id))renderWindow(id);renderTaskbar();}
 function wireAppContent(id,el) {
   if(id==='terminal'){
-    const form=el.querySelector('#terminalForm');form?.addEventListener('submit',e=>{e.preventDefault();runTerminalCommand(form.elements.command.value);form.elements.command.value='';renderWindow('terminal');document.querySelector('#terminalForm input')?.focus();});
+    const form=el.querySelector('#terminalForm');form?.addEventListener('submit',e=>{e.preventDefault();runTerminalCommand(form.elements.command.value);form.elements.command.value='';renderWindow('terminal');document.querySelector('#terminalForm input')?.focus({preventScroll:true});});
   }
   if(id==='browser'){
-    const form=el.querySelector('#browserForm');form?.addEventListener('submit',e=>{e.preventDefault();navigateBrowser(form.elements.address.value);});
+    const form=el.querySelector('#browserForm');
+    form?.addEventListener('submit',e=>{e.preventDefault();const v=form.elements.address?.value||'';navigateBrowser(v);});
   }
   if(id==='ide'){
     const editor=el.querySelector('#nbsEditor');
@@ -539,7 +549,17 @@ function doInstall(id) {
 function doHardware(part) {
   const next=HARDWARE[part]?.find(x=>x.level===state.game.computer[part]+1);if(!next)return;
   confirm('Подтвердить обновление?',`Текущий: <b>${esc(HARDWARE[part].find(x=>x.level===state.game.computer[part]).name)}</b> (${esc(hardwareDetail(part,HARDWARE[part].find(x=>x.level===state.game.computer[part])))}).<br>Новый: <b>${esc(next.name)}</b> (${esc(hardwareDetail(part,next))}).<br>Стоимость: <b>${fmt(next.price)} CR</b>. Компонент будет автоматически установлен в свой слот.`,()=>actionResult(buyHardware(state.game,part)));}
-function openMissionTarget(missionId) {const m=state.game.missions.items.find(x=>x.id===missionId);if(!m)return;ensureBrowserTab(m.target);openApp('browser');renderWindow('browser');}
+function openMissionTarget(missionId) {
+  if(!state.game)return;
+  const m=state.game.missions.items.find(x=>x.id===missionId);
+  if(!m){toast('Контракт не найден.','error');return;}
+  const site=getSite(state.game,m.target);
+  if(!site){toast('Цель контракта не найдена.','error');return;}
+  ensureBrowserTab(m.target);
+  openApp('browser');
+  renderWindow('browser');
+  toast(`Цель: ${site.domain}`,'success');
+}
 function runSiteOperation(siteId,op) {
   const mission=state.game.missions.items.find(m=>m.status==='accepted'&&m.target===siteId);
   const result=operateSite(state.game,siteId,op,mission?.id||null);
@@ -588,9 +608,27 @@ function handleAction(action,el) {
     case 'install-plugin':doInstall(id);break;
     case 'upgrade-hardware':doHardware(part);break;
     case 'uninstall-plugin':confirm('Удалить плагин?',`Удалить ${esc(getPlugin(id)?.name||id)}? Пользовательские файлы не будут затронуты.`,()=>{const r=uninstallPlugin(state.game,id);actionResult(r);});break;
-    case 'accept-mission':{const r=acceptMission(state.game,id);actionResult(r);if(r.ok){state.selectedMissionId=id;if(state.opened.has('blackwire'))renderWindow('blackwire');}break;}
-    case 'mission-details':state.selectedMissionId=id;if(!state.opened.has('blackwire'))openApp('blackwire');else renderWindow('blackwire');break;
-    case 'mission-close-guide':state.selectedMissionId=null;renderWindow('blackwire');break;
+    case 'accept-mission':{
+      if(!state.game){toast('Игра ещё не загружена.','error');break;}
+      const r=acceptMission(state.game,id);
+      if(r.ok){
+        state.selectedMissionId=id;
+        toast(r.message||'Контракт принят.','success');
+        scheduleSave();
+        if(state.opened.has('blackwire'))renderWindow('blackwire');
+        else openApp('blackwire');
+      } else {
+        toast(r.reason||'Не удалось принять контракт.','error');
+      }
+      break;
+    }
+    case 'mission-details':{
+      state.selectedMissionId=id;
+      if(!state.opened.has('blackwire'))openApp('blackwire');
+      else renderWindow('blackwire');
+      break;
+    }
+    case 'mission-close-guide':state.selectedMissionId=null;if(state.opened.has('blackwire'))renderWindow('blackwire');break;
     case 'mission-open-target':openMissionTarget(id);break;
     case 'browser-tab':ensureBrowserTab(site);if(!state.opened.has('browser'))openApp('browser');renderWindow('browser');break;
     case 'browser-home':state.browserTabs=[];state.game.browser.activeSite='';renderWindow('browser');break;
@@ -626,10 +664,19 @@ function handleAction(action,el) {
   }
 }
 
-document.addEventListener('click',event=>{
+function onUiAction(event){
   const button=event.target.closest('[data-action]');
-  if(button){event.preventDefault();handleAction(button.dataset.action,button);}
-});
+  if(!button)return;
+  // Avoid double-firing when both pointerup and click fire.
+  const now=Date.now();
+  if(button._nbActAt && now-button._nbActAt<350)return;
+  button._nbActAt=now;
+  event.preventDefault();
+  try{handleAction(button.dataset.action,button);}catch(err){console.error('[NULLBYTE] action',button.dataset.action,err);toast(String(err.message||err),'error');}
+}
+document.addEventListener('click',onUiAction);
+document.addEventListener('pointerup',onUiAction);
+
 document.addEventListener('pointerdown',event=>{
   const editable=event.target.closest('input,textarea,select,[contenteditable="true"]');
   if(editable){
@@ -667,4 +714,20 @@ document.addEventListener('keydown',event=>{
 for(const name of ['gesturestart','gesturechange','gestureend']){
   document.addEventListener(name,event=>event.preventDefault(),{passive:false});
 }
+document.addEventListener('submit',event=>{
+  const form=event.target;
+  if(!(form instanceof HTMLFormElement))return;
+  if(form.id==='browserForm'){
+    event.preventDefault();
+    navigateBrowser(form.elements.address?.value||'');
+  }
+  if(form.id==='terminalForm'){
+    event.preventDefault();
+    const input=form.elements.command;
+    runTerminalCommand(input?.value||'');
+    if(input)input.value='';
+    renderWindow('terminal');
+    queueMicrotask(()=>document.querySelector('#terminalForm input')?.focus({preventScroll:true}));
+  }
+});
 boot();

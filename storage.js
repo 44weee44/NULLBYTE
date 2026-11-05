@@ -4,10 +4,15 @@ const CLOUD_MANIFEST_KEY = 'nullbyte_save_v1_manifest';
 const CLOUD_CHUNK_PREFIX = 'nullbyte_save_v1_part_';
 const LEGACY_CLOUD_KEY = 'nullbyte_player';
 const LOCAL_KEY = 'nullbyte_save_v1';
-const CHUNK_SIZE = 3600; // Telegram CloudStorage permits at most 4096 chars per value.
+const CHUNK_SIZE = 3500;
 
 function cloudApi() {
-  try { return window.Telegram?.WebApp?.CloudStorage || null; } catch { return null; }
+  try {
+    const api = window.Telegram?.WebApp?.CloudStorage;
+    return api && typeof api.getItem === 'function' && typeof api.setItem === 'function' ? api : null;
+  } catch {
+    return null;
+  }
 }
 
 function callCloud(method, ...args) {
@@ -16,25 +21,39 @@ function callCloud(method, ...args) {
     return Promise.reject(new Error('CloudStorage недоступен'));
   }
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(`CloudStorage.${method} timeout`));
+      }
+    }, 8000);
     try {
       api[method](...args, (error, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         if (error) reject(new Error(String(error)));
         else resolve(value);
       });
     } catch (e) {
-      reject(e instanceof Error ? e : new Error(String(e)));
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      }
     }
   });
 }
 
-async function callCloudRetry(method, args = [], tries = 3, delayMs = 180) {
+async function callCloudRetry(method, args = [], tries = 4, delayMs = 200) {
   let last = null;
   for (let i = 0; i < tries; i++) {
     try {
       return await callCloud(method, ...args);
     } catch (e) {
       last = e;
-      if (i < tries - 1) await new Promise(r => setTimeout(r, delayMs * (i + 1)));
+      await new Promise(r => setTimeout(r, delayMs * (i + 1)));
     }
   }
   throw last || new Error('CloudStorage retry failed');
@@ -66,9 +85,9 @@ function getLocal() {
 
 function setLocal(state) {
   try {
-    localStorage.setItem(LOCAL_KEY, JSON.stringify(state));
-    // dual-write legacy key for older loaders
-    try { localStorage.setItem(LEGACY_CLOUD_KEY, JSON.stringify(state)); } catch {}
+    const raw = JSON.stringify(state);
+    localStorage.setItem(LOCAL_KEY, raw);
+    try { localStorage.setItem(LEGACY_CLOUD_KEY, raw); } catch {}
     return true;
   } catch {
     return false;
@@ -77,18 +96,22 @@ function setLocal(state) {
 
 export async function loadSavedGame(tgUser = null) {
   let raw = null;
-  let provider = 'LOCAL PREVIEW';
+  let provider = 'NEW GAME';
   let warning = '';
   let cloudReadFailed = false;
   const api = cloudApi();
 
   if (api) {
     try {
-      // small settle time after Telegram WebApp boot
-      await new Promise(r => setTimeout(r, 120));
+      await new Promise(r => setTimeout(r, 150));
+      let manifestText = null;
+      try {
+        manifestText = await callCloudRetry('getItem', [CLOUD_MANIFEST_KEY], 3, 180);
+      } catch (e) {
+        console.warn('[NULLBYTE] manifest read', e);
+      }
 
-      const manifestText = await callCloudRetry('getItem', [CLOUD_MANIFEST_KEY], 3, 200);
-      if (manifestText) {
+      if (manifestText && String(manifestText).trim()) {
         const manifest = JSON.parse(manifestText);
         if (
           manifest.version === 1 &&
@@ -98,12 +121,12 @@ export async function loadSavedGame(tgUser = null) {
         ) {
           let combined = '';
           for (let i = 0; i < manifest.chunks; i++) {
-            const chunk = await callCloudRetry('getItem', [`${CLOUD_CHUNK_PREFIX}${i}`], 3, 160);
-            if (typeof chunk !== 'string') throw new Error('Часть облачного сохранения отсутствует.');
+            const chunk = await callCloudRetry('getItem', [`${CLOUD_CHUNK_PREFIX}${i}`], 3, 150);
+            if (typeof chunk !== 'string') throw new Error(`Часть ${i} отсутствует`);
             combined += chunk;
           }
           if (checksum(combined) !== manifest.checksum) {
-            throw new Error('Контрольная сумма сохранения не совпала.');
+            throw new Error('Контрольная сумма не совпала');
           }
           raw = JSON.parse(combined);
           provider = 'TELEGRAM CLOUD';
@@ -111,15 +134,19 @@ export async function loadSavedGame(tgUser = null) {
       }
 
       if (!raw) {
-        const legacy = await callCloudRetry('getItem', [LEGACY_CLOUD_KEY], 2, 160).catch(() => null);
-        if (legacy) {
-          raw = JSON.parse(legacy);
-          provider = 'TELEGRAM CLOUD / MIGRATION';
+        try {
+          const legacy = await callCloudRetry('getItem', [LEGACY_CLOUD_KEY], 2, 150);
+          if (legacy && String(legacy).trim()) {
+            raw = JSON.parse(legacy);
+            provider = 'TELEGRAM CLOUD / MIGRATION';
+          }
+        } catch (e) {
+          console.warn('[NULLBYTE] legacy cloud read', e);
         }
       }
     } catch (error) {
       cloudReadFailed = true;
-      warning = `Не удалось прочитать CloudStorage: ${error.message}`;
+      warning = `CloudStorage: ${error.message}`;
       console.warn('[NULLBYTE] cloud load failed', error);
     }
   }
@@ -131,12 +158,12 @@ export async function loadSavedGame(tgUser = null) {
 
   const migrated = migrateSave(raw, tgUser);
   if (raw && migrated.changed) {
-    warning = warning || 'Сохранение обновлено до текущей версии без сброса известных данных.';
+    warning = warning || 'Сохранение обновлено до текущей версии.';
   }
 
-  // If cloud failed but local has a valid nickname profile, prefer local and do not block.
-  const hasLocalProfile = Boolean(raw?.player?.nickname);
-  const blocked = Boolean(api && cloudReadFailed && !raw && !hasLocalProfile);
+  // Never hard-block if we have any recoverable profile with a nickname.
+  const hasProfile = Boolean(migrated.state?.player?.nickname);
+  const blocked = Boolean(api && cloudReadFailed && !raw && !hasProfile);
 
   return {
     state: migrated.state,
@@ -148,27 +175,27 @@ export async function loadSavedGame(tgUser = null) {
 }
 
 export async function saveGame(state) {
-  const snapshot = JSON.stringify(state);
+  // Always try local first — works as backup even inside Telegram.
   const localSaved = setLocal(state);
   const api = cloudApi();
+  const snapshot = JSON.stringify(state);
 
   if (!api) {
     return {
       ok: localSaved,
       provider: localSaved ? 'LOCAL SAVE' : 'SAVE ERROR',
       warning: localSaved
-        ? 'Telegram CloudStorage недоступен вне Telegram.'
-        : 'Не удалось записать локальное сохранение. Проверь свободное место в хранилище браузера.'
+        ? 'CloudStorage недоступен (открой как Telegram Mini App).'
+        : 'Не удалось записать сохранение.'
     };
   }
 
   try {
     const chunks = splitChunks(snapshot);
-    if (chunks.length > 500) throw new Error('Сохранение слишком большое для безопасной записи CloudStorage.');
+    if (chunks.length > 500) throw new Error('Сохранение слишком большое');
 
-    // Write chunks first, then manifest last (commit marker).
     for (let i = 0; i < chunks.length; i++) {
-      await callCloudRetry('setItem', [`${CLOUD_CHUNK_PREFIX}${i}`, chunks[i]], 3, 140);
+      await callCloudRetry('setItem', [`${CLOUD_CHUNK_PREFIX}${i}`, chunks[i]], 4, 160);
     }
     const manifest = {
       version: 1,
@@ -176,23 +203,22 @@ export async function saveGame(state) {
       checksum: checksum(snapshot),
       savedAt: Date.now()
     };
-    await callCloudRetry('setItem', [CLOUD_MANIFEST_KEY, JSON.stringify(manifest)], 3, 140);
+    await callCloudRetry('setItem', [CLOUD_MANIFEST_KEY, JSON.stringify(manifest)], 4, 160);
 
-    // Also keep a single-key legacy snapshot when it fits (faster recovery path).
+    // Compact single-key mirror when possible
     if (snapshot.length <= 4000) {
-      try { await callCloudRetry('setItem', [LEGACY_CLOUD_KEY, snapshot], 2, 120); } catch {}
+      try {
+        await callCloudRetry('setItem', [LEGACY_CLOUD_KEY, snapshot], 2, 120);
+      } catch {}
     }
 
-    // Remove stale chunks from a previous larger save.
     try {
       const keys = await callCloudRetry('getKeys', [], 2, 120);
       const stale = (keys || [])
-        .filter(key => key.startsWith(CLOUD_CHUNK_PREFIX))
-        .filter(key => Number(key.slice(CLOUD_CHUNK_PREFIX.length)) >= chunks.length);
+        .filter(k => k.startsWith(CLOUD_CHUNK_PREFIX))
+        .filter(k => Number(k.slice(CLOUD_CHUNK_PREFIX.length)) >= chunks.length);
       if (stale.length) await callCloud('removeItems', stale);
-    } catch {
-      /* stale chunks are harmless; manifest defines committed length */
-    }
+    } catch {}
 
     return { ok: true, provider: 'TELEGRAM CLOUD', warning: '' };
   } catch (error) {
@@ -200,9 +226,7 @@ export async function saveGame(state) {
     return {
       ok: localSaved,
       provider: localSaved ? 'LOCAL SAVE' : 'SAVE ERROR',
-      warning: `Облачное сохранение не записано: ${error.message}.${
-        localSaved ? ' Локальная копия оставлена.' : ' Локальное сохранение также недоступно.'
-      }`
+      warning: `Облако: ${error.message}.${localSaved ? ' Локальная копия есть.' : ''}`
     };
   }
 }

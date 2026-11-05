@@ -1,6 +1,6 @@
 {
   "name": "nullbyte-os-game",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
   "description": "NULLBYTE — single-player fictional hacking-life simulator for Telegram Mini Apps",

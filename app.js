@@ -78,7 +78,9 @@ function updateClock() {
   $('clockDate').textContent=new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric'}).format(now);
 }
 function renderDesktopIcons() {
-  $('desktopIcons').innerHTML=APPS.map(a=>`<button class="desktop-icon" type="button" data-action="open-app" data-app="${a.id}" aria-label="Открыть ${esc(a.title)}"><span class="desktop-icon-symbol">${icon(a.id)}</span><span>${esc(a.title)}</span></button>`).join('');
+  // Desktop shortcuts intentionally removed; applications remain available in Start.
+  $('desktopIcons').replaceChildren();
+  $('desktopIcons').hidden=true;
   $('startMenuApps').innerHTML=APPS.map(a=>`<button class="start-app" type="button" data-action="open-app" data-app="${a.id}"><span class="start-app-icon">${icon(a.id)}</span><span>${esc(a.title)}</span></button>`).join('');
 }
 function renderTaskbar() {
@@ -96,7 +98,7 @@ function confirm(title,body,onConfirm,{danger=false,confirmText='ПОДТВЕР�
 function finishModal() {const fn=state.modalConfirm;if(fn){const result=fn();if(result===false)return;}closeModal();}
 
 function boot() {
-  const lines=['NULLBYTE firmware 1.0.0','Initializing virtual hardware profile','Loading fictional world snapshot','Mounting player save container','Starting desktop services'];
+  const lines=['NULLBYTE firmware 1.0.2','Initializing virtual hardware profile','Loading fictional world snapshot','Mounting player save container','Starting desktop services'];
   const log=$('bootLog'),bar=$('bootProgress');let index=0;
   const run=()=>{if(index<lines.length){const row=document.createElement('div');row.textContent=lines[index++];log.append(row);bar.style.width=`${index/lines.length*100}%`;setTimeout(run,220);}else setTimeout(finishBoot,280);};
   const skip=()=>finishBoot();$('bootSkip').addEventListener('click',skip);run();
@@ -140,6 +142,7 @@ function openApp(id) {
   element.style.width=`${width}px`;element.style.height=`${height}px`;element.style.left=`${Math.min(win.left,Math.max(8,area.clientWidth-width-8))}px`;element.style.top=`${Math.min(win.top,Math.max(8,area.clientHeight-height-8))}px`;
   element.innerHTML=`<header class="window-bar"><span class="window-app-mark">${icon(id)}</span><strong class="window-title">${esc(app.title)}</strong><span class="window-path">${esc(app.path)}</span><div class="window-controls"><button type="button" data-action="minimize-window" title="Свернуть" aria-label="Свернуть">—</button><button type="button" data-action="maximize-window" title="Развернуть" aria-label="Развернуть">□</button><button type="button" data-action="close-window" title="Закрыть" aria-label="Закрыть">×</button></div></header><div class="window-content" data-content></div>`;
   $('windowLayer').append(element);wireWindow(id,element);renderWindow(id);focusWindow(id);renderTaskbar();
+  if(id==='terminal')requestAnimationFrame(()=>element.querySelector('#terminalForm input')?.focus({preventScroll:true}));
 }
 function wireWindow(id,element) {
   element.addEventListener('pointerdown',e=>{if(!e.target.closest('.window-controls'))focusWindow(id);});
@@ -508,6 +511,8 @@ document.addEventListener('pointerdown',event=>{
   if(editable){
     const win=editable.closest('.app-window');
     if(win)focusWindow(win.dataset.window);
+    // Prevent the desktop window layer from stealing focus after a touch.
+    queueMicrotask(()=>{ if(editable.isConnected && !editable.disabled) editable.focus({preventScroll:true}); });
   }
 },true);
 $('startButton').addEventListener('click',()=>{$('startMenu').hidden=!$('startMenu').hidden;$('startButton').setAttribute('aria-expanded',String(!$('startMenu').hidden));});

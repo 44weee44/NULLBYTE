@@ -96,3 +96,11 @@ DELIVER mail "job-001"
 ## Баланс
 
 Тестовые цены, шансы, XP, требования, длительность cooldown, восстановление целей, лимит активных окон, банковский риск и награды вынесены в `engine.js` (`BALANCE`, `PLUGINS`, `HARDWARE`, `MISSION_TEMPLATES`). Значения помечены как черновые и требуют игрового тестирования.
+
+
+## v1.0.2 UI repair
+
+- Desktop shortcuts are removed; launch applications from the Start menu.
+- Terminal input is explicitly focused when opened and after touch interaction.
+- Map POI buttons have a larger interactive target and stay above decorative layers.
+- Bank and Profile remain first-class applications in the Start menu.

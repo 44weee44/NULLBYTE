@@ -3,7 +3,8 @@ import {
   getInstalledPlugin, getPlugin, getHardwareUsage, getRamUsage, purchasePlugin, buyHardware, uninstallPlugin,
   acceptMission, getSite, getSiteProgress, operateSite, exportMissionResult, submitMission,
   processTimedEvents, bankStatus, bankRisk, attemptBankSimulation, saveEditorFile, validateNbs, runNbs,
-  recordHistory, addBookmark, idempotencyKey
+  recordHistory, addBookmark, idempotencyKey,
+  PLUGIN_SHELLS, runPluginShellCommand, pluginShellBootLines, resolveSiteRef
 } from './engine.js';
 import { loadSavedGame, saveGame } from './storage.js';
 
@@ -36,7 +37,7 @@ const APPS = [
   {id:'profile',title:'Профиль',path:'user://operator',ram:1,description:'Оператор и прогресс'},
   {id:'computer',title:'My Computer',path:'system://hardware',ram:1,description:'Компьютер и файлы'}
 ];
-const state = {opened:new Map(),z:20,drag:null,active:null,game:null,provider:'LOCAL SAVE',saveWarning:'',saveTimer:null,terminalLines:[],browserTabs:[],selectedMail:null,selectedFileId:null,selectedMissionId:null,editorText:'',editorName:'mission_report',nbsOutput:'Поддерживается только фиксированный список игровых деклараций.',modalConfirm:null,bootDone:false,persisting:false,persistPending:false,saveBlocked:false};
+const state = {opened:new Map(),z:20,drag:null,active:null,game:null,provider:'LOCAL SAVE',saveWarning:'',saveTimer:null,terminalLines:[],terminalPlugin:null,browserTabs:[],selectedMail:null,selectedFileId:null,selectedMissionId:null,editorText:'',editorName:'mission_report',nbsOutput:'Поддерживается только фиксированный список игровых деклараций.',modalConfirm:null,bootDone:false,persisting:false,persistPending:false,saveBlocked:false};
 
 function icon(id,cls='') { return `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${svg[id]||svg.help}</svg>`; }
 function appInfo(id) { return APPS.find(a=>a.id===id); }
@@ -326,17 +327,37 @@ function renderBrowser(g) {
   if(!siteId){const homes=g.world.sites;return `<div class="app-heading"><div><div class="eyebrow">NULLBYTE BROWSER / FICTIONAL INTERNET</div><h2>Browser</h2><p>Внутриигровая сеть. Поиск работает только по личному миру.</p></div><span class="badge green">OFFLINE SAFE</span></div><form class="browser-address" id="browserForm"><input class="field" name="address" placeholder="Поиск по сайтам или адрес .null" autocomplete="off"><button class="btn" type="submit">ПОИСК</button></form><div class="panel section-gap"><div class="panel-title"><span>ЗАКЛАДКИ</span><small>${g.browser.bookmarks.length}</small></div><div class="list">${g.browser.bookmarks.map(id=>getSite(g,id)).filter(Boolean).map(s=>`<div class="list-row"><div class="list-main"><strong>${esc(s.title)}</strong><small>${esc(s.domain)}</small></div><button class="btn tiny ghost" data-action="browser-tab" data-site="${s.id}">ОТКРЫТЬ</button></div>`).join('')||'<div class="empty-state"><b>Нет закладок</b><p>Сохраняй интересные сайты.</p></div>'}</div></div><div class="panel section-gap"><div class="panel-title"><span>ИСТОРИЯ</span><small>${g.browser.history.length}</small></div><div class="list">${g.browser.history.slice(0,8).map(h=>{const s=getSite(g,h.siteId);return s?`<div class="list-row"><div class="list-main"><strong>${esc(s.title)}</strong><small>${esc(s.domain)} · ${formatTime(h.at)}</small></div><button class="btn tiny ghost" data-action="browser-tab" data-site="${s.id}">ПОВТОРИТЬ</button></div>`:''}).join('')||'<div class="empty-state"><b>История пуста</b><p>Открой первый игровой сайт.</p></div>'}</div></div><div class="panel section-gap"><div class="panel-title"><span>КАТАЛОГ ИГРОВЫХ САЙТОВ</span><small>${homes.length} DOMAINS</small></div><div class="list">${homes.map(s=>`<div class="list-row"><div class="list-main"><strong>${esc(s.title)}</strong><small>${esc(s.domain)} · ${esc(s.kind)}</small></div><button class="btn tiny" data-action="browser-tab" data-site="${s.id}">ОТКРЫТЬ</button></div>`).join('')}</div></div><div class="notice section-gap">Никаких внешних сайтов, поисковых систем или сетевых запросов — только вымышленный мир NULLBYTE.</div>`;}
   const tabs=state.browserTabs.length?state.browserTabs:[{id:'home',siteId}];const site=getSite(g,siteId)||g.world.sites[0];
   const p=getSiteProgress(g,site.id),activeMission=g.missions.items.find(m=>m.status==='accepted'&&m.target===site.id),isBookmarked=g.browser.bookmarks.includes(site.id),locked=site.recoveryAt>Date.now();
-  const stages=site.kind==='bank'?[]:[['analyze','Анализ сайта','site-analyzer',true],['decode','Расшифровка артефакта','artifact-decoder',p.analyzed],['node','Обнаружение узла','node-radar',p.decoded],['weakness','Поиск слабости','weakness-lab',p.node],['exploit','Симуляция доступа','sim-exploit',p.weakness],...(site.kind==='database'?[['database','Чтение виртуальной БД','db-reader',p.access]]:[]),['export','Экспорт результата','data-exporter',site.kind==='database'?p.database:p.access]];
-  const stagesHtml=stages.map(([op,label,plugin,ready])=>{const key=({analyze:'analyzed',decode:'decoded',node:'node',weakness:'weakness',exploit:'access',database:'database',export:'exported'})[op];const done=Boolean(p[key]);return `<div class="operation-card"><strong>${esc(label)}</strong><small>${getInstalledPlugin(g,plugin)?`Плагин: ${esc(getPlugin(plugin).name)}`:`Нет плагина: ${esc(getPlugin(plugin).name)}`}</small><button class="btn tiny ${ready?'':'ghost'}" data-action="site-operation" data-op="${op}" data-site="${site.id}" ${!ready||done||locked||!getInstalledPlugin(g,plugin)?'disabled':''}>${done?'ГОТОВО':'ВЫПОЛНИТЬ'}</button></div>`;}).join('');
-  const activeGuide=activeMission?`<div class="notice section-gap"><b>Активный контракт ${esc(activeMission.id)}:</b> ${esc(activeMission.title)}. Проходи кнопки цепочки сверху вниз. После «Экспорт результата» нажми «СОЗДАТЬ ФАЙЛ РЕЗУЛЬТАТА», затем открой N-Mail и жми «ОТПРАВИТЬ».</div>`:'';
-  const missionFiles=site.kind!=='bank'&&activeMission&&p.access&&p.exported?`<div class="btn-row section-gap">${activeMission.resultFileId?`<span class="badge green">ФАЙЛ СОЗДАН</span><button class="btn tiny primary" data-action="open-app" data-app="mail">ПЕРЕЙТИ В N-MAIL</button>`:`<button class="btn primary" data-action="export-result" data-id="${esc(activeMission.id)}">СОЗДАТЬ ФАЙЛ РЕЗУЛЬТАТА</button>`}<span class="badge green">EXPORT COMPLETE</span></div>`:'';
-  return `<div class="browser-top"><div class="browser-traffic"><i></i><i></i><i></i></div><form class="browser-address" id="browserForm"><input class="field" name="address" value="${esc(site.domain)}" aria-label="Игровой адрес" autocomplete="off"><button class="btn tiny" type="submit">ПЕРЕЙТИ</button></form><button class="btn tiny ghost" data-action="browser-home">⌂</button></div>
+  const flavor = ({
+    shop: { accent: '#d7b16d', label: 'MARKETFRONT', blurb: 'Каталог и витрина. Публичные карточки заказов.' },
+    bank: { accent: '#76c8a2', label: 'FINNODE', blurb: 'Закрытый контур. Отдельный эндгейм-протокол.' },
+    auto: { accent: '#55b9e9', label: 'AUTOHUB', blurb: 'Сервисные карточки и учёт техники.' },
+    utility: { accent: '#b59ad9', label: 'GRIDGATE', blurb: 'Телеметрия и журналы контроллеров.' },
+    forum: { accent: '#98b8e5', label: 'THREADNET', blurb: 'Сообщения и публичные ветки.' },
+    database: { accent: '#d77d86', label: 'RECORDVAULT', blurb: 'Структурированные виртуальные записи.' },
+    device: { accent: '#7dcea0', label: 'HANDSET', blurb: 'Демо-профиль устройства NPC.' },
+    wifi: { accent: '#5dade2', label: 'AIRLINK', blurb: 'Параметры точки доступа.' }
+  })[site.kind] || { accent: '#1793d1', label: 'NODE', blurb: 'Игровая цель.' };
+  const chain = [
+    ['analyzed', 'analyze'],
+    ['decoded', 'decode'],
+    ['node', 'node'],
+    ['weakness', 'weakness'],
+    ['access', 'access'],
+    ...(site.kind === 'database' ? [['database', 'db']] : []),
+    ['exported', 'export']
+  ];
+  const chainHtml = chain.map(([flag, label]) => `<span class="chain-pip ${p[flag] ? 'on' : ''}">${label}</span>`).join('<span class="chain-sep">›</span>');
+  const missionFiles = site.kind !== 'bank' && activeMission && p.exported && activeMission.resultFileId
+    ? `<div class="btn-row section-gap"><span class="badge green">FILE READY</span><button class="btn tiny" data-action="open-app" data-app="mail">N-MAIL</button></div>`
+    : '';
+
+    return `<div class="browser-top"><div class="browser-traffic"><i></i><i></i><i></i></div><form class="browser-address" id="browserForm"><input class="field" name="address" value="${esc(site.domain)}" aria-label="Игровой адрес" autocomplete="off"><button class="btn tiny" type="submit">ПЕРЕЙТИ</button></form><button class="btn tiny ghost" data-action="browser-home">⌂</button></div>
   <div class="browser-tabs">${tabs.map(t=>{const s=getSite(g,t.siteId);return s?`<div class="browser-tab-wrap ${s.id===site.id?'active':''}"><button class="browser-tab" data-action="browser-tab" data-site="${s.id}">${esc(s.title)}</button><button class="browser-tab-close" type="button" data-action="browser-close-tab" data-tab="${esc(t.id)}" aria-label="Закрыть вкладку ${esc(s.title)}">×</button></div>`:''}).join('')}</div>
-  <div class="site-hero"><div class="site-domain">${esc(site.domain)} · ${esc(site.kind.toUpperCase())} · ${esc(site.region)}</div><div class="app-heading" style="margin:6px 0"><h3>${esc(site.title)}</h3><div class="btn-row"><button class="btn tiny ghost" data-action="bookmark-site" data-site="${site.id}">${isBookmarked?'★':'☆'} ${isBookmarked?'СОХРАНЕНО':'ЗАКЛАДКА'}</button><span class="badge ${locked?'red':'green'}">${locked?'RECOVERING':'ONLINE'}</span></div></div><p>${esc(site.description)}</p></div>
+  <div class="site-hero site-kind-${esc(site.kind)}" style="--site-accent:${flavor.accent}"><div class="site-domain">${esc(site.domain)} · ${esc(site.kind.toUpperCase())} · ${esc(site.region)}</div><div class="app-heading" style="margin:6px 0"><h3>${esc(site.title)}</h3><div class="btn-row"><button class="btn tiny ghost" data-action="bookmark-site" data-site="${site.id}">${isBookmarked?'★':'☆'} ${isBookmarked?'СОХРАНЕНО':'ЗАКЛАДКА'}</button><span class="badge ${locked?'red':'green'}">${locked?'RECOVERING':'ONLINE'}</span></div></div><p>${esc(site.description)}</p></div>
   <div class="grid-2 section-gap"><div class="stat-box"><span>SECURITY LEVEL</span><strong>${site.security}/5</strong><small>игровая модель защиты</small></div><div class="stat-box"><span>REVISION</span><strong>${site.revision}</strong><small>состояние сайта</small></div></div>
   ${locked?`<div class="notice warning section-gap">Цель восстанавливается после предыдущей операции. Осталось примерно ${humanLeft(site.recoveryAt-Date.now())}.</div>`:''}
-  <div class="panel section-gap"><div class="panel-title"><span>ИГРОВАЯ ЦЕПОЧКА</span><small>${activeMission?`КОНТРАКТ ${activeMission.id}`:'FREE EXPLORATION'}</small></div>${site.kind==='bank'?`<div class="notice warning">Эта цель использует отдельную эндгейм-механику. Открой приложение Aster Bank, чтобы ознакомиться с рисками и требованиями.</div><button class="btn section-gap" data-action="open-app" data-app="bank">ОТКРЫТЬ ASTER BANK</button>`:`${activeGuide}<div class="operation-grid">${stagesHtml}</div>`}${missionFiles}${site.kind!=='bank'&&p.access&&getInstalledPlugin(g,'site-editor')? `<div class="btn-row section-gap"><button class="btn tiny ghost" data-action="site-operation" data-op="modify" data-site="${site.id}">ИЗМЕНИТЬ ВИРТУАЛЬНЫЙ КОНТЕНТ</button></div>`:''}</div>
-  <div class="panel section-gap"><div class="panel-title"><span>СОСТОЯНИЕ ЦЕЛИ</span><small>SIMULATION SNAPSHOT</small></div><div class="kv"><span>Артефакт</span><b>${esc(site.artifact)}</b></div><div class="kv"><span>Анализ</span><b>${p.analyzed?'ГОТОВО':'НЕ ВЫПОЛНЕН'}</b></div><div class="kv"><span>Доступ</span><b>${p.access?'ПОЛУЧЕН':'НЕТ'}</b></div><div class="kv"><span>Текущее содержимое</span><b>${esc(site.siteText)}</b></div>${p.access?`<div class="notice success section-gap">Виртуальные данные: ${esc(site.data)}</div>`:''}<div class="btn-row section-gap"><button class="btn tiny ghost" data-action="open-app" data-app="map">ОТКРЫТЬ В NULLATLAS</button><button class="btn tiny ghost" data-action="open-app" data-app="blackwire">КОНТРАКТЫ</button></div></div>
+  <div class="panel section-gap site-panel"><div class="panel-title"><span>SURFACE</span><small>${activeMission?`JOB ${activeMission.id}`:flavor.label}</small></div>${site.kind==='bank'?`<div class="notice warning">Закрытый банковский контур. Протокол — в Aster Bank.</div><button class="btn section-gap" data-action="open-app" data-app="bank">ASTER BANK</button>`:`<div class="site-intel" style="--site-accent:${flavor.accent}"><div class="site-intel-tag">${esc(flavor.label)}</div><p>${esc(flavor.blurb)}</p><div class="chain-row">${chainHtml}</div><div class="btn-row section-gap"><button class="btn tiny" type="button" data-action="copy-domain" data-domain="${esc(site.domain)}">КОПИРОВАТЬ ДОМЕН</button><button class="btn tiny ghost" type="button" data-action="open-app" data-app="terminal">TERMINAL</button></div><div class="small muted">Домен для плагинов: <code>${esc(site.domain)}</code></div></div>`}${missionFiles}</div>
+  <div class="panel section-gap"><div class="panel-title"><span>СОСТОЯНИЕ ЦЕЛИ</span><small>SIMULATION SNAPSHOT</small></div><div class="kv"><span>Сигнатура</span><b>${p.analyzed?esc(site.artifact):'········'}</b></div><div class="kv"><span>Анализ</span><b>${p.analyzed?'OK':'—'}</b></div><div class="kv"><span>Доступ</span><b>${p.access?'OK':'—'}</b></div><div class="kv"><span>Текущее содержимое</span><b>${esc(site.siteText)}</b></div>${p.access?`<div class="notice success section-gap">Виртуальные данные: ${esc(site.data)}</div>`:''}<div class="btn-row section-gap"><button class="btn tiny ghost" data-action="open-app" data-app="map">ОТКРЫТЬ В NULLATLAS</button><button class="btn tiny ghost" data-action="open-app" data-app="blackwire">КОНТРАКТЫ</button></div></div>
   <div class="panel section-gap"><div class="panel-title"><span>ДОСТУПНЫЕ ИГРОВЫЕ САЙТЫ</span><small>${g.world.sites.length} HOSTS</small></div><div class="list">${g.world.sites.map(s=>`<div class="list-row"><div class="list-main"><strong>${esc(s.title)}</strong><small>${esc(s.domain)} · security ${s.security}</small></div><button class="btn tiny ghost" data-action="browser-tab" data-site="${s.id}">ОТКРЫТЬ</button></div>`).join('')}</div></div>`;
 }
 function renderMap(g) {
@@ -357,17 +378,17 @@ function missionSteps(m, g) {
   const steps = [
     'Открой BlackWire и прими контракт (если ещё не принят).',
     `Открой Browser → цель <b>${esc(site?.domain || m.target)}</b>.`,
-    'Нажми по порядку кнопки цепочки на странице сайта:',
-    '&nbsp;&nbsp;1) Анализ сайта',
-    '&nbsp;&nbsp;2) Расшифровка артефакта',
-    '&nbsp;&nbsp;3) Обнаружение узла',
-    '&nbsp;&nbsp;4) Поиск слабости',
-    '&nbsp;&nbsp;5) Симуляция доступа',
+    'Работай через Terminal и установленные плагины:',
+    '&nbsp;&nbsp;run site-analyzer → analyze &lt;domain&gt;',
+    '&nbsp;&nbsp;run artifact-decoder → decode &lt;key&gt;',
+    '&nbsp;&nbsp;run node-radar → discover &lt;key&gt;',
+    '&nbsp;&nbsp;run weakness-lab → probe &lt;key&gt;',
+    '&nbsp;&nbsp;run sim-exploit → simulate &lt;key&gt;',
   ];
   if (needDb) steps.push('&nbsp;&nbsp;6) Чтение виртуальной БД (нужен Virtual DB Reader)');
-  steps.push(`${needDb ? '7' : '6'}) Экспорт результата`);
-  steps.push('Нажми «СОЗДАТЬ ФАЙЛ РЕЗУЛЬТАТА».');
-  steps.push('Открой N-Mail → блок «ГОТОВО К ОТПРАВКЕ» → «ОТПРАВИТЬ».');
+  steps.push(`${needDb ? '7' : '6'}) run data-exporter → export &lt;key&gt;`);
+  steps.push('Собери результат через data-exporter в Terminal.');
+  steps.push('Передай файл заказчику через N-Mail, когда он появится в очереди.');
   steps.push('Подожди проверку (~5–6 сек) — кредиты и XP начислятся автоматически.');
   return steps;
 }
@@ -393,7 +414,7 @@ function renderMissionGuide(m, g) {
     <div class="panel-title"><span>ЧТО ДЕЛАТЬ ПО ШАГАМ</span></div>
     <ol class="mission-steps">${steps}</ol>
     <div class="notice section-gap">Команды в Terminal для миссий не нужны. Вся цепочка выполняется кнопками в Browser. N-Mail — только для финальной отправки файла.</div>
-    <div class="btn-row">${m.status==='available'?`<button class="btn primary" data-action="accept-mission" data-id="${m.id}">ПРИНЯТЬ КОНТРАКТ</button>`:m.status==='accepted'?`<button class="btn primary" data-action="mission-open-target" data-id="${m.id}">ОТКРЫТЬ ЦЕЛЬ В BROWSER</button><button class="btn" data-action="open-app" data-app="mail">ОТКРЫТЬ N-MAIL</button>`:m.status==='submitted'?`<span class="badge green">НА ПРОВЕРКЕ</span>`:''}</div>
+    <div class="btn-row">${m.status==='available'?`<button class="btn primary" data-action="accept-mission" data-id="${m.id}">ПРИНЯТЬ</button>`:m.status==='accepted'?`<span class="badge amber">В РАБОТЕ</span>`:m.status==='submitted'?`<span class="badge green">НА ПРОВЕРКЕ</span>`:''}</div>
   </div>`;
 }
 
@@ -413,14 +434,14 @@ function renderBlackWire(g) {
       <div class="small muted">Подсказка: ${esc(m.hint)}</div>
       <div class="btn-row">
         <button class="btn tiny" data-action="mission-details" data-id="${m.id}">ПОДРОБНЕЕ / ГАЙД</button>
-        ${m.status==='available'?`<button class="btn primary" data-action="accept-mission" data-id="${m.id}">ПРИНЯТЬ КОНТРАКТ</button>`:m.status==='accepted'?`<button class="btn" data-action="mission-open-target" data-id="${m.id}">ОТКРЫТЬ ЦЕЛЬ В BROWSER</button>`:`<span class="badge green">ПРОВЕРКА · ${humanLeft(m.verifyAt-Date.now())}</span>`}
+        ${m.status==='available'?`<button class="btn primary" data-action="accept-mission" data-id="${m.id}">ПРИНЯТЬ</button>`:m.status==='accepted'?`<span class="badge amber">ACTIVE</span>`:`<span class="badge green">ПРОВЕРКА · ${humanLeft(m.verifyAt-Date.now())}</span>`}
       </div>
     </article>`;
   };
   const locked=g.missions.items.filter(m=>m.status==='locked');
   return `<div class="app-heading"><div><div class="eyebrow">BLACKWIRE / NPC CONTRACT BOARD</div><h2>BlackWire</h2><p>Биржа заказов от персонажей игрового мира. Без реальных пользователей и чата.</p></div><span class="badge">SOLO MODE</span></div>
   <div class="grid-3"><div class="stat-box"><span>ACTIVE</span><strong>${g.missions.items.filter(m=>m.status==='accepted').length}</strong><small>активные контракты</small></div><div class="stat-box"><span>VERIFYING</span><strong>${g.missions.items.filter(m=>m.status==='submitted').length}</strong><small>ожидают проверки</small></div><div class="stat-box"><span>COMPLETED</span><strong>${g.player.contractsCompleted}</strong><small>закрыто</small></div></div>
-  <div class="notice section-gap">1) Прими контракт → 2) открой цель в Browser и пройди цепочку кнопок → 3) создай файл → 4) отправь через N-Mail. Жми <b>ПОДРОБНЕЕ / ГАЙД</b> на любом заказе.</div>
+  <div class="notice section-gap">Контракты от NPC. Детали и требования — в карточке заказа. Операции выполняются через Terminal и плагины.</div>
   ${selected?renderMissionGuide(selected,g):''}
   <div class="section-gap list">${items.length?items.map(card).join(''):'<div class="empty-state"><b>Нет доступных контрактов</b><p>Повысь уровень, чтобы открыть новые заказы.</p></div>'}</div>
   ${locked.length?`<div class="panel section-gap"><div class="panel-title"><span>ЗАБЛОКИРОВАНО</span><small>${locked.length}</small></div><div class="list">${locked.slice(0,8).map(m=>`<div class="list-row"><div class="list-main"><strong>${esc(m.title)}</strong><small>Требуется уровень ${m.minLevel} · ${esc(m.difficulty)}</small></div><button class="btn tiny ghost" data-action="mission-details" data-id="${m.id}">ГАЙД</button></div>`).join('')}</div></div>`:''}`;
@@ -433,7 +454,7 @@ function renderMail(g) {
   const list=g.mail.messages.slice(0,30).map(m=>`<button class="mail-item ${m.status==='unread'?'unread':''}" data-action="mail-open" data-id="${m.id}"><strong>${esc(m.subject)}</strong><small>${formatTime(m.at)}</small><p>${esc(m.from)} · ${esc(m.body.slice(0,110))}${m.body.length>110?'…':''}</p></button>`).join('');
   return `<div class="app-heading"><div><div class="eyebrow">N-MAIL / INTERNAL MESSAGING</div><h2>N-Mail</h2><p>Внутриигровые письма, контракты и отправка файлов.</p></div><span class="badge">${g.mail.messages.filter(m=>m.status==='unread').length} UNREAD</span></div>
   ${pending.length?`<div class="panel"><div class="panel-title"><span>ГОТОВО К ОТПРАВКЕ</span><small>DELIVERY QUEUE</small></div><div class="list">${pending.map(m=>{const f=g.computer.files.find(x=>x.id===m.resultFileId);return `<div class="list-row"><div class="list-main"><strong>${esc(m.title)}</strong><small>${esc(m.client)} · ${esc(f?.name||'result file')}</small></div><button class="btn tiny primary" data-action="deliver-mission" data-id="${m.id}">ОТПРАВИТЬ</button></div>`;}).join('')}</div></div>`:''}
-  ${waitingFile.length?`<div class="notice warning section-gap">Есть активный контракт без файла результата. Сначала открой цель в Browser, пройди цепочку (анализ → … → экспорт) и нажми «СОЗДАТЬ ФАЙЛ РЕЗУЛЬТАТА». После этого здесь появится кнопка «ОТПРАВИТЬ».<div class="btn-row section-gap">${waitingFile.map(m=>`<button class="btn tiny" data-action="mission-open-target" data-id="${m.id}">ОТКРЫТЬ ${esc(m.id)}</button>`).join('')}</div></div>`:''}
+  ${waitingFile.length?`<div class="notice warning section-gap">Есть активный контракт без файла результата. Собери данные через плагины в Terminal, затем export — файл появится здесь.<div class="btn-row section-gap">${waitingFile.map(m=>`<button class="btn tiny" data-action="mission-open-target" data-id="${m.id}">ОТКРЫТЬ ${esc(m.id)}</button>`).join('')}</div></div>`:''}
   <div class="grid-2 section-gap" style="align-items:start"><div class="list">${list||'<div class="empty-state"><b>Входящие пусты</b><p>Письма появятся после контрактов и системных событий.</p></div>'}</div><div class="panel">${selected?`<div class="eyebrow">${selected.direction==='in'?'INCOMING MESSAGE':'SENT MESSAGE'}</div><h3 style="margin:8px 0;color:#e1ebf1;font-size:13px">${esc(selected.subject)}</h3><div class="kv"><span>От</span><b>${esc(selected.from)}</b></div><div class="kv"><span>Дата</span><b>${formatDate(selected.at)} ${formatTime(selected.at)}</b></div><div class="divider"></div><div class="mail-body">${esc(selected.body)}</div>${selected.attachments?.length?selected.attachments.map(id=>{const f=g.computer.files.find(x=>x.id===id);return f?`<button class="attachment" data-action="file-open" data-id="${esc(f.id)}">▣ ${esc(f.name)} · ${f.size} KB</button>`:''}).join(''):''}<div class="btn-row section-gap"><button class="btn tiny ghost" data-action="mail-mark" data-id="${selected.id}">ОТМЕТИТЬ ПРОЧИТАННЫМ</button></div>`:'<div class="empty-state"><b>Выбери письмо</b><p>Содержимое появится здесь.</p></div>'}${state.selectedFileId?(()=>{const f=g.computer.files.find(x=>x.id===state.selectedFileId);return f?`<div class="panel section-gap"><div class="panel-title"><span>ПРОСМОТР ВЛОЖЕНИЯ</span><button class="btn tiny ghost" data-action="file-close">ЗАКРЫТЬ</button></div><strong>${esc(f.name)}</strong><pre class="file-preview">${esc(String(f.content||'').slice(0,2400))}${String(f.content||'').length>2400?'\n… файл сокращён для просмотра':''}</pre></div>`:''})():''}</div></div>
   <div class="notice section-gap">Почта работает только внутри вымышленной игры. Кнопка «ОТПРАВИТЬ» появляется только после создания файла результата в Browser.</div>`;
 }
@@ -450,39 +471,124 @@ function renderBank(g) {
   <div class="btn-row section-gap"><button class="btn danger" data-action="bank-attempt" ${status.locked||!risk.unlocked||missing.length?'disabled':''}>ЗАПУСТИТЬ СИМУЛЯЦИЮ</button></div></div>
   <div class="panel section-gap"><div class="panel-title"><span>ИСТОРИЯ ТРАНЗАКЦИЙ</span><small>${tx.length} RECORDS</small></div>${tx.length?tx.map(t=>`<div class="transaction-row"><div><strong>${esc(t.reason)}</strong><small>${formatDate(t.at)} · ${formatTime(t.at)}</small></div><b class="${t.type==='income'?'income':t.type==='confiscated'?'confiscated':'expense'}">${t.type==='income'?'+':'−'}${fmt(t.amount)} CR</b></div>`).join(''):'<div class="empty-state"><b>Нет транзакций</b><p>История появится после получения наград и покупок.</p></div>'}</div>`;
 }
-function renderTerminal(g) {
-  if(!state.terminalLines.length) state.terminalLines=[{text:'NULLBYTE NBSHELL 1.0 — безопасный игровой интерфейс.',type:'blue'},{text:'Команды ОС, shell, SQL и сетевые запросы не поддерживаются.',type:'muted'},{text:'Введи help для списка разрешённых команд.',type:'muted'}];
-  return `<div class="app-heading"><div><div class="eyebrow">NULLBYTE / COMMAND INTERFACE</div><h2>Terminal</h2><p>Зарегистрированные игровые команды. Это не системная оболочка.</p></div><span class="badge green">SAFE MODE</span></div>
-  <div class="terminal-shell"><div class="terminal-toolbar"><span>operator@nullbyte:~</span><span>VIRTUAL TTY · NO SHELL</span></div><div class="terminal-output" id="terminalOutput">${state.terminalLines.map(l=>`<div class="${esc(l.type||'')}">${esc(l.text)}</div>`).join('')}</div><form class="terminal-input-row" id="terminalForm"><span>operator@nullbyte $</span><input name="command" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="help" aria-label="Игровая команда"></form></div>
-  <div class="notice section-gap">Разрешены только заранее зарегистрированные команды. Ничего не исполняется на устройстве или сервере.</div>`;
-}
-function runTerminalCommand(raw) {
-  const cmd=String(raw||'').trim();if(!cmd)return;
-  const add=(text,type='')=>state.terminalLines.push({text,type});
-  add(`operator@nullbyte $ ${cmd}`,'prompt');
-  const lower=cmd.toLowerCase();const parts=cmd.split(/\s+/);const one=parts[0]?.toLowerCase();
-  if(lower==='help') add('help | info | whoami | status | date | uptime | plugins | pkg list | plugin info NAME | ls | cat FILE | mission list | map | clear','blue');
-  else if(lower==='clear'){state.terminalLines=[];}
-  else if(lower==='whoami') add(state.game.player.nickname);
-  else if(lower==='date') add(new Date().toString());
-  else if(lower==='uptime') add(`${Math.floor((Date.now()-state.game.computer.uptimeStartedAt)/60000)} virtual minutes`);
-  else if(lower==='info') {
-    const g=state.game,ram=HARDWARE.ram.find(x=>x.level===g.computer.ram),cpu=HARDWARE.cpu.find(x=>x.level===g.computer.cpu),storage=getHardwareUsage(g);
-    add(`OPERATOR: ${g.player.nickname}\nTELEGRAM_ID: ${g.player.telegramId||'UNAVAILABLE'}\nCPU: ${cpu.name}\nRAM: ${ram.gb} GB\nGPU: ${HARDWARE.gpu.find(x=>x.level===g.computer.gpu).name}\nOS: NULLBYTE OS ${g.computer.os}.0\nLOCATION: NEW ARCHIVE / ${LOCATIONS[0].name}\nSTORAGE: ${fmt(storage.used/1024)} / ${storage.total/1024} GB\nPROCESSES: ${[...state.opened.values()].filter(w=>!w.minimized).length}\nMODE: FICTIONAL SIMULATION`);
+function terminalPrompt() {
+  if (state.terminalPlugin) {
+    const p = getPlugin(state.terminalPlugin);
+    return `${(p?.name || state.terminalPlugin).toLowerCase().replace(/\s+/g,'-')}>`;
   }
-  else if(lower==='status') add(`LEVEL ${state.game.player.level} · XP ${state.game.player.xp} · PLUGINS ${state.game.computer.installedPlugins.length} · OPERATIONS ${state.game.stats.operations}`);
-  else if(lower==='plugins'||lower==='pkg list') add(PLUGINS.map(p=>`${state.game.computer.installedPlugins.includes(p.id)?'[installed]':'[available]'} ${p.name} (${p.id})`).join('\n'));
-  else if(lower.startsWith('plugin info ')) {const q=cmd.slice(12).trim().toLowerCase(),p=PLUGINS.find(x=>x.id===q||x.name.toLowerCase()===q);add(p?`${p.name}\nCATEGORY: ${p.category}\nVERSION: ${p.version}\nRAM: ${p.ram} GB\nSTORAGE: ${p.storage} MB\nREQUIRED LEVEL: ${p.requiredLevel}\nSTATUS: ${getInstalledPlugin(state.game,p.id)?'INSTALLED':'NOT INSTALLED'}\n${p.description}`:'Плагин не найден. Используй pkg list.');}
-  else if(lower==='ls') {const files=[...state.game.computer.files,...state.game.editor.files];add(files.length?files.map(f=>`${f.name} (${f.size} KB)`).join('\n'):'Пустой виртуальный каталог.');}
-  else if(lower.startsWith('cat ')) {const name=cmd.slice(4).trim();const f=[...state.game.computer.files,...state.game.editor.files].find(x=>x.name===name);add(f?String(f.content).slice(0,1800):'Файл не найден. Команда cat читает только виртуальные игровые файлы.');}
-  else if(lower==='mission list') add(state.game.missions.items.filter(m=>['accepted','submitted','available'].includes(m.status)).map(m=>`${m.id} | ${m.status} | ${m.title}`).join('\n')||'Активных контрактов нет.');
-  else if(lower==='map') add(LOCATIONS.map(l=>`${l.name} / ${l.city}`).join('\n'));
-  else add('Команда не зарегистрирована. Введи help.','error');
-  state.terminalLines=state.terminalLines.slice(-120);if(state.opened.has('terminal')){renderWindow('terminal');const out=$('terminalOutput');if(out)out.scrollTop=out.scrollHeight;}
+  return 'operator@nullbyte $';
 }
+
+function renderTerminal(g) {
+  if (!state.terminalLines.length) {
+    state.terminalLines = [
+      { text: 'NULLBYTE NBSHELL 1.0 — игровой терминал.', type: 'blue' },
+      { text: 'Плагины запускаются здесь: run <plugin-id>', type: 'muted' },
+      { text: 'help — список команд · plugins — модули', type: 'muted' }
+    ];
+  }
+  const plug = state.terminalPlugin ? getPlugin(state.terminalPlugin) : null;
+  return `<div class="app-heading"><div><div class="eyebrow">NULLBYTE / COMMAND INTERFACE</div><h2>Terminal</h2><p>${plug ? `Модуль: <b>${esc(plug.name)}</b> · exit чтобы выйти` : 'Операции с целями выполняются через установленные плагины.'}</p></div><span class="badge ${plug ? 'amber' : 'green'}">${plug ? 'PLUGIN SESSION' : 'SHELL'}</span></div>
+  <div class="terminal-shell"><div class="terminal-toolbar"><span>${esc(terminalPrompt())}</span><span>${plug ? esc(plug.id) : 'VIRTUAL TTY'}</span></div><div class="terminal-output" id="terminalOutput">${state.terminalLines.map(l => `<div class="${esc(l.type || '')}">${esc(l.text)}</div>`).join('')}</div><form class="terminal-input-row" id="terminalForm"><span>${esc(terminalPrompt())}</span><input name="command" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${plug ? 'help | exit' : 'help'}" aria-label="Игровая команда"></form></div>`;
+}
+
+function termAdd(text, type = '') {
+  state.terminalLines.push({ text, type });
+}
+
+function enterPlugin(pluginId) {
+  const p = getPlugin(pluginId) || PLUGINS.find(x => x.id === pluginId || x.name.toLowerCase() === pluginId.toLowerCase());
+  if (!p) { termAdd('Плагин не найден. plugins — список.', 'error'); return; }
+  if (!getInstalledPlugin(state.game, p.id)) { termAdd(`«${p.name}» не установлен. Купи в NULForge.`, 'error'); return; }
+  if (!PLUGIN_SHELLS[p.id]) { termAdd('У этого плагина нет интерактивной оболочки.', 'error'); return; }
+  termAdd(`loading ${p.name} …`, 'muted');
+  termAdd('checking signature / sandbox …', 'muted');
+  state.terminalPlugin = p.id;
+  for (const line of pluginShellBootLines(p.id)) termAdd(line.text, line.type);
+}
+
+function runTerminalCommand(raw) {
+  const cmd = String(raw || '').trim();
+  if (!cmd) return;
+  const prompt = terminalPrompt();
+  termAdd(`${prompt} ${cmd}`, 'prompt');
+
+  // Inside plugin session
+  if (state.terminalPlugin) {
+    const result = runPluginShellCommand(state.game, state.terminalPlugin, cmd);
+    for (const line of result.lines || []) termAdd(line.text, line.type || '');
+    if (result.exit) state.terminalPlugin = null;
+    if (result.progressUpdated || result.exportFile) scheduleSave();
+    if (result.exportFile) toast('Файл результата готов. Проверь N-Mail.', 'success');
+    state.terminalLines = state.terminalLines.slice(-140);
+    if (state.opened.has('terminal')) {
+      renderWindow('terminal');
+      const out = $('terminalOutput');
+      if (out) out.scrollTop = out.scrollHeight;
+    }
+    if (result.progressUpdated) refreshOpenApps(['browser', 'mail', 'blackwire', 'computer']);
+    return;
+  }
+
+  const lower = cmd.toLowerCase();
+  const parts = cmd.split(/\s+/);
+  const one = (parts[0] || '').toLowerCase();
+
+  if (lower === 'help') {
+    termAdd('help | clear | info | whoami | status | plugins | pkg list | plugin info <id>', 'blue');
+    termAdd('run <plugin> | use <plugin> — войти в оболочку плагина', 'blue');
+    termAdd('ls | cat <file> | mission list | map', 'blue');
+    termAdd('Цепочка: analyzer → decoder → node-radar → weakness-lab → sim-exploit → data-exporter', 'muted');
+  } else if (lower === 'clear') {
+    state.terminalLines = [];
+  } else if (lower === 'whoami') termAdd(state.game.player.nickname);
+  else if (lower === 'date') termAdd(new Date().toString());
+  else if (lower === 'uptime') termAdd(`${Math.floor((Date.now() - state.game.computer.uptimeStartedAt) / 60000)} virtual minutes`);
+  else if (lower === 'info') {
+    const g = state.game, ram = HARDWARE.ram.find(x => x.level === g.computer.ram), cpu = HARDWARE.cpu.find(x => x.level === g.computer.cpu), storage = getHardwareUsage(g);
+    termAdd(`OPERATOR: ${g.player.nickname}\nTELEGRAM_ID: ${g.player.telegramId || 'UNAVAILABLE'}\nCPU: ${cpu.name}\nRAM: ${ram.gb} GB\nGPU: ${HARDWARE.gpu.find(x => x.level === g.computer.gpu).name}\nOS: NULLBYTE OS ${g.computer.os}.0\nSTORAGE: ${fmt(storage.used / 1024)} / ${storage.total / 1024} GB\nMODE: FICTIONAL SIMULATION`);
+  } else if (lower === 'status') {
+    termAdd(`LEVEL ${state.game.player.level} · XP ${state.game.player.xp} · PLUGINS ${state.game.computer.installedPlugins.length} · OPS ${state.game.stats.operations}`);
+  } else if (lower === 'plugins' || lower === 'pkg list') {
+    termAdd(PLUGINS.map(p => {
+      const on = state.game.computer.installedPlugins.includes(p.id);
+      const shell = PLUGIN_SHELLS[p.id] ? ' [shell]' : '';
+      return `${on ? '[on]' : '[  ]'} ${p.id}${shell} — ${p.name}`;
+    }).join('\n'));
+  } else if (lower.startsWith('plugin info ')) {
+    const q = cmd.slice(12).trim().toLowerCase();
+    const p = PLUGINS.find(x => x.id === q || x.name.toLowerCase() === q);
+    if (!p) termAdd('Плагин не найден.', 'error');
+    else {
+      const shell = PLUGIN_SHELLS[p.id];
+      termAdd(`${p.name}\nID: ${p.id}\n${p.description}\nSTATUS: ${getInstalledPlugin(state.game, p.id) ? 'INSTALLED' : 'NOT INSTALLED'}`);
+      if (shell) termAdd(`SHELL: ${shell.help}`, 'blue');
+    }
+  } else if (one === 'run' || one === 'use') {
+    enterPlugin(parts.slice(1).join(' ').trim());
+  } else if (lower === 'ls') {
+    const files = [...state.game.computer.files, ...state.game.editor.files];
+    termAdd(files.length ? files.map(f => `${f.name} (${f.size} KB)`).join('\n') : 'Пусто.');
+  } else if (lower.startsWith('cat ')) {
+    const name = cmd.slice(4).trim();
+    const f = [...state.game.computer.files, ...state.game.editor.files].find(x => x.name === name);
+    termAdd(f ? String(f.content).slice(0, 1800) : 'Файл не найден.', f ? '' : 'error');
+  } else if (lower === 'mission list') {
+    termAdd(state.game.missions.items.filter(m => ['accepted', 'submitted', 'available'].includes(m.status)).map(m => `${m.id} | ${m.status} | ${m.title} | target:${m.target}`).join('\n') || 'Нет контрактов.');
+  } else if (lower === 'map') termAdd(LOCATIONS.map(l => `${l.name} / ${l.city}`).join('\n'));
+  else termAdd('Команда не зарегистрирована. help', 'error');
+
+  state.terminalLines = state.terminalLines.slice(-140);
+  if (state.opened.has('terminal')) {
+    renderWindow('terminal');
+    const out = $('terminalOutput');
+    if (out) out.scrollTop = out.scrollHeight;
+  }
+}
+
 function renderHelp() {
   const sections=[
-    ['Игровой цикл','Открой BlackWire, прими контракт, изучи вымышленную цель через Browser и плагины, экспортируй результат, затем отправь его через N-Mail. Система проверит файл и начислит кредиты и XP.'],
+    ['Игровой цикл','Контракты в BlackWire. Разведка целей — Browser. Операции — Terminal через плагины (run <plugin>). Результат уходит заказчику через N-Mail.'],
     ['Terminal','Только команды help, info, whoami, status, date, uptime, plugins, pkg list, plugin info NAME, ls, cat FILE, mission list и map. Команды ОС и произвольный код не исполняются.'],
     ['Плагины','Установи базовые пакеты и докупай нужные в NULForge. Установка проверяет уровень, кредитный баланс, RAM и накопитель. Плагины нельзя создавать или публиковать.'],
     ['Браузер и карта','Browser открывает только домены .null и сайты из личного мира. NullAtlas показывает вымышленный город и расписания NPC. Реальные адреса, GPS и внешние сайты не используются.'],
@@ -631,6 +737,12 @@ function handleAction(action,el) {
     case 'mission-close-guide':state.selectedMissionId=null;if(state.opened.has('blackwire'))renderWindow('blackwire');break;
     case 'mission-open-target':openMissionTarget(id);break;
     case 'browser-tab':ensureBrowserTab(site);if(!state.opened.has('browser'))openApp('browser');renderWindow('browser');break;
+    case 'copy-domain':{
+      const d=el.dataset.domain||'';
+      if(navigator.clipboard?.writeText){navigator.clipboard.writeText(d).then(()=>toast('Домен скопирован.','success')).catch(()=>toast(d,'info'));}
+      else toast(d,'info');
+      break;
+    }
     case 'browser-home':state.browserTabs=[];state.game.browser.activeSite='';renderWindow('browser');break;
     case 'browser-close-tab':{state.browserTabs=state.browserTabs.filter(t=>t.id!==el.dataset.tab);state.game.browser.activeSite=state.browserTabs[state.browserTabs.length-1]?.siteId||'';renderWindow('browser');break;}
     case 'bookmark':case 'bookmark-site':{const ok=addBookmark(state.game,site);toast(ok?'Закладка сохранена.':'Не удалось сохранить закладку.',ok?'success':'error');scheduleSave();renderWindow('browser');break;}

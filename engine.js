@@ -99,6 +99,7 @@ export function createInitialState(tgUser=null) {
     bank:{lockStartedAt:0,lockUntil:0,lastAttemptAt:0},
     editor:{files:[]},
     cooldowns:{},
+    ops:{keys:[]},
     processedEvents:[],
     stats:{operations:0,successfulOperations:0,failedOperations:0,bytesExported:0}
   };
@@ -133,6 +134,7 @@ export function migrateSave(raw,tgUser=null) {
   out.editor={...fresh.editor,...(raw.editor||{})};
   out.cooldowns={...fresh.cooldowns,...(raw.cooldowns||{})};
   out.stats={...fresh.stats,...(raw.stats||{})};
+  out.ops={keys:Array.isArray(raw.ops?.keys)?raw.ops.keys.filter(k=>k&&typeof k==='object').slice(-40).map(k=>({id:String(k.id||'').slice(0,64),stage:String(k.stage||''),siteId:String(k.siteId||''),token:String(k.token||'').slice(0,80),createdAt:finite(k.createdAt),used:Boolean(k.used)})):[ ]};
   for (const key of ['files','installedPlugins']) if (!Array.isArray(out.computer[key])) out.computer[key]=fresh.computer[key];
   for (const key of ['transactions']) if (!Array.isArray(out.economy[key])) out.economy[key]=fresh.economy[key];
   if (!out.world || typeof out.world !== 'object' || Array.isArray(out.world)) out.world=fresh.world;
@@ -271,6 +273,302 @@ export function getSiteProgress(state,siteId) {
   if(!state.world.progress[siteId]) state.world.progress[siteId]={analyzed:false,decoded:false,node:false,weakness:false,access:false,database:false,exported:false,modified:false,report:null,lastOperationAt:0};
   return state.world.progress[siteId];
 }
+
+/* —— Terminal plugin sessions / one-time operation keys —— */
+export const PLUGIN_SHELLS = {
+  'site-analyzer': {
+    boot: 'Site Analyzer v1.0 — разбор вымышленной цели.',
+    help: 'analyze <domain> | scan <domain> | help | exit',
+    commands: ['analyze', 'scan', 'help', 'exit']
+  },
+  'artifact-decoder': {
+    boot: 'Artifact Decoder v1.0 — расшифровка игрового артефакта по ключу анализа.',
+    help: 'decode <key> | help | exit',
+    commands: ['decode', 'help', 'exit']
+  },
+  'node-radar': {
+    boot: 'Node Radar v1.1 — поиск виртуального host-node.',
+    help: 'discover <key> | find <key> | help | exit',
+    commands: ['discover', 'find', 'help', 'exit']
+  },
+  'weakness-lab': {
+    boot: 'Weakness Lab v1.2 — модель защиты цели.',
+    help: 'probe <key> | weakness <key> | help | exit',
+    commands: ['probe', 'weakness', 'help', 'exit']
+  },
+  'sim-exploit': {
+    boot: 'Sim Exploit v2.0 — безопасная симуляция доступа.',
+    help: 'simulate <key> | exploit <key> | help | exit',
+    commands: ['simulate', 'exploit', 'help', 'exit']
+  },
+  'data-exporter': {
+    boot: 'Data Exporter v1.0 — пакет результата для N-Mail.',
+    help: 'export <key> [mission-id] | pack <key> [mission-id] | help | exit',
+    commands: ['export', 'pack', 'help', 'exit']
+  },
+  'db-reader': {
+    boot: 'Virtual DB Reader v1.0 — чтение виртуальных записей.',
+    help: 'read <key> | query <key> | help | exit',
+    commands: ['read', 'query', 'help', 'exit']
+  }
+};
+
+function ensureOps(state) {
+  if (!state.ops || typeof state.ops !== 'object') state.ops = { keys: [] };
+  if (!Array.isArray(state.ops.keys)) state.ops.keys = [];
+}
+
+function makeOpToken(state, stage, siteId) {
+  const seed = `${state.meta.seed}:${stage}:${siteId}:${Date.now()}:${state.stats.operations}:${Math.random().toString(36).slice(2, 8)}`;
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619); }
+  const hex = (h >>> 0).toString(16).padStart(8, '0').toUpperCase();
+  return `${stage.slice(0, 3).toUpperCase()}-${hex}-${siteId.slice(0, 4).toUpperCase()}`;
+}
+
+export function issueOpKey(state, stage, siteId) {
+  ensureOps(state);
+  // Invalidate previous unused keys for same stage+site (single-use pipeline).
+  for (const k of state.ops.keys) {
+    if (k.stage === stage && k.siteId === siteId && !k.used) k.used = true;
+  }
+  const token = makeOpToken(state, stage, siteId);
+  const entry = { id: idempotencyKey('key'), stage, siteId, token, createdAt: Date.now(), used: false };
+  state.ops.keys.push(entry);
+  state.ops.keys = state.ops.keys.slice(-40);
+  return entry;
+}
+
+export function findOpKey(state, token) {
+  ensureOps(state);
+  const t = String(token || '').trim();
+  return state.ops.keys.find(k => k.token === t) || null;
+}
+
+export function resolveSiteRef(state, ref) {
+  const input = String(ref || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+  if (!input) return null;
+  return state.world.sites.find(s =>
+    s.domain === input || s.id === input || s.title.toLowerCase() === input ||
+    `${s.title} ${s.domain}`.toLowerCase().includes(input)
+  ) || null;
+}
+
+function pluginCooldown(state, pluginId) {
+  const until = state.cooldowns[pluginId] || 0;
+  if (until > Date.now()) return Math.ceil((until - Date.now()) / 1000);
+  return 0;
+}
+
+function touchCooldown(state, pluginId) {
+  const p = getPlugin(pluginId);
+  if (p?.cooldown) state.cooldowns[pluginId] = Date.now() + p.cooldown;
+}
+
+/**
+ * Execute a command inside an active plugin shell.
+ * Returns { ok, lines:[{text,type}], key?, progressUpdated?, exportFile? }
+ */
+export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = null) {
+  const shell = PLUGIN_SHELLS[pluginId];
+  if (!shell) return { ok: false, lines: [{ text: 'Плагин не поддерживает интерактивный режим.', type: 'error' }] };
+  if (!getInstalledPlugin(state, pluginId)) {
+    return { ok: false, lines: [{ text: `Плагин ${pluginId} не установлен.`, type: 'error' }] };
+  }
+
+  const line = String(rawLine || '').trim();
+  if (!line) return { ok: true, lines: [] };
+  const parts = line.split(/\s+/);
+  const cmd = parts[0].toLowerCase();
+  const arg1 = parts[1] || '';
+  const arg2 = parts[2] || '';
+  const lines = [];
+
+  if (cmd === 'help') {
+    return { ok: true, lines: [{ text: shell.help, type: 'blue' }] };
+  }
+  if (cmd === 'exit' || cmd === 'quit') {
+    return { ok: true, exit: true, lines: [{ text: `Выход из ${getPlugin(pluginId)?.name || pluginId}.`, type: 'muted' }] };
+  }
+
+  const wait = pluginCooldown(state, pluginId);
+  if (wait > 0) {
+    return { ok: false, lines: [{ text: `Плагин остывает: ${wait}с`, type: 'error' }] };
+  }
+
+  // —— site-analyzer ——
+  if (pluginId === 'site-analyzer' && (cmd === 'analyze' || cmd === 'scan')) {
+    const site = resolveSiteRef(state, arg1);
+    if (!site) return { ok: false, lines: [{ text: 'Цель не найдена. Укажи домен .null (скопируй из Browser).', type: 'error' }] };
+    if (site.recoveryAt > Date.now()) {
+      return { ok: false, lines: [{ text: `Цель восстанавливается ещё ~${Math.ceil((site.recoveryAt - Date.now()) / 60000)} мин.`, type: 'error' }] };
+    }
+    const r = operateSite(state, site.id, 'analyze', null);
+    if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+    const key = issueOpKey(state, 'analyze', site.id);
+    touchCooldown(state, pluginId);
+    lines.push({ text: `[boot] probing ${site.domain} …`, type: 'muted' });
+    lines.push({ text: `TITLE: ${site.title}`, type: '' });
+    lines.push({ text: `KIND: ${site.kind} · SEC: ${site.security}/5 · REGION: ${site.region}`, type: '' });
+    lines.push({ text: `ARTIFACT_HINT: ${site.artifact}`, type: 'blue' });
+    lines.push({ text: `NOTE: ${site.description}`, type: 'muted' });
+    lines.push({ text: `ANALYSIS_KEY: ${key.token}`, type: 'green' });
+    lines.push({ text: 'Ключ одноразовый. Передай его в Artifact Decoder.', type: 'muted' });
+    return { ok: true, lines, key: key.token, progressUpdated: true };
+  }
+
+  // —— artifact-decoder ——
+  if (pluginId === 'artifact-decoder' && cmd === 'decode') {
+    const key = findOpKey(state, arg1);
+    if (!key || key.stage !== 'analyze' || key.used) {
+      return { ok: false, lines: [{ text: 'Нужен свежий ANALYSIS_KEY от Site Analyzer.', type: 'error' }] };
+    }
+    const site = getSite(state, key.siteId);
+    if (!site) return { ok: false, lines: [{ text: 'Цель ключа исчезла.', type: 'error' }] };
+    const r = operateSite(state, site.id, 'decode', null);
+    if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+    key.used = true;
+    const next = issueOpKey(state, 'decode', site.id);
+    touchCooldown(state, pluginId);
+    lines.push({ text: `decoding artifact ${site.artifact} …`, type: 'muted' });
+    lines.push({ text: `DECODED: условная запись связана с ${site.data}`, type: '' });
+    lines.push({ text: `DECODE_KEY: ${next.token}`, type: 'green' });
+    return { ok: true, lines, key: next.token, progressUpdated: true };
+  }
+
+  // —— node-radar ——
+  if (pluginId === 'node-radar' && (cmd === 'discover' || cmd === 'find')) {
+    const key = findOpKey(state, arg1);
+    if (!key || key.stage !== 'decode' || key.used) {
+      return { ok: false, lines: [{ text: 'Нужен свежий DECODE_KEY от Artifact Decoder.', type: 'error' }] };
+    }
+    const site = getSite(state, key.siteId);
+    const r = operateSite(state, site.id, 'node', null);
+    if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+    key.used = true;
+    const next = issueOpKey(state, 'node', site.id);
+    touchCooldown(state, pluginId);
+    lines.push({ text: `scanning virtual subnet near ${site.domain} …`, type: 'muted' });
+    lines.push({ text: `NODE: host-${site.id}.sim.null · lag ${12 + site.security * 3}ms`, type: '' });
+    lines.push({ text: `NODE_KEY: ${next.token}`, type: 'green' });
+    return { ok: true, lines, key: next.token, progressUpdated: true };
+  }
+
+  // —— weakness-lab ——
+  if (pluginId === 'weakness-lab' && (cmd === 'probe' || cmd === 'weakness')) {
+    const key = findOpKey(state, arg1);
+    if (!key || key.stage !== 'node' || key.used) {
+      return { ok: false, lines: [{ text: 'Нужен свежий NODE_KEY от Node Radar.', type: 'error' }] };
+    }
+    const site = getSite(state, key.siteId);
+    const r = operateSite(state, site.id, 'weakness', null);
+    if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+    key.used = true;
+    const next = issueOpKey(state, 'weakness', site.id);
+    touchCooldown(state, pluginId);
+    lines.push({ text: 'building defense model …', type: 'muted' });
+    lines.push({ text: `MODEL: abstract surface ${site.security} · boost ${site.defenseBoost}`, type: '' });
+    lines.push({ text: `WEAKNESS_KEY: ${next.token}`, type: 'green' });
+    return { ok: true, lines, key: next.token, progressUpdated: true };
+  }
+
+  // —— sim-exploit ——
+  if (pluginId === 'sim-exploit' && (cmd === 'simulate' || cmd === 'exploit')) {
+    const key = findOpKey(state, arg1);
+    if (!key || key.stage !== 'weakness' || key.used) {
+      return { ok: false, lines: [{ text: 'Нужен свежий WEAKNESS_KEY от Weakness Lab.', type: 'error' }] };
+    }
+    const site = getSite(state, key.siteId);
+    const mission = state.missions.items.find(m => m.status === 'accepted' && m.target === site.id);
+    const r = operateSite(state, site.id, 'exploit', mission?.id || null);
+    if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+    key.used = true;
+    if (r.success === false) {
+      touchCooldown(state, pluginId);
+      return { ok: true, lines: [{ text: r.message, type: 'error' }, { text: 'Прогресс по цели сброшен. Начни цепочку заново.', type: 'muted' }], progressUpdated: true };
+    }
+    const next = issueOpKey(state, 'access', site.id);
+    touchCooldown(state, pluginId);
+    lines.push({ text: 'running sandbox access check …', type: 'muted' });
+    lines.push({ text: r.message, type: 'green' });
+    lines.push({ text: `DATA_SAMPLE: ${site.data}`, type: '' });
+    lines.push({ text: `ACCESS_KEY: ${next.token}`, type: 'green' });
+    return { ok: true, lines, key: next.token, progressUpdated: true };
+  }
+
+  // —— db-reader ——
+  if (pluginId === 'db-reader' && (cmd === 'read' || cmd === 'query')) {
+    const key = findOpKey(state, arg1);
+    if (!key || key.stage !== 'access' || key.used) {
+      return { ok: false, lines: [{ text: 'Нужен свежий ACCESS_KEY после Sim Exploit.', type: 'error' }] };
+    }
+    const site = getSite(state, key.siteId);
+    if (site.kind !== 'database') {
+      return { ok: false, lines: [{ text: 'Эта цель не содержит виртуальную БД.', type: 'error' }] };
+    }
+    key.used = true;
+    const r = operateSite(state, site.id, 'database', null);
+    if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+    const next = issueOpKey(state, 'database', site.id);
+    touchCooldown(state, pluginId);
+    lines.push({ text: `READ virtual-records @ ${site.domain}`, type: 'muted' });
+    lines.push({ text: `ROW: ${site.data}`, type: '' });
+    lines.push({ text: `DB_KEY: ${next.token}`, type: 'green' });
+    return { ok: true, lines, key: next.token, progressUpdated: true };
+  }
+
+  // —— data-exporter ——
+  if (pluginId === 'data-exporter' && (cmd === 'export' || cmd === 'pack')) {
+    const key = findOpKey(state, arg1);
+    if (!key || key.used) {
+      return { ok: false, lines: [{ text: 'Нужен неиспользованный ACCESS_KEY (или DB_KEY для database-целей).', type: 'error' }] };
+    }
+    const site = getSite(state, key.siteId);
+    if (!site) return { ok: false, lines: [{ text: 'Цель ключа не найдена.', type: 'error' }] };
+    const needStage = site.kind === 'database' ? 'database' : 'access';
+    if (key.stage !== needStage) {
+      return { ok: false, lines: [{ text: `Для этой цели нужен ключ стадии ${needStage}.`, type: 'error' }] };
+    }
+    key.used = true;
+    const r = operateSite(state, site.id, 'export', null);
+    if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+    touchCooldown(state, pluginId);
+    lines.push({ text: 'packing dataset …', type: 'muted' });
+    lines.push({ text: r.message, type: '' });
+
+    let mission = null;
+    if (arg2) mission = state.missions.items.find(m => m.id === arg2 && m.status === 'accepted');
+    if (!mission) mission = state.missions.items.find(m => m.status === 'accepted' && m.target === site.id);
+    if (mission) {
+      const exp = exportMissionResult(state, mission.id);
+      if (exp.ok) {
+        lines.push({ text: exp.message, type: 'green' });
+        lines.push({ text: 'Файл готов. Отправь его заказчику через N-Mail.', type: 'muted' });
+        return { ok: true, lines, progressUpdated: true, exportFile: true, missionId: mission.id };
+      }
+      lines.push({ text: exp.reason, type: 'error' });
+      return { ok: true, lines, progressUpdated: true };
+    }
+    lines.push({ text: 'Активный контракт на эту цель не найден — файл миссии не создан.', type: 'muted' });
+    return { ok: true, lines, progressUpdated: true };
+  }
+
+  return { ok: false, lines: [{ text: `Неизвестная команда «${cmd}». Введи help.`, type: 'error' }] };
+}
+
+export function pluginShellBootLines(pluginId) {
+  const shell = PLUGIN_SHELLS[pluginId];
+  const plugin = getPlugin(pluginId);
+  if (!shell) return [{ text: 'Unknown plugin shell', type: 'error' }];
+  return [
+    { text: shell.boot, type: 'blue' },
+    { text: `MODULE: ${plugin?.name || pluginId} · ${plugin?.version || ''}`, type: 'muted' },
+    { text: `CMDS: ${shell.help}`, type: 'muted' },
+    { text: 'exit — выйти из модуля', type: 'muted' }
+  ];
+}
+
+
 export function operateSite(state,siteId,operation,missionId=null) {
   const site=getSite(state,siteId); if(!site) return {ok:false,reason:'Игровая цель не найдена.'};
   if(site.kind==='bank'&&operation==='exploit') return {ok:false,reason:'Aster Union Bank использует отдельный подтверждаемый эндгейм-сценарий в приложении Aster Bank.'};

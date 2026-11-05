@@ -1,0 +1,15 @@
+{
+  "name": "nullbyte-os-game",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "NULLBYTE — single-player fictional hacking-life simulator for Telegram Mini Apps",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test *.test.js",
+    "check": "node --check app.js && node --check engine.js && node --check storage.js && node --check server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

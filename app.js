@@ -37,7 +37,7 @@ const APPS = [
   {id:'profile',title:'Профиль',path:'user://operator',ram:1,description:'Оператор и прогресс'},
   {id:'computer',title:'My Computer',path:'system://hardware',ram:1,description:'Компьютер и файлы'}
 ];
-const state = {opened:new Map(),z:20,drag:null,active:null,game:null,provider:'LOCAL SAVE',saveWarning:'',saveTimer:null,terminalLines:[],terminalPlugin:null,terminalBusy:false,terminalScrollPin:true,browserTabs:[],selectedMail:null,selectedFileId:null,selectedMissionId:null,editorText:'',editorName:'mission_report',nbsOutput:'Поддерживается только фиксированный список игровых деклараций.',modalConfirm:null,bootDone:false,persisting:false,persistPending:false,saveBlocked:false};
+const state = {opened:new Map(),z:20,drag:null,active:null,game:null,provider:'LOCAL SAVE',saveWarning:'',saveTimer:null,terminals:new Map(),termSeq:0,browserTabs:[],selectedMail:null,selectedFileId:null,selectedMissionId:null,editorText:'',editorName:'mission_report',nbsOutput:'Поддерживается только фиксированный список игровых деклараций.',modalConfirm:null,bootDone:false,persisting:false,persistPending:false,saveBlocked:false};
 
 function icon(id,cls='') { return `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${svg[id]||svg.help}</svg>`; }
 function appInfo(id) { return APPS.find(a=>a.id===id); }
@@ -104,7 +104,7 @@ function renderDesktopIcons() {
   `).join('');
 }
 function renderTaskbar() {
-  $('taskbarApps').innerHTML=[...state.opened.entries()].map(([id,w])=>`<button class="taskbar-app ${state.active===id&&!w.minimized?'active':''} ${w.minimized?'minimized':''}" type="button" data-action="taskbar-window" data-window="${id}" title="${esc(w.title)}"><i>${icon(id)}</i><span>${esc(w.title)}</span></button>`).join('');
+  $('taskbarApps').innerHTML=[...state.opened.entries()].map(([id,w])=>`<button class="taskbar-app ${state.active===id&&!w.minimized?'active':''} ${w.minimized?'minimized':''}" type="button" data-action="taskbar-window" data-window="${id}" title="${esc(w.title)}"><i>${icon(typeof terminalIconId==='function'?terminalIconId(id):id)}</i><span>${esc(w.title)}</span></button>`).join('');
   refreshSystem();
 }
 function showModal({title,eyebrow='NULLBYTE SYSTEM',body='',fields='',confirm='ПРОДОЛЖИТЬ',cancel='ОТМЕНА',danger=false,onConfirm=null}) {
@@ -175,19 +175,62 @@ function showNicknameModal() {
   const input=$('nicknameInput');input?.addEventListener('keydown',e=>{if(e.key==='Enter')finishModal();});
 }
 
+function isTerminalId(id){return id==='terminal'||String(id).startsWith('term-');}
+function terminalIconId(id){return isTerminalId(id)?'terminal':id;}
+
+function createTerminalSession(){
+  return {
+    lines:[{text:'NULLBYTE NBSHELL 1.0',type:'blue'},{text:'run <plugin-id> · plugins · help',type:'muted'}],
+    plugin:null,
+    busy:false,
+    scrollPin:true
+  };
+}
+
+function getTerm(id){
+  if(!isTerminalId(id))return null;
+  if(!state.terminals.has(id))state.terminals.set(id,createTerminalSession());
+  return state.terminals.get(id);
+}
+
 function openApp(id) {
-  const app=appInfo(id);if(!app)return;
+  // Each Terminal launch creates a NEW independent window.
+  if(id==='terminal'){
+    state.termSeq+=1;
+    id=`term-${state.termSeq}`;
+    state.terminals.set(id,createTerminalSession());
+  }
+  const baseId=isTerminalId(id)?'terminal':id;
+  const app=appInfo(baseId);if(!app)return;
   const existing=state.opened.get(id);
   if(existing){existing.minimized=false;focusWindow(id);return;}
-  const ram=currentRam();if(ram.used+app.ram>ram.total){toast(`Недостаточно RAM: ${app.title} требует ${app.ram} GB. Закрой или сверни другое окно либо обнови RAM.`,'error');return;}
-  const area=$('desktopWorkspace'),width=Math.min(880,Math.max(Math.min(320,area.clientWidth-12),area.clientWidth-42)),height=Math.min(650,Math.max(Math.min(290,area.clientHeight-12),area.clientHeight-42)),offset=(state.opened.size%5)*24;
-  const win={id,title:app.title,path:app.path,ram:app.ram,minimized:false,maximized:false,left:Math.max(8,(area.clientWidth-width)/2+offset-45),top:Math.max(8,(area.clientHeight-height)/2+offset-40),oldRect:null};
+  const ram=currentRam();if(ram.used+app.ram>ram.total){toast(`Недостаточно RAM: ${app.title} требует ${app.ram} GB.`,'error');return;}
+  const area=$('desktopWorkspace');
+  const isTerm=isTerminalId(id);
+  // Compact terminal like a real OS console; other apps keep previous sizing.
+  const width=isTerm
+    ? Math.min(560, Math.max(340, Math.floor(area.clientWidth*0.42)))
+    : Math.min(880,Math.max(Math.min(320,area.clientWidth-12),area.clientWidth-42));
+  const height=isTerm
+    ? Math.min(360, Math.max(240, Math.floor(area.clientHeight*0.42)))
+    : Math.min(650,Math.max(Math.min(290,area.clientHeight-12),area.clientHeight-42));
+  const offset=(state.opened.size%5)*22;
+  const title=isTerm?`Terminal ${id.replace('term-','#')}`:app.title;
+  const path=isTerm?`tty://${id}`:app.path;
+  const win={id,title,path,ram:app.ram,minimized:false,maximized:false,left:Math.max(8,(area.clientWidth-width)/2+offset-45),top:Math.max(8,(area.clientHeight-height)/2+offset-40),oldRect:null,baseApp:baseId};
   state.opened.set(id,win);
-  const element=document.createElement('section');element.className='app-window';element.dataset.window=id;element.setAttribute('role','dialog');element.setAttribute('aria-label',app.title);
-  element.style.width=`${width}px`;element.style.height=`${height}px`;element.style.left=`${Math.min(win.left,Math.max(8,area.clientWidth-width-8))}px`;element.style.top=`${Math.min(win.top,Math.max(8,area.clientHeight-height-8))}px`;
-  element.innerHTML=`<header class="window-bar"><span class="window-app-mark">${icon(id)}</span><strong class="window-title">${esc(app.title)}</strong><span class="window-path">${esc(app.path)}</span><div class="window-controls"><button type="button" data-action="minimize-window" title="Свернуть" aria-label="Свернуть">—</button><button type="button" data-action="maximize-window" title="Развернуть" aria-label="Развернуть">□</button><button type="button" data-action="close-window" title="Закрыть" aria-label="Закрыть">×</button></div></header><div class="window-content" data-content></div>`;
+  const element=document.createElement('section');
+  element.className=`app-window${isTerm?' app-window-terminal':''}`;
+  element.dataset.window=id;
+  element.setAttribute('role','dialog');
+  element.setAttribute('aria-label',title);
+  element.style.width=`${width}px`;
+  element.style.height=`${height}px`;
+  element.style.left=`${Math.min(win.left,Math.max(8,area.clientWidth-width-8))}px`;
+  element.style.top=`${Math.min(win.top,Math.max(8,area.clientHeight-height-8))}px`;
+  element.innerHTML=`<header class="window-bar"><span class="window-app-mark">${icon(terminalIconId(id))}</span><strong class="window-title">${esc(title)}</strong><span class="window-path">${esc(path)}</span><div class="window-controls"><button type="button" data-action="minimize-window" title="Свернуть" aria-label="Свернуть">—</button><button type="button" data-action="maximize-window" title="Развернуть" aria-label="Развернуть">□</button><button type="button" data-action="close-window" title="Закрыть" aria-label="Закрыть">×</button></div></header><div class="window-content" data-content></div>`;
   $('windowLayer').append(element);wireWindow(id,element);renderWindow(id);focusWindow(id);renderTaskbar();
-  if(id==='terminal')requestAnimationFrame(()=>element.querySelector('#terminalForm input')?.focus({preventScroll:true}));
+  if(isTerm)requestAnimationFrame(()=>element.querySelector('.terminal-form input')?.focus({preventScroll:true}));
 }
 function wireWindow(id,element) {
   element.addEventListener('pointerdown',e=>{if(!e.target.closest('.window-controls'))focusWindow(id);});
@@ -213,7 +256,7 @@ function focusWindow(id) {
   renderTaskbar();
 }
 function minimizeWindow(id) {const win=state.opened.get(id);if(!win)return;win.minimized=true;document.querySelector(`[data-window="${id}"]`)?.classList.add('is-minimized');document.querySelector(`[data-window="${id}"]`)?.classList.remove('is-active');if(state.active===id)state.active=null;const next=[...state.opened.keys()].reverse().find(k=>!state.opened.get(k).minimized);if(next)focusWindow(next);else renderTaskbar();}
-function closeWindow(id) {state.opened.delete(id);document.querySelector(`[data-window="${id}"]`)?.remove();if(state.active===id)state.active=null;const next=[...state.opened.keys()].reverse().find(k=>!state.opened.get(k).minimized);if(next)focusWindow(next);else renderTaskbar();}
+function closeWindow(id) {state.opened.delete(id);if(isTerminalId(id))state.terminals.delete(id);document.querySelector(`[data-window="${id}"]`)?.remove();if(state.active===id)state.active=null;const next=[...state.opened.keys()].reverse().find(k=>!state.opened.get(k).minimized);if(next)focusWindow(next);else renderTaskbar();}
 function maximizeWindow(id) {
   const win=state.opened.get(id),el=document.querySelector(`[data-window="${id}"]`);if(!win||!el)return;
   if(!win.maximized){win.oldRect={left:el.style.left,top:el.style.top,width:el.style.width,height:el.style.height};win.maximized=true;el.classList.add('is-maximized');}
@@ -223,24 +266,32 @@ function maximizeWindow(id) {
 function renderWindow(id) {const el=document.querySelector(`[data-window="${id}"] [data-content]`);if(!el)return;el.innerHTML=renderApp(id);wireAppContent(id,el);}
 function refreshOpenApps(ids=null) {for(const id of (ids||[...state.opened.keys()]))if(state.opened.has(id))renderWindow(id);renderTaskbar();}
 function wireAppContent(id,el) {
-  if(id==='terminal'){
-    const out=el.querySelector('#terminalOutput');
+  if(isTerminalId(id)){
+    const term=getTerm(id);
+    const out=el.querySelector('.terminal-output');
     if(out){
       out.addEventListener('scroll',()=>{
         const nearBottom=(out.scrollHeight-out.scrollTop-out.clientHeight)<48;
-        state.terminalScrollPin=nearBottom;
+        if(term) term.scrollPin=nearBottom;
       },{passive:true});
-      scrollTerminalBottom(true);
+      scrollTerminalBottom(id, true);
     }
-    const form=el.querySelector('#terminalForm');
+    const form=el.querySelector('.terminal-form');
     form?.addEventListener('submit',async e=>{
       e.preventDefault();
-      if(state.terminalBusy)return;
+      e.stopPropagation();
+      const termNow=getTerm(id);
+      // Allow typing/queue only when not mid-animation hard-lock — still accept commands
       const input=form.elements.command;
       const val=input?.value||'';
+      if(!val.trim())return;
       if(input)input.value='';
-      await runTerminalCommand(val);
-      queueMicrotask(()=>{const i=document.querySelector('#terminalForm input');if(i&&!state.terminalBusy)i.focus({preventScroll:true});scrollTerminalBottom(true);});
+      await runTerminalCommand(id, val);
+      queueMicrotask(()=>{
+        const i=document.querySelector(`[data-window="${id}"] .terminal-form input`);
+        if(i) i.focus({preventScroll:true});
+        scrollTerminalBottom(id, true);
+      });
     });
   }
   if(id==='browser'){
@@ -257,6 +308,7 @@ function wireAppContent(id,el) {
 
 function renderApp(id) {
   const g=state.game;
+  if(isTerminalId(id)) return renderTerminal(g, id);
   switch(id){
     case 'profile':return renderProfile(g);
     case 'computer':return renderComputer(g);
@@ -267,7 +319,6 @@ function renderApp(id) {
     case 'blackwire':return renderBlackWire(g);
     case 'mail':return renderMail(g);
     case 'bank':return renderBank(g);
-    case 'terminal':return renderTerminal(g);
     case 'help':return renderHelp();
     case 'ide':return renderIde(g);
     default:return `<div class="empty-state"><b>Неизвестное приложение</b><p>Приложение не зарегистрировано.</p></div>`;
@@ -396,14 +447,14 @@ function missionSteps(m, g) {
     'Открой BlackWire и прими контракт (если ещё не принят).',
     `Открой Browser → цель <b>${esc(site?.domain || m.target)}</b>.`,
     'Работай через Terminal и установленные плагины:',
-    '&nbsp;&nbsp;run site-analyzer → analyze &lt;domain&gt;',
-    '&nbsp;&nbsp;run artifact-decoder → decode &lt;key&gt;',
-    '&nbsp;&nbsp;run node-radar → discover &lt;key&gt;',
-    '&nbsp;&nbsp;run weakness-lab → probe &lt;key&gt;',
-    '&nbsp;&nbsp;run sim-exploit → simulate &lt;key&gt;',
+    '&nbsp;&nbsp;run site-analyzer → analyze &lt;domain&gt; → копируй SIGNATURE',
+    '&nbsp;&nbsp;run artifact-decoder → decode &lt;SIGNATURE&gt; → ARTIFACT_ID',
+    '&nbsp;&nbsp;run node-radar → discover &lt;ARTIFACT_ID&gt; → HOST_HANDLE',
+    '&nbsp;&nbsp;run weakness-lab → probe &lt;HOST_HANDLE&gt; → VECTOR_ID',
+    '&nbsp;&nbsp;run sim-exploit → simulate &lt;VECTOR_ID&gt; → SESSION_TOKEN',
   ];
   if (needDb) steps.push('&nbsp;&nbsp;6) Чтение виртуальной БД (нужен Virtual DB Reader)');
-  steps.push(`${needDb ? '7' : '6'}) run data-exporter → export &lt;key&gt;`);
+  steps.push(`${needDb ? '7' : '6'}) run data-exporter → export &lt;SESSION_TOKEN&gt;`);
   steps.push('Собери результат через data-exporter в Terminal.');
   steps.push('Передай файл заказчику через N-Mail, когда он появится в очереди.');
   steps.push('Подожди проверку (~5–6 сек) — кредиты и XP начислятся автоматически.');
@@ -488,196 +539,165 @@ function renderBank(g) {
   <div class="btn-row section-gap"><button class="btn danger" data-action="bank-attempt" ${status.locked||!risk.unlocked||missing.length?'disabled':''}>ЗАПУСТИТЬ СИМУЛЯЦИЮ</button></div></div>
   <div class="panel section-gap"><div class="panel-title"><span>ИСТОРИЯ ТРАНЗАКЦИЙ</span><small>${tx.length} RECORDS</small></div>${tx.length?tx.map(t=>`<div class="transaction-row"><div><strong>${esc(t.reason)}</strong><small>${formatDate(t.at)} · ${formatTime(t.at)}</small></div><b class="${t.type==='income'?'income':t.type==='confiscated'?'confiscated':'expense'}">${t.type==='income'?'+':'−'}${fmt(t.amount)} CR</b></div>`).join(''):'<div class="empty-state"><b>Нет транзакций</b><p>История появится после получения наград и покупок.</p></div>'}</div>`;
 }
-function terminalPrompt() {
-  if (state.terminalPlugin) {
-    const p = getPlugin(state.terminalPlugin);
-    const short = (p?.id || state.terminalPlugin).replace(/[^a-z0-9]/gi, '').slice(0, 10);
+function terminalPrompt(term) {
+  if (term?.plugin) {
+    const p = getPlugin(term.plugin);
+    const short = (p?.id || term.plugin).replace(/[^a-z0-9]/gi, '').slice(0, 10);
     return `${short}>`;
   }
   return 'operator@nullbyte $';
 }
 
-function scrollTerminalBottom(force = false) {
-  const out = $('terminalOutput');
+function scrollTerminalBottom(termId, force = false) {
+  const out = document.querySelector(`[data-window="${termId}"] .terminal-output`);
   if (!out) return;
-  const pin = force || state.terminalScrollPin;
-  if (!pin) return;
+  const term = getTerm(termId);
+  if (!force && term && !term.scrollPin) return;
   requestAnimationFrame(() => {
-    out.scrollTop = out.scrollHeight + 200;
-    requestAnimationFrame(() => { out.scrollTop = out.scrollHeight + 200; });
+    out.scrollTop = out.scrollHeight + 400;
+    requestAnimationFrame(() => { out.scrollTop = out.scrollHeight + 400; });
   });
 }
 
-function termAdd(text, type = '') {
-  state.terminalLines.push({ text, type });
-  state.terminalLines = state.terminalLines.slice(-180);
-  // Live-append if terminal is open — avoid full window remount when possible
-  const out = $('terminalOutput');
-  if (out && state.opened.has('terminal')) {
+function termAdd(termId, text, type = '') {
+  const term = getTerm(termId);
+  if (!term) return;
+  term.lines.push({ text, type });
+  term.lines = term.lines.slice(-200);
+  const out = document.querySelector(`[data-window="${termId}"] .terminal-output`);
+  if (out) {
     const row = document.createElement('div');
     if (type) row.className = type;
     row.textContent = text;
     out.appendChild(row);
-    while (out.children.length > 180) out.removeChild(out.firstChild);
-    scrollTerminalBottom(true);
+    while (out.children.length > 200) out.removeChild(out.firstChild);
+    scrollTerminalBottom(termId, true);
   }
 }
 
 function pluginBanner(pluginId) {
   const p = getPlugin(pluginId);
   const name = (p?.name || pluginId).toUpperCase();
-  const id = pluginId;
-  const bar = '═'.repeat(Math.min(42, Math.max(28, name.length + 8)));
+  const bar = '═'.repeat(Math.min(36, Math.max(24, name.length + 6)));
   return [
     { text: `╔${bar}╗`, type: 'blue' },
     { text: `║  ░▒▓ ${name} ▓▒░`.padEnd(bar.length + 1) + '║', type: 'blue' },
-    { text: `║  module://${id}`.padEnd(bar.length + 1) + '║', type: 'muted' },
-    { text: `║  ${(p?.version || 'v1')} · sandbox=ON · net=SIM`.padEnd(bar.length + 1) + '║', type: 'muted' },
-    { text: `╚${bar}╝`, type: 'blue' },
-    { text: '  .·°·. 01001110 01010101 01001100 01001100  .·°·.', type: 'muted' }
+    { text: `║  module://${pluginId}`.padEnd(bar.length + 1) + '║', type: 'muted' },
+    { text: `╚${bar}╝`, type: 'blue' }
   ];
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function animatePluginBoot(pluginId) {
-  const frames = [
-    { text: '[······] init runtime', type: 'muted' },
-    { text: '[=·····] verify package signature', type: 'muted' },
-    { text: '[==····] map memory pages', type: 'muted' },
-    { text: '[===···] load opcode table', type: 'muted' },
-    { text: '[====··] attach sandbox tty', type: 'muted' },
-    { text: '[=====·] link operator session', type: 'muted' },
-    { text: '[======] module ready', type: 'green' }
-  ];
-  for (const f of frames) {
-    termAdd(f.text, f.type);
-    await sleep(90 + Math.random() * 70);
+async function animatePluginBoot(termId, pluginId) {
+  for (const f of [
+    { text: '[··] init', type: 'muted' },
+    { text: '[=·] signature ok', type: 'muted' },
+    { text: '[==] sandbox tty', type: 'muted' },
+    { text: '[==] ready', type: 'green' }
+  ]) {
+    termAdd(termId, f.text, f.type);
+    await sleep(70);
   }
   for (const line of pluginBanner(pluginId)) {
-    termAdd(line.text, line.type);
-    await sleep(30);
+    termAdd(termId, line.text, line.type);
+    await sleep(20);
   }
   for (const line of pluginShellBootLines(pluginId)) {
-    termAdd(line.text, line.type);
-    await sleep(40);
+    termAdd(termId, line.text, line.type);
+    await sleep(25);
   }
 }
 
-async function animateWork(pluginId, prefix = 'work') {
-  const steps = PLUGIN_ANIM[pluginId] || ['processing…', 'almost…', 'done'];
-  const totalMs = 4200 + Math.random() * 1200;
-  const stepMs = totalMs / (steps.length + 2);
-  termAdd(`┌─ ${prefix}`, 'blue');
+async function animateWork(termId, pluginId) {
+  const steps = PLUGIN_ANIM[pluginId] || ['processing…', 'done'];
+  const stepMs = (3800 + Math.random() * 1000) / steps.length;
+  termAdd(termId, `┌─ ${pluginId}`, 'blue');
   for (let i = 0; i < steps.length; i++) {
     const pct = Math.round(((i + 1) / steps.length) * 100);
     const filled = Math.round(pct / 5);
-    const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);
-    termAdd(`│ ${bar} ${String(pct).padStart(3)}%  ${steps[i]}`, 'muted');
+    termAdd(termId, `│ ${'█'.repeat(filled)}${'░'.repeat(20 - filled)} ${String(pct).padStart(3)}%  ${steps[i]}`, 'muted');
     await sleep(stepMs);
   }
-  termAdd('└─ complete', 'green');
-  await sleep(120);
+  termAdd(termId, '└─ complete', 'green');
+  await sleep(80);
 }
 
-async function enterPlugin(pluginId) {
+async function enterPlugin(termId, pluginId) {
+  const term = getTerm(termId);
+  if (!term) return;
   const p = getPlugin(pluginId) || PLUGINS.find(x => x.id === pluginId || x.name.toLowerCase() === pluginId.toLowerCase());
-  if (!p) { termAdd('Плагин не найден. plugins — список.', 'error'); return; }
-  if (!getInstalledPlugin(state.game, p.id)) { termAdd(`«${p.name}» не установлен. Купи в NULForge.`, 'error'); return; }
-  if (!PLUGIN_SHELLS[p.id]) { termAdd('У этого плагина нет интерактивной оболочки.', 'error'); return; }
-  if (state.terminalBusy) { termAdd('Подожди, модуль ещё грузится…', 'error'); return; }
-  state.terminalBusy = true;
+  if (!p) { termAdd(termId, 'Плагин не найден.', 'error'); return; }
+  if (!getInstalledPlugin(state.game, p.id)) { termAdd(termId, `«${p.name}» не установлен.`, 'error'); return; }
+  if (!PLUGIN_SHELLS[p.id]) { termAdd(termId, 'Нет shell.', 'error'); return; }
+  if (term.busy) { termAdd(termId, 'busy…', 'error'); return; }
+  term.busy = true;
   try {
-    termAdd(`$ run ${p.id}`, 'prompt');
-    await animatePluginBoot(p.id);
-    state.terminalPlugin = p.id;
-    if (state.opened.has('terminal')) {
-      // refresh prompt only
-      renderWindow('terminal');
-      scrollTerminalBottom(true);
-    }
+    await animatePluginBoot(termId, p.id);
+    term.plugin = p.id;
+    const win = document.querySelector(`[data-window="${termId}"]`);
+    win?.querySelector('.terminal-form .term-prompt') && (win.querySelector('.terminal-form .term-prompt').textContent = terminalPrompt(term));
+    const tool = win?.querySelector('.terminal-toolbar .term-mode');
+    if (tool) tool.textContent = p.id;
   } finally {
-    state.terminalBusy = false;
+    term.busy = false;
+    const input = document.querySelector(`[data-window="${termId}"] .terminal-form input`);
+    if (input) { input.disabled = false; input.focus({ preventScroll: true }); }
   }
 }
 
-function renderTerminal(g) {
-  if (!state.terminalLines.length) {
-    state.terminalLines = [
-      { text: 'NULLBYTE NBSHELL 1.0', type: 'blue' },
-      { text: 'run <plugin-id> — войти в модуль · plugins — список · help', type: 'muted' }
-    ];
-  }
-  const plug = state.terminalPlugin ? getPlugin(state.terminalPlugin) : null;
-  return `<div class="app-heading"><div><div class="eyebrow">NULLBYTE / COMMAND INTERFACE</div><h2>Terminal</h2><p>${plug ? `Модуль <b>${esc(plug.name)}</b> · exit` : 'Операции через плагины. Не системная оболочка.'}</p></div><span class="badge ${plug ? 'amber' : 'green'}">${plug ? 'PLUGIN' : 'SHELL'}</span></div>
-  <div class="terminal-shell"><div class="terminal-toolbar"><span>${esc(terminalPrompt())}</span><span>${plug ? esc(plug.id) : 'TTY-0'}${state.terminalBusy ? ' · BUSY' : ''}</span></div><div class="terminal-output" id="terminalOutput">${state.terminalLines.map(l => `<div class="${esc(l.type || '')}">${esc(l.text)}</div>`).join('')}</div><form class="terminal-input-row" id="terminalForm"><span>${esc(terminalPrompt())}</span><input name="command" autocomplete="off" autocapitalize="off" spellcheck="false" ${state.terminalBusy ? 'disabled' : ''} placeholder="${plug ? 'help | exit' : 'run site-analyzer'}" aria-label="Игровая команда"></form></div>`;
+function renderTerminal(g, termId) {
+  const term = getTerm(termId);
+  const plug = term.plugin ? getPlugin(term.plugin) : null;
+  return `<div class="term-root"><div class="terminal-shell terminal-shell-compact"><div class="terminal-toolbar"><span class="term-prompt-label">${esc(terminalPrompt(term))}</span><span class="term-mode">${plug ? esc(plug.id) : 'tty'}</span></div><div class="terminal-output">${term.lines.map(l => `<div class="${esc(l.type || '')}">${esc(l.text)}</div>`).join('')}</div><form class="terminal-input-row terminal-form" data-term="${esc(termId)}"><span class="term-prompt">${esc(terminalPrompt(term))}</span><input name="command" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${plug ? 'help | exit' : 'run site-analyzer'}" aria-label="Команда"></form></div></div>`;
 }
 
-async function runTerminalCommand(raw) {
+async function runTerminalCommand(termId, raw) {
+  const term = getTerm(termId);
+  if (!term) return;
   const cmd = String(raw || '').trim();
   if (!cmd) return;
-  if (state.terminalBusy) {
-    termAdd('busy — дождись окончания операции', 'error');
-    return;
-  }
+  termAdd(termId, `${terminalPrompt(term)} ${cmd}`, 'prompt');
+  term.scrollPin = true;
 
-  const prompt = terminalPrompt();
-  termAdd(`${prompt} ${cmd}`, 'prompt');
-  state.terminalScrollPin = true;
-
-  // Inside plugin session
-  if (state.terminalPlugin) {
+  if (term.plugin) {
     const lower = cmd.toLowerCase();
     if (lower === 'exit' || lower === 'quit') {
-      const result = runPluginShellCommand(state.game, state.terminalPlugin, 'exit');
-      for (const line of result.lines || []) termAdd(line.text, line.type || '');
-      state.terminalPlugin = null;
-      if (state.opened.has('terminal')) {
-        renderWindow('terminal');
-        scrollTerminalBottom(true);
-      }
+      const result = runPluginShellCommand(state.game, term.plugin, 'exit');
+      for (const line of result.lines || []) termAdd(termId, line.text, line.type || '');
+      term.plugin = null;
+      const win = document.querySelector(`[data-window="${termId}"]`);
+      if (win?.querySelector('.terminal-form .term-prompt')) win.querySelector('.terminal-form .term-prompt').textContent = terminalPrompt(term);
+      const tool = win?.querySelector('.terminal-toolbar .term-mode');
+      if (tool) tool.textContent = 'tty';
       return;
     }
-    if (lower === 'help' || lower === 'clear') {
-      const result = runPluginShellCommand(state.game, state.terminalPlugin, cmd);
-      if (lower === 'clear') state.terminalLines = [];
-      else for (const line of result.lines || []) termAdd(line.text, line.type || '');
-      if (state.opened.has('terminal')) {
-        renderWindow('terminal');
-        scrollTerminalBottom(true);
-      }
+    if (lower === 'help') {
+      for (const line of (runPluginShellCommand(state.game, term.plugin, 'help').lines || [])) termAdd(termId, line.text, line.type || '');
       return;
     }
-
-    // Animated work for real ops
-    state.terminalBusy = true;
+    if (lower === 'clear') {
+      term.lines = [];
+      const out = document.querySelector(`[data-window="${termId}"] .terminal-output`);
+      if (out) out.innerHTML = '';
+      return;
+    }
+    term.busy = true;
     try {
-      const isOp = !['help', 'exit', 'quit', 'clear'].includes(cmd.split(/\s+/)[0].toLowerCase());
-      if (isOp) await animateWork(state.terminalPlugin, state.terminalPlugin);
-      const result = runPluginShellCommand(state.game, state.terminalPlugin, cmd);
+      await animateWork(termId, term.plugin);
+      const result = runPluginShellCommand(state.game, term.plugin, cmd);
       for (const line of result.lines || []) {
-        termAdd(line.text, line.type || '');
-        await sleep(25);
+        termAdd(termId, line.text, line.type || '');
+        await sleep(20);
       }
-      if (result.exit) state.terminalPlugin = null;
+      if (result.exit) term.plugin = null;
       if (result.progressUpdated || result.exportFile) scheduleSave();
-      if (result.exportFile) toast('Файл результата готов → N-Mail', 'success');
-      if (state.opened.has('terminal')) {
-        // Keep lines; only refresh prompt chrome if session ended
-        if (result.exit) renderWindow('terminal');
-        else {
-          // re-enable input after busy
-          const input = document.querySelector('#terminalForm input');
-          if (input) { input.disabled = false; input.focus({ preventScroll: true }); }
-          const tb = document.querySelector('.terminal-toolbar span:last-child');
-        }
-        scrollTerminalBottom(true);
-      }
+      if (result.exportFile) toast('Файл готов → N-Mail', 'success');
       if (result.progressUpdated) refreshOpenApps(['browser', 'mail', 'blackwire', 'computer']);
     } finally {
-      state.terminalBusy = false;
-      const input = document.querySelector('#terminalForm input');
-      if (input) input.disabled = false;
+      term.busy = false;
+      const input = document.querySelector(`[data-window="${termId}"] .terminal-form input`);
+      if (input) { input.disabled = false; input.focus({ preventScroll: true }); }
     }
     return;
   }
@@ -685,54 +705,35 @@ async function runTerminalCommand(raw) {
   const lower = cmd.toLowerCase();
   const parts = cmd.split(/\s+/);
   const one = (parts[0] || '').toLowerCase();
-
   if (lower === 'help') {
-    termAdd('help | clear | info | whoami | status | plugins | plugin info <id>', 'blue');
-    termAdd('run <plugin> | use <plugin> — оболочка модуля', 'blue');
-    termAdd('ls | cat <file> | mission list | map', 'blue');
+    termAdd(termId, 'help | clear | plugins | run <plugin> | mission list', 'blue');
   } else if (lower === 'clear') {
-    state.terminalLines = [];
-    if (state.opened.has('terminal')) renderWindow('terminal');
-  } else if (lower === 'whoami') termAdd(state.game.player.nickname);
-  else if (lower === 'date') termAdd(new Date().toString());
-  else if (lower === 'uptime') termAdd(`${Math.floor((Date.now() - state.game.computer.uptimeStartedAt) / 60000)} virtual minutes`);
-  else if (lower === 'info') {
-    const g = state.game, ram = HARDWARE.ram.find(x => x.level === g.computer.ram), cpu = HARDWARE.cpu.find(x => x.level === g.computer.cpu), storage = getHardwareUsage(g);
-    termAdd(`OPERATOR: ${g.player.nickname}\nCPU: ${cpu.name}\nRAM: ${ram.gb} GB\nSTORAGE: ${fmt(storage.used / 1024)} / ${storage.total / 1024} GB`);
-  } else if (lower === 'status') {
-    termAdd(`LEVEL ${state.game.player.level} · XP ${state.game.player.xp} · PLUGINS ${state.game.computer.installedPlugins.length}`);
-  } else if (lower === 'plugins' || lower === 'pkg list') {
-    termAdd(PLUGINS.map(p => {
-      const on = state.game.computer.installedPlugins.includes(p.id);
-      const shell = PLUGIN_SHELLS[p.id] ? ' [shell]' : '';
-      return `${on ? '[on]' : '[  ]'} ${p.id}${shell} — ${p.name}`;
-    }).join('\n'));
+    term.lines = [];
+    const out = document.querySelector(`[data-window="${termId}"] .terminal-output`);
+    if (out) out.innerHTML = '';
+  } else if (lower === 'whoami') termAdd(termId, state.game.player.nickname);
+  else if (lower === 'status' || lower === 'info') termAdd(termId, `LEVEL ${state.game.player.level} · XP ${state.game.player.xp}`);
+  else if (lower === 'plugins' || lower === 'pkg list') {
+    termAdd(termId, PLUGINS.map(p => `${state.game.computer.installedPlugins.includes(p.id)?'[on]':'[  ]'} ${p.id}${PLUGIN_SHELLS[p.id]?' [shell]':''}`).join('\n'));
   } else if (lower.startsWith('plugin info ')) {
     const q = cmd.slice(12).trim().toLowerCase();
     const p = PLUGINS.find(x => x.id === q || x.name.toLowerCase() === q);
-    if (!p) termAdd('Плагин не найден.', 'error');
+    if (!p) termAdd(termId, 'Не найден.', 'error');
     else {
-      const shell = PLUGIN_SHELLS[p.id];
-      termAdd(`${p.name}\nID: ${p.id}\n${p.description}`);
-      if (shell) termAdd(`SHELL: ${shell.help}`, 'blue');
+      termAdd(termId, `${p.name}\n${p.description}`);
+      if (PLUGIN_SHELLS[p.id]) termAdd(termId, `SHELL: ${PLUGIN_SHELLS[p.id].help}`, 'blue');
     }
-  } else if (one === 'run' || one === 'use') {
-    await enterPlugin(parts.slice(1).join(' ').trim());
-  } else if (lower === 'ls') {
+  } else if (one === 'run' || one === 'use') await enterPlugin(termId, parts.slice(1).join(' ').trim());
+  else if (lower === 'ls') {
     const files = [...state.game.computer.files, ...state.game.editor.files];
-    termAdd(files.length ? files.map(f => `${f.name} (${f.size} KB)`).join('\n') : 'Пусто.');
+    termAdd(termId, files.length ? files.map(f => `${f.name} (${f.size} KB)`).join('\n') : 'Пусто.');
   } else if (lower.startsWith('cat ')) {
-    const name = cmd.slice(4).trim();
-    const f = [...state.game.computer.files, ...state.game.editor.files].find(x => x.name === name);
-    termAdd(f ? String(f.content).slice(0, 1800) : 'Файл не найден.', f ? '' : 'error');
+    const f = [...state.game.computer.files, ...state.game.editor.files].find(x => x.name === cmd.slice(4).trim());
+    termAdd(termId, f ? String(f.content).slice(0, 1800) : 'Нет файла.', f ? '' : 'error');
   } else if (lower === 'mission list') {
-    termAdd(state.game.missions.items.filter(m => ['accepted', 'submitted', 'available'].includes(m.status)).map(m => `${m.id} | ${m.status} | ${m.title} | ${m.target}`).join('\n') || 'Нет контрактов.');
-  } else if (lower === 'map') termAdd(LOCATIONS.map(l => `${l.name} / ${l.city}`).join('\n'));
-  else termAdd('Команда не зарегистрирована. help', 'error');
-
-  if (state.opened.has('terminal') && one !== 'run' && one !== 'use' && lower !== 'clear') {
-    scrollTerminalBottom(true);
-  }
+    termAdd(termId, state.game.missions.items.filter(m => ['accepted','submitted','available'].includes(m.status)).map(m => `${m.id} | ${m.status} | ${m.title}`).join('\n') || 'Нет.');
+  } else if (lower === 'map') termAdd(termId, LOCATIONS.map(l => `${l.name}`).join('\n'));
+  else termAdd(termId, 'unknown — help', 'error');
 }
 
 function renderHelp() {
@@ -982,17 +983,19 @@ document.addEventListener('submit',event=>{
     event.preventDefault();
     navigateBrowser(form.elements.address?.value||'');
   }
-  if(form.id==='terminalForm'){
+  if(form.classList?.contains('terminal-form')){
     event.preventDefault();
-    if(state.terminalBusy)return;
+    const termId=form.getAttribute('data-term')||form.closest('[data-window]')?.dataset.window;
+    if(!termId)return;
     const input=form.elements.command;
     const val=input?.value||'';
+    if(!val.trim())return;
     if(input)input.value='';
-    runTerminalCommand(val).then(()=>{
+    runTerminalCommand(termId, val).then(()=>{
       queueMicrotask(()=>{
-        const i=document.querySelector('#terminalForm input');
-        if(i&&!state.terminalBusy)i.focus({preventScroll:true});
-        scrollTerminalBottom(true);
+        const i=document.querySelector(`[data-window="${termId}"] .terminal-form input`);
+        if(i) i.focus({preventScroll:true});
+        scrollTerminalBottom(termId, true);
       });
     });
   }

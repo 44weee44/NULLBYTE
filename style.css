@@ -81,3 +81,18 @@ code{font-family:var(--mono);color:#c5d3dc}
 .terminal-output .muted{color:#6b8294}
 .terminal-output .prompt{color:#9eb0bd}
 .terminal-output{overflow-y:auto;overscroll-behavior:contain}
+
+.app-window-terminal{min-width:300px;min-height:200px}
+.app-window-terminal .window-content{padding:0;display:flex;flex-direction:column;background:#070d12}
+.app-window-terminal .window-path{display:none}
+.term-root{height:100%;display:flex;flex-direction:column;min-height:0}
+.terminal-shell-compact{flex:1;display:flex;flex-direction:column;min-height:0;border:none;border-radius:0;margin:0;background:#070d12}
+.terminal-shell-compact .terminal-toolbar{padding:6px 10px;border-bottom:1px solid #1a2a36;font-size:9px}
+.terminal-shell-compact .terminal-output{
+  flex:1;min-height:0;overflow:auto;padding:8px 10px;
+  user-select:text;-webkit-user-select:text;cursor:text;
+  font-size:10px;line-height:1.45;
+}
+.terminal-shell-compact .terminal-form{padding:6px 10px;border-top:1px solid #1a2a36;gap:6px}
+.terminal-shell-compact .terminal-form input{font-size:11px}
+.terminal-output div{user-select:text;-webkit-user-select:text}

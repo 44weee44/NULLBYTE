@@ -464,13 +464,18 @@ export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = 
     if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
     const key = issueOpKey(state, 'analyze', site.id);
     touchCooldown(state, pluginId);
-    lines.push({ text: `[boot] probing ${site.domain} …`, type: 'muted' });
-    lines.push({ text: `TITLE: ${site.title}`, type: '' });
-    lines.push({ text: `KIND: ${site.kind} · SEC: ${site.security}/5 · REGION: ${site.region}`, type: '' });
-    lines.push({ text: `ARTIFACT_HINT: ${site.artifact}`, type: 'blue' });
-    lines.push({ text: `NOTE: ${site.description}`, type: 'muted' });
-    lines.push({ text: `SIGNATURE: ${key.token}`, type: 'green' });
-    lines.push({ text: 'Сигнатура одноразовая. Нужна в Artifact Decoder (decode <sig>).', type: 'muted' });
+    lines.push({ text: `── report ${site.domain} ──`, type: 'blue' });
+    lines.push({ text: `host.title      ${site.title}`, type: '' });
+    lines.push({ text: `host.kind       ${site.kind}`, type: '' });
+    lines.push({ text: `host.security   ${site.security}/5`, type: '' });
+    lines.push({ text: `host.region     ${site.region} / ${site.district || '—'}`, type: '' });
+    lines.push({ text: `http.banner     NULLBYTE/${site.kind}-surface`, type: 'muted' });
+    lines.push({ text: `open.ports      80, 443, ${4000 + site.security * 17}`, type: 'muted' });
+    lines.push({ text: `marker.found    ${site.artifact}`, type: '' });
+    lines.push({ text: `noise.table     x${12 + site.security * 3} abstract entries`, type: 'muted' });
+    lines.push({ text: `note            ${site.description}`, type: 'muted' });
+    lines.push({ text: `EXTRACT >> SIGNATURE = ${key.token}`, type: 'green' });
+    lines.push({ text: 'Передай SIGNATURE в artifact-decoder: decode <SIGNATURE>', type: 'muted' });
     return { ok: true, lines, key: key.token, progressUpdated: true };
   }
 
@@ -487,9 +492,12 @@ export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = 
     key.used = true;
     const next = issueOpKey(state, 'decode', site.id);
     touchCooldown(state, pluginId);
-    lines.push({ text: `decoding artifact ${site.artifact} …`, type: 'muted' });
-    lines.push({ text: `DECODED: условная запись связана с ${site.data}`, type: '' });
-    lines.push({ text: `ARTIFACT_ID: ${next.token}`, type: 'green' });
+    lines.push({ text: `── decode ${site.artifact} ──`, type: 'blue' });
+    lines.push({ text: `cipher.profile  abstract-poly/${site.security}`, type: 'muted' });
+    lines.push({ text: `block.align     ok`, type: 'muted' });
+    lines.push({ text: `payload.hint    ${String(site.data).slice(0, 64)}`, type: '' });
+    lines.push({ text: `EXTRACT >> ARTIFACT_ID = ${next.token}`, type: 'green' });
+    lines.push({ text: 'Дальше: node-radar → discover <ARTIFACT_ID>', type: 'muted' });
     return { ok: true, lines, key: next.token, progressUpdated: true };
   }
 
@@ -505,9 +513,12 @@ export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = 
     key.used = true;
     const next = issueOpKey(state, 'node', site.id);
     touchCooldown(state, pluginId);
-    lines.push({ text: `scanning virtual subnet near ${site.domain} …`, type: 'muted' });
-    lines.push({ text: `NODE: host-${site.id}.sim.null · lag ${12 + site.security * 3}ms`, type: '' });
-    lines.push({ text: `HOST_HANDLE: ${next.token}`, type: 'green' });
+    lines.push({ text: `── subnet scan ${site.domain} ──`, type: 'blue' });
+    lines.push({ text: `candidates      3 virtual hosts`, type: 'muted' });
+    lines.push({ text: `best.rtt        ${12 + site.security * 3}ms`, type: 'muted' });
+    lines.push({ text: `host.label      host-${site.id}.sim.null`, type: '' });
+    lines.push({ text: `EXTRACT >> HOST_HANDLE = ${next.token}`, type: 'green' });
+    lines.push({ text: 'Дальше: weakness-lab → probe <HOST_HANDLE>', type: 'muted' });
     return { ok: true, lines, key: next.token, progressUpdated: true };
   }
 
@@ -523,9 +534,12 @@ export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = 
     key.used = true;
     const next = issueOpKey(state, 'weakness', site.id);
     touchCooldown(state, pluginId);
-    lines.push({ text: 'building defense model …', type: 'muted' });
-    lines.push({ text: `MODEL: abstract surface ${site.security} · boost ${site.defenseBoost}`, type: '' });
-    lines.push({ text: `VECTOR_ID: ${next.token}`, type: 'green' });
+    lines.push({ text: `── weakness model ──`, type: 'blue' });
+    lines.push({ text: `surface.score   ${site.security}.0`, type: 'muted' });
+    lines.push({ text: `defense.boost   ${site.defenseBoost}`, type: 'muted' });
+    lines.push({ text: `gap.class       abstract-misconfig`, type: '' });
+    lines.push({ text: `EXTRACT >> VECTOR_ID = ${next.token}`, type: 'green' });
+    lines.push({ text: 'Дальше: sim-exploit → simulate <VECTOR_ID>', type: 'muted' });
     return { ok: true, lines, key: next.token, progressUpdated: true };
   }
 
@@ -546,10 +560,12 @@ export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = 
     }
     const next = issueOpKey(state, 'access', site.id);
     touchCooldown(state, pluginId);
-    lines.push({ text: 'running sandbox access check …', type: 'muted' });
-    lines.push({ text: r.message, type: 'green' });
-    lines.push({ text: `DATA_SAMPLE: ${site.data}`, type: '' });
-    lines.push({ text: `SESSION_TOKEN: ${next.token}`, type: 'green' });
+    lines.push({ text: `── sandbox access ──`, type: 'blue' });
+    lines.push({ text: r.message, type: '' });
+    lines.push({ text: `policy.gate     passed`, type: 'muted' });
+    lines.push({ text: `data.sample     ${String(site.data).slice(0, 72)}`, type: '' });
+    lines.push({ text: `EXTRACT >> SESSION_TOKEN = ${next.token}`, type: 'green' });
+    lines.push({ text: 'Дальше: data-exporter → export <SESSION_TOKEN>', type: 'muted' });
     return { ok: true, lines, key: next.token, progressUpdated: true };
   }
 

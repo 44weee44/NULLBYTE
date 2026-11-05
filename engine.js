@@ -1,4 +1,5 @@
 /* NULLBYTE game engine. Fictional, deterministic client-side simulation only. */
+import { createEmptyIntel, seedIntelFromSites, runWebRecon, migrateIntel, listIntelSummary, ensureIntel, runServerAnalysis, runWeaknessScan, runSimExploit, runUserSearch, runMobileIdentify, runMobileAnalysis, modifyVirtualUser, runDbExport, writeIntelFile } from './cyber.js';
 export const SAVE_VERSION = 1;
 export const BALANCE = {
   creditsStart: 650,
@@ -14,7 +15,7 @@ export const BALANCE = {
 };
 
 export const PLUGINS = [
-  { id:'site-analyzer', name:'Site Analyzer', category:'Анализ сайтов', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:120, cooldown:0, description:'Читает параметры вымышленных сайтов и артефактов.', effect:'Открывает первичный анализ игровой цели.', starter:true },
+  { id:'site-analyzer', name:'Site Analyzer', category:'Анализ сайтов', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:120, cooldown:0, description:'WEB RECON: DNS, fingerprint, surface, артефакты разведки.', effect:'Карта домена и SIGNATURE для pipeline.', starter:true },
   { id:'artifact-decoder', name:'Artifact Decoder', category:'Расшифровка', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:180, cooldown:0, description:'Преобразует условный игровой артефакт в подсказку.', effect:'Открывает шаг декодирования.', starter:true },
   { id:'node-radar', name:'Node Radar', category:'Обнаружение узлов', version:'1.1.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:260, cooldown:5000, description:'Находит симулируемый узел цели в личном мире.', effect:'Показывает игровой host-node.', starter:true },
   { id:'weakness-lab', name:'Weakness Lab', category:'Поиск игровых слабостей', version:'1.2.0', price:0, requiredLevel:1, minOs:1, ram:2, storage:420, cooldown:7000, description:'Проверяет абстрактную модель защиты цели.', effect:'Открывает условную слабость.', starter:true },
@@ -82,7 +83,7 @@ export function idempotencyKey(prefix='evt') { return `${prefix}-${Date.now().to
 
 export function createInitialState(tgUser=null) {
   const now=Date.now();
-  return {
+  const state0 = {
     version:SAVE_VERSION,
     meta:{createdAt:now,updatedAt:now,seed:`nb-${now.toString(36)}`,migratedFrom:null},
     player:{nickname:'',telegramId:tgUser?.id ? String(tgUser.id) : '',level:1,xp:0,reputation:0,contractsCompleted:0,totalEarned:0},
@@ -100,9 +101,12 @@ export function createInitialState(tgUser=null) {
     editor:{files:[]},
     cooldowns:{},
     ops:{keys:[]},
+    intel:null,
     processedEvents:[],
     stats:{operations:0,successfulOperations:0,failedOperations:0,bytesExported:0}
   };
+  state0.intel = seedIntelFromSites(state0.world.sites, createEmptyIntel());
+  return state0;
 }
 
 function finite(value) { const n=Number(value); return Number.isFinite(n)?n:0; }
@@ -134,6 +138,7 @@ export function migrateSave(raw,tgUser=null) {
   out.editor={...fresh.editor,...(raw.editor||{})};
   out.cooldowns={...fresh.cooldowns,...(raw.cooldowns||{})};
   out.stats={...fresh.stats,...(raw.stats||{})};
+  out.intel=migrateIntel(raw.intel, out.world?.sites||fresh.world.sites);
   out.ops={keys:Array.isArray(raw.ops?.keys)?raw.ops.keys.filter(k=>k&&typeof k==='object').slice(-40).map(k=>({id:String(k.id||'').slice(0,64),stage:String(k.stage||''),siteId:String(k.siteId||''),token:String(k.token||'').slice(0,80),createdAt:finite(k.createdAt),used:Boolean(k.used)})):[ ]};
   for (const key of ['files','installedPlugins']) if (!Array.isArray(out.computer[key])) out.computer[key]=fresh.computer[key];
   for (const key of ['transactions']) if (!Array.isArray(out.economy[key])) out.economy[key]=fresh.economy[key];
@@ -276,6 +281,17 @@ export function getSiteProgress(state,siteId) {
 
 /* —— Terminal plugin sessions / one-time operation keys —— */
 export const PLUGIN_SHELLS = {
+  'map-scanner': {
+    boot: 'Mobile / Geo Link v1.0 — идентификация устройств.',
+    help: 'phone <USER_ID|PHONE_ID> | forensics <PHONE_ID> | help | exit',
+    commands: ['phone', 'identify', 'forensics', 'analyze', 'mobile', 'help', 'exit']
+  },
+  'site-editor': {
+    boot: 'Site Editor v1.0 — изменение виртуальных записей (нужен access≥user).',
+    help: 'set <USER_ID> <balance|reputation|accountStatus> <value> | help | exit',
+    commands: ['set', 'modify', 'help', 'exit']
+  },
+
   'site-analyzer': {
     boot: 'Site Analyzer v1.0 — разбор вымышленной цели.',
     help: 'analyze <domain> | scan <domain> | help | exit',
@@ -288,17 +304,17 @@ export const PLUGIN_SHELLS = {
   },
   'node-radar': {
     boot: 'Node Radar v1.1 — поиск виртуального host-node.',
-    help: 'discover <key> | find <key> | help | exit',
+    help: 'discover <ARTIFACT_ID> | scan <host|domain> | help | exit',
     commands: ['discover', 'find', 'help', 'exit']
   },
   'weakness-lab': {
     boot: 'Weakness Lab v1.2 — модель защиты цели.',
-    help: 'probe <key> | weakness <key> | help | exit',
+    help: 'probe <NODE|server> | scan <server> | help | exit',
     commands: ['probe', 'weakness', 'help', 'exit']
   },
   'sim-exploit': {
     boot: 'Sim Exploit v2.0 — безопасная симуляция доступа.',
-    help: 'simulate <key> | exploit <key> | help | exit',
+    help: 'simulate <VECTOR|WEAKNESS_KEY> | use <vuln_id> | help | exit',
     commands: ['simulate', 'exploit', 'help', 'exit']
   },
   'data-exporter': {
@@ -307,9 +323,9 @@ export const PLUGIN_SHELLS = {
     commands: ['export', 'pack', 'help', 'exit']
   },
   'db-reader': {
-    boot: 'Virtual DB Reader v1.0 — чтение виртуальных записей.',
-    help: 'read <key> | query <key> | help | exit',
-    commands: ['read', 'query', 'help', 'exit']
+    boot: 'Virtual DB Reader v1.0 — пользователи и виртуальные записи.',
+    help: 'search <q> | export <domain> | read <SESSION> | help | exit',
+    commands: ['search', 'export', 'read', 'query', 'help', 'exit']
   }
 };
 
@@ -455,35 +471,25 @@ export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = 
 
   // —— site-analyzer ——
   if (pluginId === 'site-analyzer' && (cmd === 'analyze' || cmd === 'scan')) {
-    const site = resolveSiteRef(state, arg1);
-    if (!site) return { ok: false, lines: [{ text: 'Цель не найдена. Укажи домен .null (скопируй из Browser).', type: 'error' }] };
-    if (site.recoveryAt > Date.now()) {
-      return { ok: false, lines: [{ text: `Цель восстанавливается ещё ~${Math.ceil((site.recoveryAt - Date.now()) / 60000)} мин.`, type: 'error' }] };
-    }
+    const recon = runWebRecon(state, arg1);
+    if (!recon.ok) return { ok: false, lines: recon.lines };
+    const site = getSite(state, recon.siteId);
+    if (!site) return { ok: false, lines: [{ text: 'SITE_MISSING', type: 'error' }] };
+    if (site.recoveryAt > Date.now()) return { ok: false, lines: [{ text: `Цель восстанавливается ~${Math.ceil((site.recoveryAt-Date.now())/60000)} мин.`, type: 'error' }] };
     const r = operateSite(state, site.id, 'analyze', null);
     if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
-    const key = issueOpKey(state, 'analyze', site.id);
+    ensureOps(state);
+    for (const k of state.ops.keys) if (k.stage === 'analyze' && k.siteId === site.id && !k.used) k.used = true;
+    state.ops.keys.push({ id: idempotencyKey('key'), stage: 'analyze', siteId: site.id, token: recon.signature, createdAt: Date.now(), used: false });
+    state.ops.keys = state.ops.keys.slice(-40);
     touchCooldown(state, pluginId);
-    lines.push({ text: `── report ${site.domain} ──`, type: 'blue' });
-    lines.push({ text: `host.title      ${site.title}`, type: '' });
-    lines.push({ text: `host.kind       ${site.kind}`, type: '' });
-    lines.push({ text: `host.security   ${site.security}/5`, type: '' });
-    lines.push({ text: `host.region     ${site.region} / ${site.district || '—'}`, type: '' });
-    lines.push({ text: `http.banner     NULLBYTE/${site.kind}-surface`, type: 'muted' });
-    lines.push({ text: `open.ports      80, 443, ${4000 + site.security * 17}`, type: 'muted' });
-    lines.push({ text: `marker.found    ${site.artifact}`, type: '' });
-    lines.push({ text: `noise.table     x${12 + site.security * 3} abstract entries`, type: 'muted' });
-    lines.push({ text: `note            ${site.description}`, type: 'muted' });
-    lines.push({ text: `EXTRACT >> SIGNATURE = ${key.token}`, type: 'green' });
-    lines.push({ text: 'Передай SIGNATURE в artifact-decoder: decode <SIGNATURE>', type: 'muted' });
-    return { ok: true, lines, key: key.token, progressUpdated: true };
+    return { ok: true, lines: recon.lines, key: recon.signature, progressUpdated: true };
   }
 
-  // —— artifact-decoder ——
   if (pluginId === 'artifact-decoder' && cmd === 'decode') {
     const key = findOpKey(state, arg1);
     if (!key || key.stage !== 'analyze' || key.used) {
-      return { ok: false, lines: [{ text: 'Нужна свежая SIGNATURE от Site Analyzer (формат SIG/…).', type: 'error' }] };
+      return { ok: false, lines: [{ text: 'Нужна свежая SIGNATURE от Site Analyzer (SIG/…).', type: 'error' }] };
     }
     const site = getSite(state, key.siteId);
     if (!site) return { ok: false, lines: [{ text: 'Цель ключа исчезла.', type: 'error' }] };
@@ -492,138 +498,186 @@ export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = 
     key.used = true;
     const next = issueOpKey(state, 'decode', site.id);
     touchCooldown(state, pluginId);
-    lines.push({ text: `── decode ${site.artifact} ──`, type: 'blue' });
-    lines.push({ text: `cipher.profile  abstract-poly/${site.security}`, type: 'muted' });
-    lines.push({ text: `block.align     ok`, type: 'muted' });
-    lines.push({ text: `payload.hint    ${String(site.data).slice(0, 64)}`, type: '' });
-    lines.push({ text: `EXTRACT >> ARTIFACT_ID = ${next.token}`, type: 'green' });
-    lines.push({ text: 'Дальше: node-radar → discover <ARTIFACT_ID>', type: 'muted' });
+    ensureIntel(state);
+    const lines = [
+      { text: 'NULLBYTE // ARTIFACT DECODER', type: 'blue' },
+      { text: `Artifact marker: ${site.artifact}`, type: '' },
+      { text: `Payload hint: ${String(site.data).slice(0, 80)}`, type: '' },
+      { text: `EXTRACT >> ARTIFACT_ID = ${next.token}`, type: 'green' },
+      { text: 'Next: node-radar → discover <ARTIFACT_ID> | scan <host>', type: 'muted' }
+    ];
     return { ok: true, lines, key: next.token, progressUpdated: true };
   }
 
-  // —— node-radar ——
-  if (pluginId === 'node-radar' && (cmd === 'discover' || cmd === 'find')) {
+  if (pluginId === 'node-radar' && (cmd === 'discover' || cmd === 'find' || cmd === 'scan')) {
+    // Prefer server analysis from intel; still advance pipeline if key valid
+    let siteId = null;
+    let lines = [];
     const key = findOpKey(state, arg1);
-    if (!key || key.stage !== 'decode' || key.used) {
-      return { ok: false, lines: [{ text: 'Нужен свежий ARTIFACT_ID от Artifact Decoder (формат ART-ID:…).', type: 'error' }] };
-    }
-    const site = getSite(state, key.siteId);
-    const r = operateSite(state, site.id, 'node', null);
-    if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
-    key.used = true;
-    const next = issueOpKey(state, 'node', site.id);
-    touchCooldown(state, pluginId);
-    lines.push({ text: `── subnet scan ${site.domain} ──`, type: 'blue' });
-    lines.push({ text: `candidates      3 virtual hosts`, type: 'muted' });
-    lines.push({ text: `best.rtt        ${12 + site.security * 3}ms`, type: 'muted' });
-    lines.push({ text: `host.label      host-${site.id}.sim.null`, type: '' });
-    lines.push({ text: `EXTRACT >> HOST_HANDLE = ${next.token}`, type: 'green' });
-    lines.push({ text: 'Дальше: weakness-lab → probe <HOST_HANDLE>', type: 'muted' });
-    return { ok: true, lines, key: next.token, progressUpdated: true };
-  }
-
-  // —— weakness-lab ——
-  if (pluginId === 'weakness-lab' && (cmd === 'probe' || cmd === 'weakness')) {
-    const key = findOpKey(state, arg1);
-    if (!key || key.stage !== 'node' || key.used) {
-      return { ok: false, lines: [{ text: 'Нужен HOST_HANDLE от Node Radar (формат HOST/…).', type: 'error' }] };
-    }
-    const site = getSite(state, key.siteId);
-    const r = operateSite(state, site.id, 'weakness', null);
-    if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
-    key.used = true;
-    const next = issueOpKey(state, 'weakness', site.id);
-    touchCooldown(state, pluginId);
-    lines.push({ text: `── weakness model ──`, type: 'blue' });
-    lines.push({ text: `surface.score   ${site.security}.0`, type: 'muted' });
-    lines.push({ text: `defense.boost   ${site.defenseBoost}`, type: 'muted' });
-    lines.push({ text: `gap.class       abstract-misconfig`, type: '' });
-    lines.push({ text: `EXTRACT >> VECTOR_ID = ${next.token}`, type: 'green' });
-    lines.push({ text: 'Дальше: sim-exploit → simulate <VECTOR_ID>', type: 'muted' });
-    return { ok: true, lines, key: next.token, progressUpdated: true };
-  }
-
-  // —— sim-exploit ——
-  if (pluginId === 'sim-exploit' && (cmd === 'simulate' || cmd === 'exploit')) {
-    const key = findOpKey(state, arg1);
-    if (!key || key.stage !== 'weakness' || key.used) {
-      return { ok: false, lines: [{ text: 'Нужен VECTOR_ID от Weakness Lab (формат VEC#…).', type: 'error' }] };
-    }
-    const site = getSite(state, key.siteId);
-    const mission = state.missions.items.find(m => m.status === 'accepted' && m.target === site.id);
-    const r = operateSite(state, site.id, 'exploit', mission?.id || null);
-    if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
-    key.used = true;
-    if (r.success === false) {
+    if (key && key.stage === 'decode' && !key.used) {
+      const site = getSite(state, key.siteId);
+      const r = operateSite(state, site.id, 'node', null);
+      if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+      key.used = true;
+      siteId = site.id;
+      const next = issueOpKey(state, 'node', site.id);
+      const srv = runServerAnalysis(state, site.id);
+      lines = (srv.lines || []).concat([
+        { text: `EXTRACT >> NODE_KEY = ${next.token}`, type: 'green' }
+      ]);
       touchCooldown(state, pluginId);
-      return { ok: true, lines: [{ text: r.message, type: 'error' }, { text: 'Прогресс по цели сброшен. Начни цепочку заново.', type: 'muted' }], progressUpdated: true };
+      return { ok: true, lines, key: next.token, progressUpdated: true, siteId };
     }
-    const next = issueOpKey(state, 'access', site.id);
+    // Free scan by domain/host without key still gives intel but not pipeline
+    const srv = runServerAnalysis(state, arg1);
+    if (!srv.ok) return srv;
     touchCooldown(state, pluginId);
-    lines.push({ text: `── sandbox access ──`, type: 'blue' });
-    lines.push({ text: r.message, type: '' });
-    lines.push({ text: `policy.gate     passed`, type: 'muted' });
-    lines.push({ text: `data.sample     ${String(site.data).slice(0, 72)}`, type: '' });
-    lines.push({ text: `EXTRACT >> SESSION_TOKEN = ${next.token}`, type: 'green' });
-    lines.push({ text: 'Дальше: data-exporter → export <SESSION_TOKEN>', type: 'muted' });
-    return { ok: true, lines, key: next.token, progressUpdated: true };
+    return { ok: true, lines: srv.lines, progressUpdated: true, siteId: srv.siteId };
   }
 
-  // —— db-reader ——
-  if (pluginId === 'db-reader' && (cmd === 'read' || cmd === 'query')) {
+  if (pluginId === 'weakness-lab' && (cmd === 'probe' || cmd === 'weakness' || cmd === 'scan')) {
     const key = findOpKey(state, arg1);
-    if (!key || key.stage !== 'access' || key.used) {
-      return { ok: false, lines: [{ text: 'Нужен SESSION_TOKEN после Sim Exploit (формат SESSION=…).', type: 'error' }] };
+    let siteId = null;
+    if (key && key.stage === 'node' && !key.used) {
+      const site = getSite(state, key.siteId);
+      const r = operateSite(state, site.id, 'weakness', null);
+      if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+      key.used = true;
+      siteId = site.id;
+      const next = issueOpKey(state, 'weakness', site.id);
+      const scan = runWeaknessScan(state, site.id);
+      const lines = (scan.lines || []).concat([
+        { text: `EXTRACT >> WEAKNESS_PIPELINE = ${next.token}`, type: 'green' }
+      ]);
+      touchCooldown(state, pluginId);
+      return { ok: true, lines, key: next.token, progressUpdated: true, vectorId: scan.vectorId };
     }
-    const site = getSite(state, key.siteId);
-    if (site.kind !== 'database') {
-      return { ok: false, lines: [{ text: 'Эта цель не содержит виртуальную БД.', type: 'error' }] };
-    }
-    key.used = true;
-    const r = operateSite(state, site.id, 'database', null);
-    if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
-    const next = issueOpKey(state, 'database', site.id);
+    const scan = runWeaknessScan(state, arg1);
+    if (!scan.ok) return scan;
     touchCooldown(state, pluginId);
-    lines.push({ text: `READ virtual-records @ ${site.domain}`, type: 'muted' });
-    lines.push({ text: `ROW: ${site.data}`, type: '' });
-    lines.push({ text: `ROW_REF: ${next.token}`, type: 'green' });
-    return { ok: true, lines, key: next.token, progressUpdated: true };
+    return { ok: true, lines: scan.lines, progressUpdated: true, vectorId: scan.vectorId };
   }
 
-  // —— data-exporter ——
+  if (pluginId === 'sim-exploit' && (cmd === 'simulate' || cmd === 'exploit' || cmd === 'use')) {
+    const key = findOpKey(state, arg1);
+    const mission = state.missions.items.find(m => m.status === 'accepted' && (key ? m.target === key.siteId : true));
+    if (key && key.stage === 'weakness' && !key.used) {
+      const site = getSite(state, key.siteId);
+      const r = operateSite(state, site.id, 'exploit', mission?.id || null);
+      if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+      key.used = true;
+      if (r.success === false) {
+        touchCooldown(state, pluginId);
+        return { ok: true, lines: [{ text: r.message, type: 'error' }], progressUpdated: true };
+      }
+      const ex = runSimExploit(state, site.id, mission?.id || null);
+      const next = issueOpKey(state, 'access', site.id);
+      // Prefer session from intel
+      const session = ex.session || next.token;
+      // align pipeline key to session
+      next.token = session;
+      touchCooldown(state, pluginId);
+      const lines = (ex.lines || []).concat([{ text: `Pipeline SESSION bound.`, type: 'muted' }]);
+      return { ok: true, lines, key: session, progressUpdated: true, success: ex.success !== false };
+    }
+    // Direct vector id exploit
+    const ex = runSimExploit(state, arg1, mission?.id || null);
+    touchCooldown(state, pluginId);
+    return { ok: true, lines: ex.lines, key: ex.session, progressUpdated: true, success: ex.success !== false, siteId: ex.siteId };
+  }
+
+  if (pluginId === 'db-reader' && (cmd === 'read' || cmd === 'query' || cmd === 'search' || cmd === 'export')) {
+    if (cmd === 'search') {
+      const r = runUserSearch(state, parts.slice(1).join(' '));
+      touchCooldown(state, pluginId);
+      return { ok: r.ok, lines: r.lines, progressUpdated: true };
+    }
+    if (cmd === 'export') {
+      const site = resolveSiteRef(state, arg1) || getSite(state, arg1);
+      if (!site) return { ok: false, lines: [{ text: 'Укажи site id / domain', type: 'error' }] };
+      const r = runDbExport(state, site.id);
+      // pipeline database flag if access
+      const p = getSiteProgress(state, site.id);
+      if (p.access) { p.database = true; }
+      touchCooldown(state, pluginId);
+      return { ok: r.ok, lines: r.lines, progressUpdated: true };
+    }
+    // read with access key
+    const key = findOpKey(state, arg1);
+    if (key && key.stage === 'access' && !key.used) {
+      const site = getSite(state, key.siteId);
+      if (site?.kind === 'database') {
+        const r = operateSite(state, site.id, 'database', null);
+        if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+        key.used = true;
+        const next = issueOpKey(state, 'database', site.id);
+        const exp = runDbExport(state, site.id);
+        touchCooldown(state, pluginId);
+        return { ok: true, lines: (exp.lines||[]).concat([{ text: `EXTRACT >> DB_KEY = ${next.token}`, type: 'green' }]), key: next.token, progressUpdated: true };
+      }
+      key.used = true;
+      const exp = runDbExport(state, key.siteId);
+      touchCooldown(state, pluginId);
+      return { ok: true, lines: exp.lines, progressUpdated: true };
+    }
+    return { ok: false, lines: [{ text: 'db-reader: search <q> | export <domain> | read <SESSION>', type: 'error' }] };
+  }
+
   if (pluginId === 'data-exporter' && (cmd === 'export' || cmd === 'pack')) {
     const key = findOpKey(state, arg1);
     if (!key || key.used) {
-      return { ok: false, lines: [{ text: 'Нужен неиспользованный SESSION_TOKEN (или ROW_REF для database-целей).', type: 'error' }] };
+      return { ok: false, lines: [{ text: 'Нужен SESSION_TOKEN / ACCESS ключ.', type: 'error' }] };
     }
     const site = getSite(state, key.siteId);
-    if (!site) return { ok: false, lines: [{ text: 'Цель ключа не найдена.', type: 'error' }] };
+    if (!site) return { ok: false, lines: [{ text: 'Цель не найдена.', type: 'error' }] };
     const needStage = site.kind === 'database' ? 'database' : 'access';
-    if (key.stage !== needStage) {
-      return { ok: false, lines: [{ text: `Для этой цели нужен ключ стадии ${needStage}.`, type: 'error' }] };
+    if (key.stage !== needStage && key.stage !== 'access') {
+      return { ok: false, lines: [{ text: `Ожидался токен стадии ${needStage}.`, type: 'error' }] };
     }
     key.used = true;
     const r = operateSite(state, site.id, 'export', null);
     if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
     touchCooldown(state, pluginId);
-    lines.push({ text: 'packing dataset …', type: 'muted' });
-    lines.push({ text: r.message, type: '' });
-
-    let mission = null;
-    if (arg2) mission = state.missions.items.find(m => m.id === arg2 && m.status === 'accepted');
+    const lines = [
+      { text: 'NULLBYTE // DATA EXPORTER', type: 'blue' },
+      { text: r.message, type: '' }
+    ];
+    let mission = arg2 ? state.missions.items.find(m => m.id === arg2 && m.status === 'accepted') : null;
     if (!mission) mission = state.missions.items.find(m => m.status === 'accepted' && m.target === site.id);
     if (mission) {
       const exp = exportMissionResult(state, mission.id);
       if (exp.ok) {
         lines.push({ text: exp.message, type: 'green' });
-        lines.push({ text: 'Файл готов. Отправь его заказчику через N-Mail.', type: 'muted' });
+        lines.push({ text: 'Отправь файл через N-Mail.', type: 'muted' });
+        writeIntelFile(state, `${mission.id}_evidence.report`, `CONTRACT ${mission.id}\nTARGET ${site.domain}\nRESULT OK`, 'report');
         return { ok: true, lines, progressUpdated: true, exportFile: true, missionId: mission.id };
       }
       lines.push({ text: exp.reason, type: 'error' });
-      return { ok: true, lines, progressUpdated: true };
+    } else {
+      lines.push({ text: 'Нет активного контракта на цель — только intel-файл.', type: 'muted' });
+      writeIntelFile(state, `${site.id}_export.dat`, `EXPORT ${site.domain}\n${site.data}`, 'dataset');
     }
-    lines.push({ text: 'Активный контракт на эту цель не найден — файл миссии не создан.', type: 'muted' });
     return { ok: true, lines, progressUpdated: true };
+  }
+
+  if (pluginId === 'site-editor' && (cmd === 'set' || cmd === 'modify')) {
+    // set <userId> <field> <value>
+    const userId = arg1, field = arg2, value = parts.slice(3).join(' ');
+    const r = modifyVirtualUser(state, userId, field, value);
+    touchCooldown(state, pluginId);
+    return { ok: r.ok, lines: r.lines, progressUpdated: r.ok };
+  }
+
+  // Mobile via map-scanner / identity as soft tools — also allow from terminal generic
+  if ((pluginId === 'map-scanner' || pluginId === 'identity-mask') && (cmd === 'phone' || cmd === 'identify' || cmd === 'mobile')) {
+    const r = cmd === 'mobile' || cmd === 'forensics'
+      ? runMobileAnalysis(state, arg1)
+      : runMobileIdentify(state, arg1);
+    return { ok: r.ok, lines: r.lines, progressUpdated: r.ok };
+  }
+  if ((pluginId === 'map-scanner') && (cmd === 'forensics' || cmd === 'analyze')) {
+    const r = runMobileAnalysis(state, arg1);
+    return { ok: r.ok, lines: r.lines, progressUpdated: r.ok };
   }
 
   return { ok: false, lines: [{ text: `Неизвестная команда «${cmd}». Введи help.`, type: 'error' }] };
@@ -750,6 +804,20 @@ export function processTimedEvents(state,now=Date.now()) {
   updateLevel(state);
   unlockMissions(state);
   state.meta.updatedAt=now;
+  
+  // Available mission board refresh every 20 minutes (active jobs untouched).
+  if (!state.intel) state.intel = seedIntelFromSites(state.world?.sites || [], createEmptyIntel());
+  if (!state.intel.nextBoardAt) state.intel.nextBoardAt = now + 20 * 60 * 1000;
+  if (state.intel.nextBoardAt <= now) {
+    state.intel.nextBoardAt = now + 20 * 60 * 1000;
+    const pool = state.missions.items.filter(m => m.status === 'available' || m.status === 'locked');
+    // Re-roll availability for non-active: unlock by level only; shuffle reward flavor lightly
+    for (const m of state.missions.items) {
+      if (m.status === 'locked' && m.minLevel <= state.player.level) m.status = 'available';
+    }
+    notices.push('BlackWire: доска доступных заказов обновлена.');
+  }
+
   return notices;
 }
 function unlockMissions(state) { for(const m of state.missions.items) if(m.status==='locked'&&m.minLevel<=state.player.level)m.status='available'; }
@@ -886,3 +954,5 @@ export function runNbs(state,source) {
 }
 export function addBookmark(state,siteId) {if(!getSite(state,siteId))return false;if(!state.browser.bookmarks.includes(siteId))state.browser.bookmarks.push(siteId);return true;}
 export function recordHistory(state,siteId) {if(!getSite(state,siteId))return;state.browser.history.unshift({siteId,at:Date.now()});state.browser.history=state.browser.history.slice(0,50);state.browser.activeSite=siteId;}
+
+export { listIntelSummary, seedIntelFromSites, createEmptyIntel };

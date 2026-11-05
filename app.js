@@ -707,6 +707,7 @@ async function runTerminalCommand(termId, raw) {
   const one = (parts[0] || '').toLowerCase();
   if (lower === 'help') {
     termAdd(termId, 'help | clear | plugins | run <plugin> | mission list', 'blue');
+    termAdd(termId, 'intel | ops | rm <file> — разведка / журнал / удаление файла', 'blue');
   } else if (lower === 'clear') {
     term.lines = [];
     const out = document.querySelector(`[data-window="${termId}"] .terminal-output`);
@@ -733,12 +734,42 @@ async function runTerminalCommand(termId, raw) {
   } else if (lower === 'mission list') {
     termAdd(termId, state.game.missions.items.filter(m => ['accepted','submitted','available'].includes(m.status)).map(m => `${m.id} | ${m.status} | ${m.title}`).join('\n') || 'Нет.');
   } else if (lower === 'map') termAdd(termId, LOCATIONS.map(l => `${l.name}`).join('\n'));
+  else if (lower === 'intel') {
+    const intel = state.game.intel;
+    if (!intel) termAdd(termId, 'intel empty', 'muted');
+    else {
+      const doms = Object.values(intel.domains || {}).filter(d => d.discovered || d.analyzed);
+      const srvs = Object.values(intel.servers || {}).filter(s => s.discovered);
+      const users = Object.values(intel.users || {}).filter(u => u.discovered);
+      const phones = Object.values(intel.devices || {}).filter(d => d.discovered);
+      termAdd(termId, `INTEL · dom ${doms.length} · srv ${srvs.length} · users ${users.length} · phones ${phones.length} · art ${Object.keys(intel.artifacts||{}).length}`, 'blue');
+      for (const d of doms.slice(0, 8)) termAdd(termId, `  ${d.domain} · ${d.kind} · sec ${d.security}`);
+      for (const s of srvs.slice(0, 6)) termAdd(termId, `  ${s.hostname} · access=${s.accessLevel} · ${s.ip}`, 'muted');
+      for (const u of users.slice(0, 6)) termAdd(termId, `  user ${u.username} (${u.id})`, 'muted');
+      for (const p of phones.slice(0, 4)) termAdd(termId, `  phone ${p.id} · ${p.model} · ${p.network}`, 'muted');
+    }
+  } else if (lower === 'ops' || lower === 'history') {
+    const ops = state.game.intel?.operations || [];
+    if (!ops.length) termAdd(termId, 'Нет операций.', 'muted');
+    else for (const o of ops.slice(0, 12)) termAdd(termId, `${o.pluginId} · ${o.summary || o.targetId} · ${o.status}`);
+  } else if (lower.startsWith('rm ') || lower.startsWith('delete ')) {
+    const name = cmd.split(/\s+/).slice(1).join(' ').trim().split('/').pop();
+    const files = state.game.computer.files;
+    const idx = files.findIndex(f => f.name === name || f.id === name);
+    if (idx < 0) termAdd(termId, 'FILE_NOT_FOUND', 'error');
+    else {
+      const f = files[idx];
+      if (state.game.missions.items.some(m => m.status === 'accepted' && m.resultFileId === f.id))
+        termAdd(termId, 'FILE_IN_USE — активный контракт', 'error');
+      else { files.splice(idx, 1); termAdd(termId, `Deleted: ${f.name}`, 'green'); scheduleSave(); }
+    }
+  }
   else termAdd(termId, 'unknown — help', 'error');
 }
 
 function renderHelp() {
   const sections=[
-    ['Игровой цикл','Контракты в BlackWire. Разведка целей — Browser. Операции — Terminal через плагины (run <plugin>). Результат уходит заказчику через N-Mail.'],
+    ['Игровой цикл','Browser → домен. Terminal: run site-analyzer / цепочка плагинов. intel — база разведки. N-Mail — сдача. Авто/прочие устройства: LOCKED.'],,
     ['Terminal','Только команды help, info, whoami, status, date, uptime, plugins, pkg list, plugin info NAME, ls, cat FILE, mission list и map. Команды ОС и произвольный код не исполняются.'],
     ['Плагины','Установи базовые пакеты и докупай нужные в NULForge. Установка проверяет уровень, кредитный баланс, RAM и накопитель. Плагины нельзя создавать или публиковать.'],
     ['Браузер и карта','Browser открывает только домены .null и сайты из личного мира. NullAtlas показывает вымышленный город и расписания NPC. Реальные адреса, GPS и внешние сайты не используются.'],

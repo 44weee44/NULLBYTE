@@ -36,7 +36,7 @@ const APPS = [
   {id:'profile',title:'Профиль',path:'user://operator',ram:1,description:'Оператор и прогресс'},
   {id:'computer',title:'My Computer',path:'system://hardware',ram:1,description:'Компьютер и файлы'}
 ];
-const state = {opened:new Map(),z:20,drag:null,active:null,game:null,provider:'LOCAL SAVE',saveWarning:'',saveTimer:null,terminalLines:[],browserTabs:[],selectedMail:null,selectedFileId:null,editorText:'',editorName:'mission_report',nbsOutput:'Поддерживается только фиксированный список игровых деклараций.',modalConfirm:null,bootDone:false,persisting:false,persistPending:false,saveBlocked:false};
+const state = {opened:new Map(),z:20,drag:null,active:null,game:null,provider:'LOCAL SAVE',saveWarning:'',saveTimer:null,terminalLines:[],browserTabs:[],selectedMail:null,selectedFileId:null,selectedMissionId:null,editorText:'',editorName:'mission_report',nbsOutput:'Поддерживается только фиксированный список игровых деклараций.',modalConfirm:null,bootDone:false,persisting:false,persistPending:false,saveBlocked:false};
 
 function icon(id,cls='') { return `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${svg[id]||svg.help}</svg>`; }
 function appInfo(id) { return APPS.find(a=>a.id===id); }
@@ -138,6 +138,8 @@ async function finishBoot() {
   } catch(e) {
     console.warn('[NULLBYTE] Telegram init error', e);
   }
+  // Give Telegram CloudStorage a moment to become ready before first load.
+  await new Promise(r => setTimeout(r, 250));
   const tgUser=window.Telegram?.WebApp?.initDataUnsafe?.user||null;
   const loaded=await loadSavedGame(tgUser);
   state.game=loaded.state;state.provider=loaded.provider;state.saveWarning=loaded.warning;state.saveBlocked=Boolean(loaded.blocked);
@@ -146,7 +148,9 @@ async function finishBoot() {
   processTimedEvents(state.game);
   if(!state.game.player.nickname) {showNicknameModal();if(loaded.warning)toast(loaded.warning,'error');}
   else {toast(`С возвращением, ${state.game.player.nickname}.`, 'success');if(loaded.warning)toast(loaded.warning,'error');}
-  scheduleSave();
+  // Immediate persist so CloudStorage gets a fresh write after successful load.
+  if(state.game.player.nickname && !state.saveBlocked) await persist();
+  else scheduleSave();
 }
 function showNicknameModal() {
   const tgId=state.game.player.telegramId;
@@ -156,7 +160,7 @@ function showNicknameModal() {
     const input=$('nicknameInput');const value=input?.value?.trim()||'';
     if(!validNickname(value)){const err=$('nicknameError');if(err){err.textContent='Ник должен содержать 2–12 латинских букв или цифр.';err.hidden=false;}return false;}
     if(state.saveBlocked&&!$('confirmNewSave')?.checked){const err=$('nicknameError');if(err){err.textContent='Подтверди запуск новой игры, чтобы продолжить.';err.hidden=false;}return false;}
-    state.saveBlocked=false;state.game.player.nickname=value;scheduleSave();refreshSystem();toast(`Профиль ${value} создан.`,'success');
+    state.saveBlocked=false;state.game.player.nickname=value;refreshSystem();toast(`Профиль ${value} создан.`,'success');persist();
   }});
   const input=$('nicknameInput');input?.addEventListener('keydown',e=>{if(e.key==='Enter')finishModal();});
 }
@@ -314,13 +318,14 @@ function renderBrowser(g) {
   const p=getSiteProgress(g,site.id),activeMission=g.missions.items.find(m=>m.status==='accepted'&&m.target===site.id),isBookmarked=g.browser.bookmarks.includes(site.id),locked=site.recoveryAt>Date.now();
   const stages=site.kind==='bank'?[]:[['analyze','Анализ сайта','site-analyzer',true],['decode','Расшифровка артефакта','artifact-decoder',p.analyzed],['node','Обнаружение узла','node-radar',p.decoded],['weakness','Поиск слабости','weakness-lab',p.node],['exploit','Симуляция доступа','sim-exploit',p.weakness],...(site.kind==='database'?[['database','Чтение виртуальной БД','db-reader',p.access]]:[]),['export','Экспорт результата','data-exporter',site.kind==='database'?p.database:p.access]];
   const stagesHtml=stages.map(([op,label,plugin,ready])=>{const key=({analyze:'analyzed',decode:'decoded',node:'node',weakness:'weakness',exploit:'access',database:'database',export:'exported'})[op];const done=Boolean(p[key]);return `<div class="operation-card"><strong>${esc(label)}</strong><small>${getInstalledPlugin(g,plugin)?`Плагин: ${esc(getPlugin(plugin).name)}`:`Нет плагина: ${esc(getPlugin(plugin).name)}`}</small><button class="btn tiny ${ready?'':'ghost'}" data-action="site-operation" data-op="${op}" data-site="${site.id}" ${!ready||done||locked||!getInstalledPlugin(g,plugin)?'disabled':''}>${done?'ГОТОВО':'ВЫПОЛНИТЬ'}</button></div>`;}).join('');
+  const activeGuide=activeMission?`<div class="notice section-gap"><b>Активный контракт ${esc(activeMission.id)}:</b> ${esc(activeMission.title)}. Проходи кнопки цепочки сверху вниз. После «Экспорт результата» нажми «СОЗДАТЬ ФАЙЛ РЕЗУЛЬТАТА», затем открой N-Mail и жми «ОТПРАВИТЬ».</div>`:'';
   const missionFiles=site.kind!=='bank'&&activeMission&&p.access&&p.exported?`<div class="btn-row section-gap">${activeMission.resultFileId?`<span class="badge green">ФАЙЛ СОЗДАН</span><button class="btn tiny primary" data-action="open-app" data-app="mail">ПЕРЕЙТИ В N-MAIL</button>`:`<button class="btn primary" data-action="export-result" data-id="${esc(activeMission.id)}">СОЗДАТЬ ФАЙЛ РЕЗУЛЬТАТА</button>`}<span class="badge green">EXPORT COMPLETE</span></div>`:'';
   return `<div class="browser-top"><div class="browser-traffic"><i></i><i></i><i></i></div><form class="browser-address" id="browserForm"><input class="field" name="address" value="${esc(site.domain)}" aria-label="Игровой адрес" autocomplete="off"><button class="btn tiny" type="submit">ПЕРЕЙТИ</button></form><button class="btn tiny ghost" data-action="browser-home">⌂</button></div>
   <div class="browser-tabs">${tabs.map(t=>{const s=getSite(g,t.siteId);return s?`<div class="browser-tab-wrap ${s.id===site.id?'active':''}"><button class="browser-tab" data-action="browser-tab" data-site="${s.id}">${esc(s.title)}</button><button class="browser-tab-close" type="button" data-action="browser-close-tab" data-tab="${esc(t.id)}" aria-label="Закрыть вкладку ${esc(s.title)}">×</button></div>`:''}).join('')}</div>
   <div class="site-hero"><div class="site-domain">${esc(site.domain)} · ${esc(site.kind.toUpperCase())} · ${esc(site.region)}</div><div class="app-heading" style="margin:6px 0"><h3>${esc(site.title)}</h3><div class="btn-row"><button class="btn tiny ghost" data-action="bookmark-site" data-site="${site.id}">${isBookmarked?'★':'☆'} ${isBookmarked?'СОХРАНЕНО':'ЗАКЛАДКА'}</button><span class="badge ${locked?'red':'green'}">${locked?'RECOVERING':'ONLINE'}</span></div></div><p>${esc(site.description)}</p></div>
   <div class="grid-2 section-gap"><div class="stat-box"><span>SECURITY LEVEL</span><strong>${site.security}/5</strong><small>игровая модель защиты</small></div><div class="stat-box"><span>REVISION</span><strong>${site.revision}</strong><small>состояние сайта</small></div></div>
   ${locked?`<div class="notice warning section-gap">Цель восстанавливается после предыдущей операции. Осталось примерно ${humanLeft(site.recoveryAt-Date.now())}.</div>`:''}
-  <div class="panel section-gap"><div class="panel-title"><span>ИГРОВАЯ ЦЕПОЧКА</span><small>${activeMission?`КОНТРАКТ ${activeMission.id}`:'FREE EXPLORATION'}</small></div>${site.kind==='bank'?`<div class="notice warning">Эта цель использует отдельную эндгейм-механику. Открой приложение Aster Bank, чтобы ознакомиться с рисками и требованиями.</div><button class="btn section-gap" data-action="open-app" data-app="bank">ОТКРЫТЬ ASTER BANK</button>`:`<div class="operation-grid">${stagesHtml}</div>`}${missionFiles}${site.kind!=='bank'&&p.access&&getInstalledPlugin(g,'site-editor')? `<div class="btn-row section-gap"><button class="btn tiny ghost" data-action="site-operation" data-op="modify" data-site="${site.id}">ИЗМЕНИТЬ ВИРТУАЛЬНЫЙ КОНТЕНТ</button></div>`:''}</div>
+  <div class="panel section-gap"><div class="panel-title"><span>ИГРОВАЯ ЦЕПОЧКА</span><small>${activeMission?`КОНТРАКТ ${activeMission.id}`:'FREE EXPLORATION'}</small></div>${site.kind==='bank'?`<div class="notice warning">Эта цель использует отдельную эндгейм-механику. Открой приложение Aster Bank, чтобы ознакомиться с рисками и требованиями.</div><button class="btn section-gap" data-action="open-app" data-app="bank">ОТКРЫТЬ ASTER BANK</button>`:`${activeGuide}<div class="operation-grid">${stagesHtml}</div>`}${missionFiles}${site.kind!=='bank'&&p.access&&getInstalledPlugin(g,'site-editor')? `<div class="btn-row section-gap"><button class="btn tiny ghost" data-action="site-operation" data-op="modify" data-site="${site.id}">ИЗМЕНИТЬ ВИРТУАЛЬНЫЙ КОНТЕНТ</button></div>`:''}</div>
   <div class="panel section-gap"><div class="panel-title"><span>СОСТОЯНИЕ ЦЕЛИ</span><small>SIMULATION SNAPSHOT</small></div><div class="kv"><span>Артефакт</span><b>${esc(site.artifact)}</b></div><div class="kv"><span>Анализ</span><b>${p.analyzed?'ГОТОВО':'НЕ ВЫПОЛНЕН'}</b></div><div class="kv"><span>Доступ</span><b>${p.access?'ПОЛУЧЕН':'НЕТ'}</b></div><div class="kv"><span>Текущее содержимое</span><b>${esc(site.siteText)}</b></div>${p.access?`<div class="notice success section-gap">Виртуальные данные: ${esc(site.data)}</div>`:''}<div class="btn-row section-gap"><button class="btn tiny ghost" data-action="open-app" data-app="map">ОТКРЫТЬ В NULLATLAS</button><button class="btn tiny ghost" data-action="open-app" data-app="blackwire">КОНТРАКТЫ</button></div></div>
   <div class="panel section-gap"><div class="panel-title"><span>ДОСТУПНЫЕ ИГРОВЫЕ САЙТЫ</span><small>${g.world.sites.length} HOSTS</small></div><div class="list">${g.world.sites.map(s=>`<div class="list-row"><div class="list-main"><strong>${esc(s.title)}</strong><small>${esc(s.domain)} · security ${s.security}</small></div><button class="btn tiny ghost" data-action="browser-tab" data-site="${s.id}">ОТКРЫТЬ</button></div>`).join('')}</div></div>`;
 }
@@ -335,25 +340,94 @@ function renderMap(g) {
   <div class="panel section-gap"><div class="panel-title"><span>NPC / МАРШРУТЫ</span><small>СОХРАНЯЕМЫЕ РАСПИСАНИЯ</small></div><div class="list">${npcs}</div></div>
   <div class="panel section-gap"><div class="panel-title"><span>POINTS OF INTEREST</span><small>ВЫМЫШЛЕННЫЕ ОБЪЕКТЫ</small></div><div class="list">${sites}</div></div>`;
 }
+
+function missionSteps(m, g) {
+  const site = getSite(g, m.target);
+  const needDb = site?.kind === 'database';
+  const steps = [
+    'Открой BlackWire и прими контракт (если ещё не принят).',
+    `Открой Browser → цель <b>${esc(site?.domain || m.target)}</b>.`,
+    'Нажми по порядку кнопки цепочки на странице сайта:',
+    '&nbsp;&nbsp;1) Анализ сайта',
+    '&nbsp;&nbsp;2) Расшифровка артефакта',
+    '&nbsp;&nbsp;3) Обнаружение узла',
+    '&nbsp;&nbsp;4) Поиск слабости',
+    '&nbsp;&nbsp;5) Симуляция доступа',
+  ];
+  if (needDb) steps.push('&nbsp;&nbsp;6) Чтение виртуальной БД (нужен Virtual DB Reader)');
+  steps.push(`${needDb ? '7' : '6'}) Экспорт результата`);
+  steps.push('Нажми «СОЗДАТЬ ФАЙЛ РЕЗУЛЬТАТА».');
+  steps.push('Открой N-Mail → блок «ГОТОВО К ОТПРАВКЕ» → «ОТПРАВИТЬ».');
+  steps.push('Подожди проверку (~5–6 сек) — кредиты и XP начислятся автоматически.');
+  return steps;
+}
+
+function renderMissionGuide(m, g) {
+  const site = getSite(g, m.target);
+  const loc = LOCATIONS.find(l => (l.pois || []).includes(m.target));
+  const tools = (m.requiredPlugins || []).map(id => getPlugin(id)?.name || id).join(' · ') || 'Базовые стартовые';
+  const steps = missionSteps(m, g).map(s => `<li>${s}</li>`).join('');
+  return `<div class="panel section-gap mission-guide">
+    <div class="panel-title"><span>ПОЛНЫЙ ГАЙД · ${esc(m.id)}</span><button class="btn tiny ghost" data-action="mission-close-guide">ЗАКРЫТЬ</button></div>
+    <div class="kv"><span>Название</span><b>${esc(m.title)}</b></div>
+    <div class="kv"><span>Клиент</span><b>${esc(m.client)}</b></div>
+    <div class="kv"><span>Цель</span><b>${esc(site?.title || m.target)} · ${esc(site?.domain || '—')}</b></div>
+    <div class="kv"><span>Район</span><b>${esc(loc?.name || site?.region || '—')} / ${esc(site?.district || '—')}</b></div>
+    <div class="kv"><span>Сложность / SEC</span><b>${esc(m.difficulty)} · ${site?.security ?? '—'}</b></div>
+    <div class="kv"><span>Награда</span><b class="text-green">+${fmt(m.reward)} CR · +${fmt(m.xp)} XP</b></div>
+    <div class="kv"><span>Плагины</span><b>${esc(tools)}</b></div>
+    <div class="divider"></div>
+    <p><b>Задача:</b> ${esc(m.objective)}</p>
+    <p class="muted small"><b>Подсказка:</b> ${esc(m.hint)}</p>
+    <div class="divider"></div>
+    <div class="panel-title"><span>ЧТО ДЕЛАТЬ ПО ШАГАМ</span></div>
+    <ol class="mission-steps">${steps}</ol>
+    <div class="notice section-gap">Команды в Terminal для миссий не нужны. Вся цепочка выполняется кнопками в Browser. N-Mail — только для финальной отправки файла.</div>
+    <div class="btn-row">${m.status==='available'?`<button class="btn primary" data-action="accept-mission" data-id="${m.id}">ПРИНЯТЬ КОНТРАКТ</button>`:m.status==='accepted'?`<button class="btn primary" data-action="mission-open-target" data-id="${m.id}">ОТКРЫТЬ ЦЕЛЬ В BROWSER</button><button class="btn" data-action="open-app" data-app="mail">ОТКРЫТЬ N-MAIL</button>`:m.status==='submitted'?`<span class="badge green">НА ПРОВЕРКЕ</span>`:''}</div>
+  </div>`;
+}
+
+
 function renderBlackWire(g) {
   const items=g.missions.items.filter(m=>['available','accepted','submitted'].includes(m.status));
-  const card=m=>{const site=getSite(g,m.target);return `<article class="contract-card"><div class="contract-top"><strong>${esc(m.title)}</strong><span class="badge ${m.status==='accepted'?'amber':m.status==='submitted'?'green':'gray'}">${m.status==='accepted'?'ACTIVE':m.status==='submitted'?'VERIFYING':'AVAILABLE'}</span></div><p>${esc(m.objective)}</p><div class="contract-meta"><span>ID ${esc(m.id)}</span><span>ЦЕЛЬ ${esc(site?.domain||m.target)}</span><span>SEC ${site?.security||'—'}</span><span>${esc(m.difficulty)}</span></div><div class="contract-meta section-gap"><span>TOOLS ${(m.requiredPlugins||[]).map(id=>getPlugin(id)?.name||id).map(esc).join(' · ')||'Базовые'}</span></div><div class="contract-meta section-gap"><span class="text-green">+${fmt(m.reward)} CR</span><span>+${fmt(m.xp)} XP</span><span>CLIENT ${esc(m.client)}</span></div><div class="divider"></div><div class="small muted">Подсказка: ${esc(m.hint)}</div><div class="btn-row">${m.status==='available'?`<button class="btn primary" data-action="accept-mission" data-id="${m.id}">ПРИНЯТЬ КОНТРАКТ</button>`:m.status==='accepted'?`<button class="btn" data-action="mission-open-target" data-id="${m.id}">ОТКРЫТЬ ЦЕЛЬ В BROWSER</button>`:`<span class="badge green">ПРОВЕРКА · ${humanLeft(m.verifyAt-Date.now())}</span>`}</div></article>`;};
+  const selected=state.selectedMissionId?g.missions.items.find(x=>x.id===state.selectedMissionId):null;
+  const card=m=>{
+    const site=getSite(g,m.target);
+    return `<article class="contract-card ${state.selectedMissionId===m.id?'is-selected':''}">
+      <div class="contract-top"><strong>${esc(m.title)}</strong><span class="badge ${m.status==='accepted'?'amber':m.status==='submitted'?'green':'gray'}">${m.status==='accepted'?'ACTIVE':m.status==='submitted'?'VERIFYING':'AVAILABLE'}</span></div>
+      <p>${esc(m.objective)}</p>
+      <div class="contract-meta"><span>ID ${esc(m.id)}</span><span>ЦЕЛЬ ${esc(site?.domain||m.target)}</span><span>SEC ${site?.security||'—'}</span><span>${esc(m.difficulty)}</span></div>
+      <div class="contract-meta section-gap"><span>TOOLS ${(m.requiredPlugins||[]).map(id=>getPlugin(id)?.name||id).map(esc).join(' · ')||'Базовые'}</span></div>
+      <div class="contract-meta section-gap"><span class="text-green">+${fmt(m.reward)} CR</span><span>+${fmt(m.xp)} XP</span><span>CLIENT ${esc(m.client)}</span></div>
+      <div class="divider"></div>
+      <div class="small muted">Подсказка: ${esc(m.hint)}</div>
+      <div class="btn-row">
+        <button class="btn tiny" data-action="mission-details" data-id="${m.id}">ПОДРОБНЕЕ / ГАЙД</button>
+        ${m.status==='available'?`<button class="btn primary" data-action="accept-mission" data-id="${m.id}">ПРИНЯТЬ КОНТРАКТ</button>`:m.status==='accepted'?`<button class="btn" data-action="mission-open-target" data-id="${m.id}">ОТКРЫТЬ ЦЕЛЬ В BROWSER</button>`:`<span class="badge green">ПРОВЕРКА · ${humanLeft(m.verifyAt-Date.now())}</span>`}
+      </div>
+    </article>`;
+  };
   const locked=g.missions.items.filter(m=>m.status==='locked');
   return `<div class="app-heading"><div><div class="eyebrow">BLACKWIRE / NPC CONTRACT BOARD</div><h2>BlackWire</h2><p>Биржа заказов от персонажей игрового мира. Без реальных пользователей и чата.</p></div><span class="badge">SOLO MODE</span></div>
   <div class="grid-3"><div class="stat-box"><span>ACTIVE</span><strong>${g.missions.items.filter(m=>m.status==='accepted').length}</strong><small>активные контракты</small></div><div class="stat-box"><span>VERIFYING</span><strong>${g.missions.items.filter(m=>m.status==='submitted').length}</strong><small>ожидают проверки</small></div><div class="stat-box"><span>COMPLETED</span><strong>${g.player.contractsCompleted}</strong><small>закрыто</small></div></div>
-  <div class="notice section-gap">Сдача выполняется через N-Mail: экспортируй игровой результат в Browser, затем отправь соответствующее вложение заказчику.</div>
-  <div class="section-gap list">${items.length?items.map(card).join(''):'<div class="empty-state"><b>Нет доступных контрактов</b><p>Новые задачи откроются по мере роста уровня оператора.</p></div>'}</div>
-  ${locked.length?`<div class="panel section-gap"><div class="panel-title"><span>ЗАБЛОКИРОВАННЫЕ ЗАКАЗЫ</span><small>LEVEL GATED</small></div><div class="list">${locked.map(m=>`<div class="list-row"><div class="list-main"><strong>${esc(m.title)}</strong><small>${esc(m.client)} · требуется уровень ${m.minLevel}</small></div><span class="badge gray">LOCKED</span></div>`).join('')}</div></div>`:''}`;
+  <div class="notice section-gap">1) Прими контракт → 2) открой цель в Browser и пройди цепочку кнопок → 3) создай файл → 4) отправь через N-Mail. Жми <b>ПОДРОБНЕЕ / ГАЙД</b> на любом заказе.</div>
+  ${selected?renderMissionGuide(selected,g):''}
+  <div class="section-gap list">${items.length?items.map(card).join(''):'<div class="empty-state"><b>Нет доступных контрактов</b><p>Повысь уровень, чтобы открыть новые заказы.</p></div>'}</div>
+  ${locked.length?`<div class="panel section-gap"><div class="panel-title"><span>ЗАБЛОКИРОВАНО</span><small>${locked.length}</small></div><div class="list">${locked.slice(0,8).map(m=>`<div class="list-row"><div class="list-main"><strong>${esc(m.title)}</strong><small>Требуется уровень ${m.minLevel} · ${esc(m.difficulty)}</small></div><button class="btn tiny ghost" data-action="mission-details" data-id="${m.id}">ГАЙД</button></div>`).join('')}</div></div>`:''}`;
 }
+
 function renderMail(g) {
   const pending=g.missions.items.filter(m=>m.status==='accepted'&&m.resultFileId);
+  const waitingFile=g.missions.items.filter(m=>m.status==='accepted'&&!m.resultFileId);
   const selected=g.mail.messages.find(m=>m.id===state.selectedMail)||g.mail.messages[0];
   const list=g.mail.messages.slice(0,30).map(m=>`<button class="mail-item ${m.status==='unread'?'unread':''}" data-action="mail-open" data-id="${m.id}"><strong>${esc(m.subject)}</strong><small>${formatTime(m.at)}</small><p>${esc(m.from)} · ${esc(m.body.slice(0,110))}${m.body.length>110?'…':''}</p></button>`).join('');
   return `<div class="app-heading"><div><div class="eyebrow">N-MAIL / INTERNAL MESSAGING</div><h2>N-Mail</h2><p>Внутриигровые письма, контракты и отправка файлов.</p></div><span class="badge">${g.mail.messages.filter(m=>m.status==='unread').length} UNREAD</span></div>
   ${pending.length?`<div class="panel"><div class="panel-title"><span>ГОТОВО К ОТПРАВКЕ</span><small>DELIVERY QUEUE</small></div><div class="list">${pending.map(m=>{const f=g.computer.files.find(x=>x.id===m.resultFileId);return `<div class="list-row"><div class="list-main"><strong>${esc(m.title)}</strong><small>${esc(m.client)} · ${esc(f?.name||'result file')}</small></div><button class="btn tiny primary" data-action="deliver-mission" data-id="${m.id}">ОТПРАВИТЬ</button></div>`;}).join('')}</div></div>`:''}
+  ${waitingFile.length?`<div class="notice warning section-gap">Есть активный контракт без файла результата. Сначала открой цель в Browser, пройди цепочку (анализ → … → экспорт) и нажми «СОЗДАТЬ ФАЙЛ РЕЗУЛЬТАТА». После этого здесь появится кнопка «ОТПРАВИТЬ».<div class="btn-row section-gap">${waitingFile.map(m=>`<button class="btn tiny" data-action="mission-open-target" data-id="${m.id}">ОТКРЫТЬ ${esc(m.id)}</button>`).join('')}</div></div>`:''}
   <div class="grid-2 section-gap" style="align-items:start"><div class="list">${list||'<div class="empty-state"><b>Входящие пусты</b><p>Письма появятся после контрактов и системных событий.</p></div>'}</div><div class="panel">${selected?`<div class="eyebrow">${selected.direction==='in'?'INCOMING MESSAGE':'SENT MESSAGE'}</div><h3 style="margin:8px 0;color:#e1ebf1;font-size:13px">${esc(selected.subject)}</h3><div class="kv"><span>От</span><b>${esc(selected.from)}</b></div><div class="kv"><span>Дата</span><b>${formatDate(selected.at)} ${formatTime(selected.at)}</b></div><div class="divider"></div><div class="mail-body">${esc(selected.body)}</div>${selected.attachments?.length?selected.attachments.map(id=>{const f=g.computer.files.find(x=>x.id===id);return f?`<button class="attachment" data-action="file-open" data-id="${esc(f.id)}">▣ ${esc(f.name)} · ${f.size} KB</button>`:''}).join(''):''}<div class="btn-row section-gap"><button class="btn tiny ghost" data-action="mail-mark" data-id="${selected.id}">ОТМЕТИТЬ ПРОЧИТАННЫМ</button></div>`:'<div class="empty-state"><b>Выбери письмо</b><p>Содержимое появится здесь.</p></div>'}${state.selectedFileId?(()=>{const f=g.computer.files.find(x=>x.id===state.selectedFileId);return f?`<div class="panel section-gap"><div class="panel-title"><span>ПРОСМОТР ВЛОЖЕНИЯ</span><button class="btn tiny ghost" data-action="file-close">ЗАКРЫТЬ</button></div><strong>${esc(f.name)}</strong><pre class="file-preview">${esc(String(f.content||'').slice(0,2400))}${String(f.content||'').length>2400?'\n… файл сокращён для просмотра':''}</pre></div>`:''})():''}</div></div>
-  <div class="notice section-gap">Почта работает только внутри вымышленной игры. Никакие реальные email-адреса или внешние сообщения не используются.</div>`;
+  <div class="notice section-gap">Почта работает только внутри вымышленной игры. Кнопка «ОТПРАВИТЬ» появляется только после создания файла результата в Browser.</div>`;
 }
+
 function renderBank(g) {
   const status=bankStatus(g),risk=bankRisk(g),tx=g.economy.transactions.slice(0,30);
   const missing=risk.missing.map(id=>getPlugin(id)?.name||id);
@@ -497,7 +571,9 @@ function handleAction(action,el) {
     case 'install-plugin':doInstall(id);break;
     case 'upgrade-hardware':doHardware(part);break;
     case 'uninstall-plugin':confirm('Удалить плагин?',`Удалить ${esc(getPlugin(id)?.name||id)}? Пользовательские файлы не будут затронуты.`,()=>{const r=uninstallPlugin(state.game,id);actionResult(r);});break;
-    case 'accept-mission':actionResult(acceptMission(state.game,id));break;
+    case 'accept-mission':{const r=acceptMission(state.game,id);actionResult(r);if(r.ok){state.selectedMissionId=id;if(state.opened.has('blackwire'))renderWindow('blackwire');}break;}
+    case 'mission-details':state.selectedMissionId=id;if(!state.opened.has('blackwire'))openApp('blackwire');else renderWindow('blackwire');break;
+    case 'mission-close-guide':state.selectedMissionId=null;renderWindow('blackwire');break;
     case 'mission-open-target':openMissionTarget(id);break;
     case 'browser-tab':ensureBrowserTab(site);if(!state.opened.has('browser'))openApp('browser');renderWindow('browser');break;
     case 'browser-home':state.browserTabs=[];state.game.browser.activeSite='';renderWindow('browser');break;

@@ -56,3 +56,7 @@ input, textarea, select, [contenteditable="true"] { pointer-events: auto; user-s
 /* No desktop shortcuts: apps launch from the Start menu. */
 #desktopIcons[hidden] { display:none !important; }
 .map-point { pointer-events:auto; touch-action:manipulation; }
+
+.mission-guide .mission-steps{margin:8px 0 0;padding-left:18px;color:#c5d3dc;font-size:10px;line-height:1.55}
+.mission-guide .mission-steps li{margin:4px 0}
+.contract-card.is-selected{border-color:#4d8db0;box-shadow:0 0 0 1px #1a4d66}

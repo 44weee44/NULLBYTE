@@ -308,7 +308,7 @@ export function operateSite(state,siteId,operation,missionId=null) {
     p.access=true;state.stats.successfulOperations++;
     site.defenseBoost=Math.min(5,site.defenseBoost+0.5);
   }
-  else if(operation==='export') { if(!p.access) return {ok:false,reason:'Для экспорта сначала нужен симулируемый доступ.'}; if(site.kind==='database'&&!p.database) return {ok:false,reason:'Сначала прочитай виртуальную запись через Virtual DB Reader.'}; p.exported=true; beginSiteRecovery(state,site,'export'); }
+  else if(operation==='export') { if(!p.access) return {ok:false,reason:'Для экспорта сначала нужен симулируемый доступ.'}; if(site.kind==='database'&&!p.database) return {ok:false,reason:'Сначала прочитай виртуальную запись через Virtual DB Reader.'}; p.exported=true; const hasActiveMission=state.missions.items.some(m=>m.status==='accepted'&&m.target===siteId); if(!hasActiveMission) beginSiteRecovery(state,site,'export'); }
   else if(operation==='modify') { if(!p.access) return {ok:false,reason:'Для изменения сначала нужен симулируемый доступ.'}; p.modified=true;site.siteText='Содержимое обновлено в игровой симуляции.';site.revision++;beginSiteRecovery(state,site,'modified'); }
   else if(operation==='database') { if(!p.access) return {ok:false,reason:'Сначала получи симулируемый доступ.'}; p.database=true; }
   else return {ok:false,reason:'Операция не зарегистрирована.'};
@@ -344,6 +344,7 @@ export function submitMission(state,missionId,eventId=idempotencyKey('deliver'))
     const file=state.computer.files.find(f=>f.id===m.resultFileId);if(!file)return {ok:false,reason:'Файл результата не найден.'};
     if(!file.content.includes(`CONTRACT=${m.id}`)||!file.content.includes('SIMULATION_ONLY=true'))return {ok:false,reason:'Файл не прошёл проверку формата.'};
     m.status='submitted';m.submittedAt=Date.now();m.verifyAt=Date.now()+BALANCE.verificationDelayMs;
+    const site=getSite(state,m.target); if(site) beginSiteRecovery(state,site,'mission-submit');
     state.mail.messages.unshift({id:idempotencyKey('mail'),direction:'out',from:state.player.nickname,to:m.client,subject:`Результат контракта ${m.id}`,body:`Передан файл ${file.name}. Результат проверяется игровой системой.`,at:Date.now(),attachments:[file.id],status:'sent'});
     state.mail.messages.unshift({id:idempotencyKey('mail'),direction:'in',from:m.client,to:state.player.nickname,subject:'Результат получен',body:'Файл принят в очередь проверки. Ответ придёт во внутриигровую почту.',at:Date.now(),attachments:[],status:'unread'});
     return {ok:true,message:'Результат отправлен. Проверка завершится автоматически.'};

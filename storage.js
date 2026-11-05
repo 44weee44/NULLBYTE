@@ -126,7 +126,7 @@ export async function loadSavedGame(tgUser = null) {
 
   if (!raw) {
     raw = getLocal();
-    if (raw) provider = api ? (cloudReadFailed ? 'LOCAL FALLBACK' : 'LOCAL SAVE') : 'LOCAL SAVE';
+    if (raw) provider = 'LOCAL SAVE';
   }
 
   const migrated = migrateSave(raw, tgUser);

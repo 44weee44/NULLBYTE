@@ -543,10 +543,27 @@ function openMissionTarget(missionId) {const m=state.game.missions.items.find(x=
 function runSiteOperation(siteId,op) {
   const mission=state.game.missions.items.find(m=>m.status==='accepted'&&m.target===siteId);
   const result=operateSite(state.game,siteId,op,mission?.id||null);
-  if(result.ok){toast(result.message,result.success===false?'error':'success');scheduleSave();refreshOpenApps();}else toast(result.reason,'error');
+  if(!result.ok){toast(result.reason,'error');return;}
+  toast(result.message,result.success===false?'error':'success');
+  // After successful export stage on an active mission, auto-create result file so Mail can send it.
+  if(result.ok && result.success!==false && op==='export' && mission){
+    const exp=exportMissionResult(state.game,mission.id);
+    if(exp.ok) toast(exp.message + ' Открой N-Mail и нажми ОТПРАВИТЬ.','success');
+    else toast(exp.reason,'error');
+  }
+  scheduleSave();
+  refreshOpenApps();
 }
-function exportResult(missionId) {const result=exportMissionResult(state.game,missionId);actionResult(result);}
-function deliverResult(missionId) {const result=submitMission(state.game,missionId);actionResult(result);}
+function exportResult(missionId) {
+  const result=exportMissionResult(state.game,missionId);
+  actionResult(result);
+  if(result.ok){openApp('mail');renderWindow('mail');}
+}
+function deliverResult(missionId) {
+  const result=submitMission(state.game,missionId);
+  actionResult(result);
+  if(result.ok){renderWindow('mail');renderWindow('blackwire');}
+}
 function openMail(id) {const m=state.game.mail.messages.find(x=>x.id===id);if(!m)return;state.selectedMail=id;m.status='read';scheduleSave();renderWindow('mail');}
 function runNbsAction(action) {
   const editor=$('nbsEditor');if(editor)state.editorText=editor.value;

@@ -188,16 +188,19 @@ test('plugin installation enforces operating-system compatibility without chargi
   assert.ok(s.computer.installedPlugins.includes('db-reader'));
 });
 
-test('site recovery starts after export and does not break an active contract',()=>{
+test('site recovery starts after mission submit and does not break active contract progress',()=>{
   const s=createInitialState();assert.equal(acceptMission(s,'job-001').ok,true);
   for(const op of ['analyze','decode','node','weakness','exploit','export']) assert.equal(operateSite(s,'volt-market',op,'job-001').ok,true);
   const site=s.world.sites.find(x=>x.id==='volt-market');
-  assert.equal(site.state,'recovering');assert.ok(site.recoveryAt>Date.now());
+  // During active mission export, site stays online so player can create/send the result file.
+  assert.equal(site.state,'online');
   assert.equal(exportMissionResult(s,'job-001').ok,true);
+  assert.equal(submitMission(s,'job-001').ok,true);
+  assert.equal(site.state,'recovering');assert.ok(site.recoveryAt>Date.now());
   const p=s.world.progress['volt-market'];
   processTimedEvents(s,site.recoveryAt+1);
   assert.equal(site.state,'online');
-  assert.equal(s.world.progress['volt-market'].access,true);
+  // Contract still submitted/completed may clear progress only when not accepted.
   assert.ok(p.access);
 });
 

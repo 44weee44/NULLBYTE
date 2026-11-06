@@ -1,7 +1,7 @@
 import {
   BALANCE, PLUGINS, HARDWARE, SITES, LOCATIONS, createInitialState, validNickname, escapeText as esc,
   getInstalledPlugin, getPlugin, getHardwareUsage, getRamUsage, purchasePlugin, buyHardware, uninstallPlugin,
-  acceptMission, getSite, getSiteProgress, operateSite, exportMissionResult, submitMission,
+  acceptMission, cancelMission, missionBoardTimer, rotateMissionBoard, getSite, getSiteProgress, operateSite, exportMissionResult, submitMission,
   processTimedEvents, bankStatus, bankRisk, attemptBankSimulation, saveEditorFile, validateNbs, runNbs,
   recordHistory, addBookmark, idempotencyKey,
   PLUGIN_SHELLS, PLUGIN_ANIM, runPluginShellCommand, pluginShellBootLines, resolveSiteRef
@@ -217,7 +217,7 @@ function openApp(id) {
   const offset=(state.opened.size%5)*22;
   const title=isTerm?`Terminal ${id.replace('term-','#')}`:app.title;
   const path=isTerm?`tty://${id}`:app.path;
-  const win={id,title,path,ram:app.ram,minimized:false,maximized:false,left:Math.max(8,(area.clientWidth-width)/2+offset-45),top:Math.max(8,(area.clientHeight-height)/2+offset-40),oldRect:null,baseApp:baseId};
+  const win={id,title,path,ram:app.ram,minimized:false,maximized:false,alwaysOnTop:false,left:Math.max(8,(area.clientWidth-width)/2+offset-45),top:Math.max(8,(area.clientHeight-height)/2+offset-40),oldRect:null,baseApp:baseId};
   state.opened.set(id,win);
   const element=document.createElement('section');
   element.className=`app-window${isTerm?' app-window-terminal':''}`;
@@ -228,32 +228,89 @@ function openApp(id) {
   element.style.height=`${height}px`;
   element.style.left=`${Math.min(win.left,Math.max(8,area.clientWidth-width-8))}px`;
   element.style.top=`${Math.min(win.top,Math.max(8,area.clientHeight-height-8))}px`;
-  element.innerHTML=`<header class="window-bar"><span class="window-app-mark">${icon(terminalIconId(id))}</span><strong class="window-title">${esc(title)}</strong><span class="window-path">${esc(path)}</span><div class="window-controls"><button type="button" data-action="minimize-window" title="Свернуть" aria-label="Свернуть">—</button><button type="button" data-action="maximize-window" title="Развернуть" aria-label="Развернуть">□</button><button type="button" data-action="close-window" title="Закрыть" aria-label="Закрыть">×</button></div></header><div class="window-content" data-content></div>`;
+  element.innerHTML=`<header class="window-bar"><span class="window-app-mark">${icon(terminalIconId(id))}</span><strong class="window-title">${esc(title)}</strong><span class="window-path">${esc(path)}</span><div class="window-controls"><button type="button" data-action="toggle-pin-window" class="pin-btn" title="Поверх остальных" aria-label="Поверх остальных">📌</button><button type="button" data-action="minimize-window" title="Свернуть" aria-label="Свернуть">—</button><button type="button" data-action="maximize-window" title="Развернуть" aria-label="Развернуть">□</button><button type="button" data-action="close-window" title="Закрыть" aria-label="Закрыть">×</button></div></header><div class="window-content" data-content></div><div class="window-resize" data-resize></div>`;
   $('windowLayer').append(element);wireWindow(id,element);renderWindow(id);focusWindow(id);renderTaskbar();
   if(isTerm)requestAnimationFrame(()=>element.querySelector('.terminal-form input')?.focus({preventScroll:true}));
 }
 function wireWindow(id,element) {
-  element.addEventListener('pointerdown',e=>{if(!e.target.closest('.window-controls'))focusWindow(id);});
+  element.addEventListener('pointerdown',e=>{
+    if(e.target.closest('.window-controls')||e.target.closest('[data-resize]'))return;
+    focusWindow(id);
+  });
   const bar=element.querySelector('.window-bar');
   bar.addEventListener('pointerdown',e=>{
     if(e.target.closest('.window-controls')||state.opened.get(id)?.maximized||e.button!==0)return;
+    if(e.target.closest('input,textarea,button'))return;
     const rect=element.getBoundingClientRect(),workspace=$('desktopWorkspace').getBoundingClientRect();
     state.drag={id,pointerId:e.pointerId,dx:e.clientX-rect.left,dy:e.clientY-rect.top,workspace};
     try{bar.setPointerCapture(e.pointerId);}catch{}focusWindow(id);e.preventDefault();
   });
   bar.addEventListener('pointermove',e=>{
-    const d=state.drag;if(!d||d.id!==id||d.pointerId!==e.pointerId)return;
-    const area=$('desktopWorkspace'),x=Math.max(0,Math.min(area.clientWidth-element.offsetWidth,e.clientX-d.workspace.left-d.dx)),y=Math.max(0,Math.min(area.clientHeight-element.offsetHeight,e.clientY-d.workspace.top-d.dy));
-    element.style.left=`${x}px`;element.style.top=`${y}px`;const w=state.opened.get(id);w.left=x;w.top=y;
+    const d=state.drag;if(!d||d.id!==id||d.pointerId!==e.pointerId||d.resize)return;
+    const area=$('desktopWorkspace'),x=Math.max(0,Math.min(area.clientWidth-80,e.clientX-d.workspace.left-d.dx)),y=Math.max(0,Math.min(area.clientHeight-40,e.clientY-d.workspace.top-d.dy));
+    element.style.left=`${x}px`;element.style.top=`${y}px`;const w=state.opened.get(id);if(w){w.left=x;w.top=y;}
   });
   const stop=e=>{if(state.drag?.id===id&&state.drag.pointerId===e.pointerId)state.drag=null;};
   bar.addEventListener('pointerup',stop);bar.addEventListener('pointercancel',stop);bar.addEventListener('lostpointercapture',stop);
+
+  // Resize from bottom-right handle
+  const rz=element.querySelector('[data-resize]');
+  if(rz){
+    rz.addEventListener('pointerdown',e=>{
+      if(state.opened.get(id)?.maximized||e.button!==0)return;
+      e.stopPropagation();
+      const rect=element.getBoundingClientRect();
+      state.drag={id,pointerId:e.pointerId,resize:true,startW:rect.width,startH:rect.height,sx:e.clientX,sy:e.clientY};
+      try{rz.setPointerCapture(e.pointerId);}catch{}
+      focusWindow(id);e.preventDefault();
+    });
+    rz.addEventListener('pointermove',e=>{
+      const d=state.drag;if(!d||d.id!==id||!d.resize||d.pointerId!==e.pointerId)return;
+      const area=$('desktopWorkspace');
+      const w=Math.max(300,Math.min(area.clientWidth-8,d.startW+(e.clientX-d.sx)));
+      const h=Math.max(200,Math.min(area.clientHeight-8,d.startH+(e.clientY-d.sy)));
+      element.style.width=`${w}px`;element.style.height=`${h}px`;
+      const win=state.opened.get(id);if(win){win.width=w;win.height=h;}
+    });
+    rz.addEventListener('pointerup',stop);rz.addEventListener('pointercancel',stop);rz.addEventListener('lostpointercapture',stop);
+  }
 }
 function focusWindow(id) {
   const win=state.opened.get(id);if(!win)return;win.minimized=false;state.active=id;state.z++;
-  const el=document.querySelector(`[data-window="${id}"]`);if(el){el.classList.remove('is-minimized');el.style.zIndex=state.z;el.classList.add('is-active');}
-  for(const [other] of state.opened)if(other!==id)document.querySelector(`[data-window="${other}"]`)?.classList.remove('is-active');
+  // Normal windows: z 20–999; always-on-top: 10000+
+  const base = win.alwaysOnTop ? 10000 : 20;
+  const el=document.querySelector(`[data-window="${id}"]`);
+  if(el){
+    el.classList.remove('is-minimized');
+    el.classList.toggle('is-pinned', !!win.alwaysOnTop);
+    el.style.zIndex = base + state.z;
+    el.classList.add('is-active');
+  }
+  for(const [other, ow] of state.opened){
+    if(other===id) continue;
+    const oel=document.querySelector(`[data-window="${other}"]`);
+    if(!oel) continue;
+    oel.classList.remove('is-active');
+    // Keep pinned windows above normal even when not active
+    if(ow.alwaysOnTop && !win.alwaysOnTop) {
+      oel.style.zIndex = 10000 + (Number(oel.style.zIndex) % 1000 || 1);
+    }
+  }
   renderTaskbar();
+}
+
+function togglePinWindow(id) {
+  const win = state.opened.get(id);
+  if (!win) return;
+  win.alwaysOnTop = !win.alwaysOnTop;
+  const el = document.querySelector(`[data-window="${id}"]`);
+  if (el) {
+    el.classList.toggle('is-pinned', win.alwaysOnTop);
+    const pin = el.querySelector('.pin-btn');
+    if (pin) pin.classList.toggle('is-on', win.alwaysOnTop);
+  }
+  focusWindow(id);
+  toast(win.alwaysOnTop ? 'Окно поверх остальных' : 'Обычный порядок окон', 'success');
 }
 function minimizeWindow(id) {const win=state.opened.get(id);if(!win)return;win.minimized=true;document.querySelector(`[data-window="${id}"]`)?.classList.add('is-minimized');document.querySelector(`[data-window="${id}"]`)?.classList.remove('is-active');if(state.active===id)state.active=null;const next=[...state.opened.keys()].reverse().find(k=>!state.opened.get(k).minimized);if(next)focusWindow(next);else renderTaskbar();}
 function closeWindow(id) {state.opened.delete(id);if(isTerminalId(id))state.terminals.delete(id);document.querySelector(`[data-window="${id}"]`)?.remove();if(state.active===id)state.active=null;const next=[...state.opened.keys()].reverse().find(k=>!state.opened.get(k).minimized);if(next)focusWindow(next);else renderTaskbar();}
@@ -378,56 +435,294 @@ function renderForge(g) {
   <div class="notice">Плагины созданы разработчиком. Игрок может устанавливать и удалять готовые пакеты, но не создавать и не публиковать плагины.</div>
   ${categories.map(cat=>`<div class="panel section-gap"><div class="panel-title"><span>${esc(cat.toUpperCase())}</span><small>${PLUGINS.filter(p=>p.category===cat).length} PACKAGES</small></div><div class="list">${PLUGINS.filter(p=>p.category===cat).map(p=>renderPluginCard(g,p)).join('')}</div></div>`).join('')}`;
 }
-function ensureBrowserTab(siteId) {
-  const site=getSite(state.game,siteId);if(!site)return;
-  let tab=state.browserTabs.find(t=>t.siteId===siteId);if(!tab)tab={id:idempotencyKey('tab'),siteId};
-  state.browserTabs=state.browserTabs.filter(t=>t.siteId!==siteId);state.browserTabs.push(tab);state.browserTabs=state.browserTabs.slice(-5);state.game.browser.activeSite=siteId;recordHistory(state.game,siteId);scheduleSave();
-}
-function navigateBrowser(value) {
-  const input=String(value||'').trim().toLowerCase().replace(/^https?:\/\//,'').replace(/\/$/,'');
-  if(!input){toast('Введи название игрового сайта или адрес .null.','error');return;}
-  const site=state.game.world.sites.find(s=>s.domain===input||s.id===input||s.title.toLowerCase()===input)||state.game.world.sites.find(s=>`${s.title} ${s.domain} ${s.kind} ${s.description}`.toLowerCase().includes(input));
-  if(!site){toast('Совпадений нет. Browser открывает только сайты вымышленного мира с доменом .null.','error');return;}
-  ensureBrowserTab(site.id);renderWindow('browser');
-}
-function renderBrowser(g) {
-  const siteId=state.browserTabs[state.browserTabs.length-1]?.siteId||g.browser.activeSite||'';
-  if(!siteId){const homes=g.world.sites;return `<div class="app-heading"><div><div class="eyebrow">NULLBYTE BROWSER / FICTIONAL INTERNET</div><h2>Browser</h2><p>Внутриигровая сеть. Поиск работает только по личному миру.</p></div><span class="badge green">OFFLINE SAFE</span></div><form class="browser-address" id="browserForm"><input class="field" name="address" placeholder="Поиск по сайтам или адрес .null" autocomplete="off"><button class="btn" type="submit">ПОИСК</button></form><div class="panel section-gap"><div class="panel-title"><span>ЗАКЛАДКИ</span><small>${g.browser.bookmarks.length}</small></div><div class="list">${g.browser.bookmarks.map(id=>getSite(g,id)).filter(Boolean).map(s=>`<div class="list-row"><div class="list-main"><strong>${esc(s.title)}</strong><small>${esc(s.domain)}</small></div><button class="btn tiny ghost" data-action="browser-tab" data-site="${s.id}">ОТКРЫТЬ</button></div>`).join('')||'<div class="empty-state"><b>Нет закладок</b><p>Сохраняй интересные сайты.</p></div>'}</div></div><div class="panel section-gap"><div class="panel-title"><span>ИСТОРИЯ</span><small>${g.browser.history.length}</small></div><div class="list">${g.browser.history.slice(0,8).map(h=>{const s=getSite(g,h.siteId);return s?`<div class="list-row"><div class="list-main"><strong>${esc(s.title)}</strong><small>${esc(s.domain)} · ${formatTime(h.at)}</small></div><button class="btn tiny ghost" data-action="browser-tab" data-site="${s.id}">ПОВТОРИТЬ</button></div>`:''}).join('')||'<div class="empty-state"><b>История пуста</b><p>Открой первый игровой сайт.</p></div>'}</div></div><div class="panel section-gap"><div class="panel-title"><span>КАТАЛОГ ИГРОВЫХ САЙТОВ</span><small>${homes.length} DOMAINS</small></div><div class="list">${homes.map(s=>`<div class="list-row"><div class="list-main"><strong>${esc(s.title)}</strong><small>${esc(s.domain)} · ${esc(s.kind)}</small></div><button class="btn tiny" data-action="browser-tab" data-site="${s.id}">ОТКРЫТЬ</button></div>`).join('')}</div></div><div class="notice section-gap">Никаких внешних сайтов, поисковых систем или сетевых запросов — только вымышленный мир NULLBYTE.</div>`;}
-  const tabs=state.browserTabs.length?state.browserTabs:[{id:'home',siteId}];const site=getSite(g,siteId)||g.world.sites[0];
-  const p=getSiteProgress(g,site.id),activeMission=g.missions.items.find(m=>m.status==='accepted'&&m.target===site.id),isBookmarked=g.browser.bookmarks.includes(site.id),locked=site.recoveryAt>Date.now();
-  const flavor = ({
-    shop: { accent: '#d7b16d', label: 'MARKETFRONT', blurb: 'Каталог и витрина. Публичные карточки заказов.' },
-    bank: { accent: '#76c8a2', label: 'FINNODE', blurb: 'Закрытый контур. Отдельный эндгейм-протокол.' },
-    auto: { accent: '#55b9e9', label: 'AUTOHUB', blurb: 'Сервисные карточки и учёт техники.' },
-    utility: { accent: '#b59ad9', label: 'GRIDGATE', blurb: 'Телеметрия и журналы контроллеров.' },
-    forum: { accent: '#98b8e5', label: 'THREADNET', blurb: 'Сообщения и публичные ветки.' },
-    database: { accent: '#d77d86', label: 'RECORDVAULT', blurb: 'Структурированные виртуальные записи.' },
-    device: { accent: '#7dcea0', label: 'HANDSET', blurb: 'Демо-профиль устройства NPC.' },
-    wifi: { accent: '#5dade2', label: 'AIRLINK', blurb: 'Параметры точки доступа.' }
-  })[site.kind] || { accent: '#1793d1', label: 'NODE', blurb: 'Игровая цель.' };
-  const chain = [
-    ['analyzed', 'analyze'],
-    ['decoded', 'decode'],
-    ['node', 'node'],
-    ['weakness', 'weakness'],
-    ['access', 'access'],
-    ...(site.kind === 'database' ? [['database', 'db']] : []),
-    ['exported', 'export']
-  ];
-  const chainHtml = chain.map(([flag, label]) => `<span class="chain-pip ${p[flag] ? 'on' : ''}">${label}</span>`).join('<span class="chain-sep">›</span>');
-  const missionFiles = site.kind !== 'bank' && activeMission && p.exported && activeMission.resultFileId
-    ? `<div class="btn-row section-gap"><span class="badge green">FILE READY</span><button class="btn tiny" data-action="open-app" data-app="mail">N-MAIL</button></div>`
-    : '';
 
-    return `<div class="browser-top"><div class="browser-traffic"><i></i><i></i><i></i></div><form class="browser-address" id="browserForm"><input class="field" name="address" value="${esc(site.domain)}" aria-label="Игровой адрес" autocomplete="off"><button class="btn tiny" type="submit">ПЕРЕЙТИ</button></form><button class="btn tiny ghost" data-action="browser-home">⌂</button></div>
-  <div class="browser-tabs">${tabs.map(t=>{const s=getSite(g,t.siteId);return s?`<div class="browser-tab-wrap ${s.id===site.id?'active':''}"><button class="browser-tab" data-action="browser-tab" data-site="${s.id}">${esc(s.title)}</button><button class="browser-tab-close" type="button" data-action="browser-close-tab" data-tab="${esc(t.id)}" aria-label="Закрыть вкладку ${esc(s.title)}">×</button></div>`:''}).join('')}</div>
-  <div class="site-hero site-kind-${esc(site.kind)}" style="--site-accent:${flavor.accent}"><div class="site-domain">${esc(site.domain)} · ${esc(site.kind.toUpperCase())} · ${esc(site.region)}</div><div class="app-heading" style="margin:6px 0"><h3>${esc(site.title)}</h3><div class="btn-row"><button class="btn tiny ghost" data-action="bookmark-site" data-site="${site.id}">${isBookmarked?'★':'☆'} ${isBookmarked?'СОХРАНЕНО':'ЗАКЛАДКА'}</button><span class="badge ${locked?'red':'green'}">${locked?'RECOVERING':'ONLINE'}</span></div></div><p>${esc(site.description)}</p></div>
-  <div class="grid-2 section-gap"><div class="stat-box"><span>SECURITY LEVEL</span><strong>${site.security}/5</strong><small>игровая модель защиты</small></div><div class="stat-box"><span>REVISION</span><strong>${site.revision}</strong><small>состояние сайта</small></div></div>
-  ${locked?`<div class="notice warning section-gap">Цель восстанавливается после предыдущей операции. Осталось примерно ${humanLeft(site.recoveryAt-Date.now())}.</div>`:''}
-  <div class="panel section-gap site-panel"><div class="panel-title"><span>SURFACE</span><small>${activeMission?`JOB ${activeMission.id}`:flavor.label}</small></div>${site.kind==='bank'?`<div class="notice warning">Закрытый банковский контур. Протокол — в Aster Bank.</div><button class="btn section-gap" data-action="open-app" data-app="bank">ASTER BANK</button>`:`<div class="site-intel" style="--site-accent:${flavor.accent}"><div class="site-intel-tag">${esc(flavor.label)}</div><p>${esc(flavor.blurb)}</p><div class="chain-row">${chainHtml}</div><div class="btn-row section-gap"><button class="btn tiny" type="button" data-action="copy-domain" data-domain="${esc(site.domain)}">КОПИРОВАТЬ ДОМЕН</button><button class="btn tiny ghost" type="button" data-action="open-app" data-app="terminal">TERMINAL</button></div><div class="small muted">Домен для плагинов: <code>${esc(site.domain)}</code></div></div>`}${missionFiles}</div>
-  <div class="panel section-gap"><div class="panel-title"><span>СОСТОЯНИЕ ЦЕЛИ</span><small>SIMULATION SNAPSHOT</small></div><div class="kv"><span>Сигнатура</span><b>${p.analyzed?esc(site.artifact):'········'}</b></div><div class="kv"><span>Анализ</span><b>${p.analyzed?'OK':'—'}</b></div><div class="kv"><span>Доступ</span><b>${p.access?'OK':'—'}</b></div><div class="kv"><span>Текущее содержимое</span><b>${esc(site.siteText)}</b></div>${p.access?`<div class="notice success section-gap">Виртуальные данные: ${esc(site.data)}</div>`:''}<div class="btn-row section-gap"><button class="btn tiny ghost" data-action="open-app" data-app="map">ОТКРЫТЬ В NULLATLAS</button><button class="btn tiny ghost" data-action="open-app" data-app="blackwire">КОНТРАКТЫ</button></div></div>
-  <div class="panel section-gap"><div class="panel-title"><span>ДОСТУПНЫЕ ИГРОВЫЕ САЙТЫ</span><small>${g.world.sites.length} HOSTS</small></div><div class="list">${g.world.sites.map(s=>`<div class="list-row"><div class="list-main"><strong>${esc(s.title)}</strong><small>${esc(s.domain)} · security ${s.security}</small></div><button class="btn tiny ghost" data-action="browser-tab" data-site="${s.id}">ОТКРЫТЬ</button></div>`).join('')}</div></div>`;
+function ensureBrowserState() {
+  if (!Array.isArray(state.browserTabs)) state.browserTabs = [];
+  if (typeof state.browserActive !== 'number') state.browserActive = 0;
+  if (!Array.isArray(state.browserClosed)) state.browserClosed = [];
 }
+
+function ensureBrowserTab(siteId, page = 'home') {
+  ensureBrowserState();
+  const site = getSite(state.game, siteId);
+  if (!site) return null;
+  let tab = state.browserTabs.find(t => t.siteId === siteId);
+  if (!tab) {
+    tab = {
+      id: `tab_${siteId}_${Date.now().toString(36)}`,
+      siteId,
+      page: page || 'home',
+      title: site.title,
+      history: [{ page: page || 'home' }],
+      histIdx: 0,
+      loading: false
+    };
+    state.browserTabs.push(tab);
+  } else {
+    tab.page = page || tab.page || 'home';
+  }
+  state.browserActive = state.browserTabs.indexOf(tab);
+  state.game.browser.activeSite = siteId;
+  const hist = state.game.browser.history || [];
+  if (hist[0]?.siteId !== siteId) {
+    hist.unshift({ siteId, at: Date.now() });
+    state.game.browser.history = hist.slice(0, 40);
+  }
+  scheduleSave();
+  return tab;
+}
+
+function navigateBrowser(value) {
+  ensureBrowserState();
+  const input = String(value || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+  if (!input) { toast('Введи адрес .null или название сайта.', 'error'); return; }
+  // internal path: domain/page
+  let domain = input, page = 'home';
+  if (input.includes('/')) {
+    const parts = input.split('/');
+    domain = parts[0];
+    page = parts.slice(1).join('/') || 'home';
+  }
+  const site = state.game.world.sites.find(s => s.domain === domain || s.id === domain || s.title.toLowerCase() === domain)
+    || state.game.world.sites.find(s => `${s.title} ${s.domain} ${s.kind}`.toLowerCase().includes(domain));
+  if (!site) { toast('Нет совпадений в сети .null', 'error'); return; }
+  const tab = ensureBrowserTab(site.id, page);
+  if (tab) {
+    tab.loading = true;
+    renderWindow('browser');
+    setTimeout(() => {
+      tab.loading = false;
+      if (state.opened.has('browser')) renderWindow('browser');
+    }, 280 + Math.random() * 420);
+  }
+}
+
+function browserGoPage(page) {
+  ensureBrowserState();
+  const tab = state.browserTabs[state.browserActive];
+  if (!tab) return;
+  tab.page = page || 'home';
+  tab.history = (tab.history || []).slice(0, tab.histIdx + 1);
+  tab.history.push({ page: tab.page });
+  tab.histIdx = tab.history.length - 1;
+  tab.loading = true;
+  renderWindow('browser');
+  setTimeout(() => { tab.loading = false; if (state.opened.has('browser')) renderWindow('browser'); }, 200);
+}
+
+function browserBack() {
+  const tab = state.browserTabs[state.browserActive];
+  if (!tab || tab.histIdx <= 0) return;
+  tab.histIdx--;
+  tab.page = tab.history[tab.histIdx].page;
+  renderWindow('browser');
+}
+function browserForward() {
+  const tab = state.browserTabs[state.browserActive];
+  if (!tab || tab.histIdx >= tab.history.length - 1) return;
+  tab.histIdx++;
+  tab.page = tab.history[tab.histIdx].page;
+  renderWindow('browser');
+}
+function browserReload() {
+  const tab = state.browserTabs[state.browserActive];
+  if (!tab) return;
+  tab.loading = true;
+  renderWindow('browser');
+  setTimeout(() => { tab.loading = false; if (state.opened.has('browser')) renderWindow('browser'); }, 350);
+}
+function browserNewTab() {
+  ensureBrowserState();
+  state.browserTabs.push({ id: `tab_new_${Date.now()}`, siteId: '', page: 'start', title: 'Новая вкладка', history: [{ page: 'start' }], histIdx: 0, loading: false });
+  state.browserActive = state.browserTabs.length - 1;
+  renderWindow('browser');
+}
+function browserCloseTab(idx) {
+  ensureBrowserState();
+  if (state.browserTabs.length <= 1) {
+    state.browserTabs = [{ id: 'tab_start', siteId: '', page: 'start', title: 'Новая вкладка', history: [{ page: 'start' }], histIdx: 0 }];
+    state.browserActive = 0;
+  } else {
+    const [closed] = state.browserTabs.splice(idx, 1);
+    if (closed?.siteId) state.browserClosed.unshift(closed);
+    state.browserClosed = (state.browserClosed || []).slice(0, 10);
+    state.browserActive = Math.max(0, Math.min(state.browserActive, state.browserTabs.length - 1));
+  }
+  renderWindow('browser');
+}
+
+function renderSitePage(g, site, page, progress) {
+  const locked = site.recoveryAt > Date.now();
+  const access = progress.access;
+  const p = page || 'home';
+
+  if (locked) {
+    return `<div class="site-page site-error"><div class="site-error-code">503</div><h2>Service Recovering</h2><p>${esc(site.domain)} временно недоступен · recovery ${humanLeft(site.recoveryAt - Date.now())}</p></div>`;
+  }
+
+  // Nav helper
+  const nav = (items) => `<nav class="site-nav">${items.map(([pg, lab]) => `<button type="button" class="site-nav-link ${p===pg?'on':''}" data-action="browser-page" data-page="${pg}">${lab}</button>`).join('')}</nav>`;
+
+  if (site.kind === 'shop') {
+    const products = [
+      { n: 'NullCore CPU kit', price: 420 },
+      { n: 'Mesh RAM stick', price: 180 },
+      { n: 'Harbor SSD 512', price: 310 },
+      { n: 'Order VM-204 (ledger)', price: '—' }
+    ];
+    if (p === 'catalog') {
+      return `<div class="site-page site-shop"><header class="site-hero shop"><div class="site-brand">VOLT<span>MARKET</span></div>${nav([['home','Главная'],['catalog','Каталог'],['orders','Заказы'],['about','О нас']])}</header>
+        <div class="site-body"><h2>Каталог</h2><div class="shop-grid">${products.map(x=>`<div class="shop-card"><strong>${esc(x.n)}</strong><span>${x.price=== '—' ? 'ledger' : x.price+' CR'}</span></div>`).join('')}</div>
+        <p class="site-note">Публичная витрина. Глубокие записи заказа — через операции в Terminal.</p></div></div>`;
+    }
+    if (p === 'orders') {
+      return `<div class="site-page site-shop"><header class="site-hero shop"><div class="site-brand">VOLT<span>MARKET</span></div>${nav([['home','Главная'],['catalog','Каталог'],['orders','Заказы'],['about','О нас']])}</header>
+        <div class="site-body"><h2>Заказы</h2>
+        <div class="data-table"><div class="dt-row head"><span>ID</span><span>Статус</span><span>Сумма</span></div>
+        <div class="dt-row"><span>VM-204</span><span>${access?'visible':'restricted'}</span><span>···</span></div>
+        <div class="dt-row"><span>VM-118</span><span>shipped</span><span>90 CR</span></div></div>
+        <p class="site-note">Артефакт CATALOG-B7 связан с VM-204.</p></div></div>`;
+    }
+    return `<div class="site-page site-shop"><header class="site-hero shop"><div class="site-brand">VOLT<span>MARKET</span></div>${nav([['home','Главная'],['catalog','Каталог'],['orders','Заказы'],['about','О нас']])}</header>
+      <div class="site-body"><h1>Электроника и комплектующие</h1><p>${esc(site.description)}</p>
+      <div class="shop-grid">${products.slice(0,3).map(x=>`<div class="shop-card"><strong>${esc(x.n)}</strong><span>${x.price} CR</span></div>`).join('')}</div>
+      <p class="site-meta">Регион: ${esc(site.region)} · sec ${site.security}/5</p></div></div>`;
+  }
+
+  if (site.kind === 'bank') {
+    return `<div class="site-page site-bank"><header class="site-hero bank"><div class="site-brand">ASTER <span>UNION</span></div>${nav([['home','Обзор'],['security','Безопасность'],['about','О банке']])}</header>
+      <div class="site-body">
+        <div class="bank-dash"><div class="bank-tile"><span>Контур</span><strong>CLOSED</strong></div><div class="bank-tile"><span>Защита</span><strong>${site.security}/5 + boost</strong></div><div class="bank-tile"><span>Статус</span><strong>${site.state}</strong></div></div>
+        <p>Aster Union Bank — эндгейм-контур. Операции только через банковский протокол игры, не через обычную цепочку сайтов.</p>
+        <div class="bank-chart"><i style="height:40%"></i><i style="height:65%"></i><i style="height:50%"></i><i style="height:80%"></i><i style="height:55%"></i></div>
+        <p class="site-note">Требуется уровень ${8}+ и отдельный набор инструментов.</p>
+      </div></div>`;
+  }
+
+  if (site.kind === 'forum') {
+    const threads = [
+      { t: 'Правила симуляции', by: 'mod_cobalt', n: 12 },
+      { t: 'Сборка null-mesh', by: 'night_runner', n: 5 },
+      { t: 'Сигналы с Площади Маяк', by: 'harbor_ops', n: 8 }
+    ];
+    if (p === 'threads') {
+      return `<div class="site-page site-forum"><header class="site-hero forum"><div class="site-brand">COBALT <span>FORUM</span></div>${nav([['home','Лента'],['threads','Темы'],['users','Участники']])}</header>
+        <div class="site-body"><h2>Темы</h2>${threads.map(th=>`<div class="forum-row"><strong>${esc(th.t)}</strong><small>${esc(th.by)} · ${th.n} msg</small></div>`).join('')}
+        <p class="site-note">Полные тексты сообщений — через контракт / Terminal export.</p></div></div>`;
+    }
+    return `<div class="site-page site-forum"><header class="site-hero forum"><div class="site-brand">COBALT <span>FORUM</span></div>${nav([['home','Лента'],['threads','Темы'],['users','Участники']])}</header>
+      <div class="site-body"><h1>Сообщество Cobalt</h1><p>${esc(site.description)}</p>
+      ${threads.slice(0,2).map(th=>`<div class="forum-row"><strong>${esc(th.t)}</strong><small>${esc(th.by)}</small></div>`).join('')}
+      </div></div>`;
+  }
+
+  if (site.kind === 'database') {
+    return `<div class="site-page site-gov"><header class="site-hero gov"><div class="site-brand">CIVIC <span>RECORDS</span></div>${nav([['home','Портал'],['registry','Реестр'],['docs','Документы']])}</header>
+      <div class="site-body">
+        <h1>Муниципальный реестр</h1>
+        <p>Официальный интерфейс. Записи CR-* доступны операторам с Virtual DB Reader.</p>
+        <div class="gov-box"><span>Раздел</span><strong>${p==='registry'?'REGISTRY':'PUBLIC'}</strong></div>
+        <div class="data-table"><div class="dt-row head"><span>Код</span><span>Класс</span><span>Доступ</span></div>
+        <div class="dt-row"><span>CR-29</span><span>archive</span><span>${progress.database||access?'granted':'restricted'}</span></div>
+        <div class="dt-row"><span>CR-11</span><span>public</span><span>open</span></div></div>
+      </div></div>`;
+  }
+
+  if (site.kind === 'utility') {
+    return `<div class="site-page site-util"><header class="site-hero util"><div class="site-brand">GRID<span>WORKS</span></div>${nav([['home','Статус'],['logs','Журналы'],['nodes','Узлы']])}</header>
+      <div class="site-body"><h1>Сетевой контроллер</h1>
+      <div class="util-meters"><div><span>Load</span><b>${30+site.security*8}%</b></div><div><span>Nodes</span><b>14</b></div><div><span>Journal</span><b>GW-11</b></div></div>
+      <p>${esc(site.description)}</p>
+      <p class="site-note">Телеметрия публична частично. Полный журнал — через операции.</p></div></div>`;
+  }
+
+  if (site.kind === 'auto') {
+    return `<div class="site-page site-auto"><header class="site-hero auto"><div class="site-brand">NEON <span>MOTORS</span></div>${nav([['home','Сервис'],['cards','Карточки'],['about','О сервисе']])}</header>
+      <div class="site-body"><h1>Сервисные карточки</h1>
+      <div class="auto-card"><strong>NM-88</strong><span>VIN-SIM-88</span><small>status: workshop</small></div>
+      <div class="auto-card"><strong>NM-12</strong><span>VIN-SIM-12</span><small>status: ready</small></div>
+      <p class="site-note">Авто-механика как отдельная система — LOCKED. Здесь только веб-карточки.</p></div></div>`;
+  }
+
+  if (site.kind === 'device') {
+    return `<div class="site-page site-device"><header class="site-hero device"><div class="site-brand">POCKET <span>MOBILE</span></div>${nav([['home','Устройство'],['apps','Приложения']])}</header>
+      <div class="site-body"><div class="phone-frame"><div class="phone-screen"><strong>PM-22</strong><small>demo handset</small><p>Сеть: NorthWifi</p></div></div>
+      <p>${esc(site.description)}</p>
+      <p class="site-note">Глубокий разбор — map-scanner forensics в Terminal.</p></div></div>`;
+  }
+
+  if (site.kind === 'wifi') {
+    return `<div class="site-page site-wifi"><header class="site-hero wifi"><div class="site-brand">NORTH <span>WIFI</span></div>${nav([['home','Точка'],['status','Статус']])}</header>
+      <div class="site-body"><h1>AP-05 · Площадь Маяк</h1>
+      <div class="wifi-panel"><span>SSID</span><strong>NorthWifi-AP05</strong><span>Signal</span><strong>-48 dBm</strong><span>Clients</span><strong>6</strong></div>
+      <p class="site-note">Параметры точки экспортируются контрактом.</p></div></div>`;
+  }
+
+  // generic
+  return `<div class="site-page site-generic"><header class="site-hero"><div class="site-brand">${esc(site.title)}</div></header>
+    <div class="site-body"><p>${esc(site.description)}</p><p class="site-meta">${esc(site.domain)} · ${esc(site.kind)} · sec ${site.security}</p></div></div>`;
+}
+
+function renderBrowserStart(g) {
+  const sites = g.world.sites;
+  return `<div class="browser-start">
+    <div class="browser-start-hero"><h1>NULLBYTE NET</h1><p>Только домены .null · локальная симуляция</p></div>
+    <form class="browser-start-search" id="browserForm"><input class="field" name="address" placeholder="адрес .null или название" autocomplete="off"><button class="btn primary" type="submit">Перейти</button></form>
+    <div class="browser-start-grid">${sites.map(s=>`<button type="button" class="start-tile kind-${esc(s.kind)}" data-action="browser-tab" data-site="${s.id}"><strong>${esc(s.title)}</strong><small>${esc(s.domain)}</small></button>`).join('')}</div>
+    <div class="browser-start-side">
+      <div><h3>История</h3>${(g.browser.history||[]).slice(0,5).map(h=>{const s=getSite(g,h.siteId);return s?`<button type="button" class="linkish" data-action="browser-tab" data-site="${s.id}">${esc(s.domain)}</button>`:'';}).join('')||'<span class="muted">пусто</span>'}</div>
+      <div><h3>Закладки</h3>${(g.browser.bookmarks||[]).map(id=>{const s=getSite(g,id);return s?`<button type="button" class="linkish" data-action="browser-tab" data-site="${s.id}">${esc(s.title)}</button>`:'';}).join('')||'<span class="muted">нет</span>'}</div>
+    </div>
+  </div>`;
+}
+
+function renderBrowser(g) {
+  ensureBrowserState();
+  if (!state.browserTabs.length) {
+    state.browserTabs = [{ id: 'tab_start', siteId: '', page: 'start', title: 'Новая вкладка', history: [{ page: 'start' }], histIdx: 0 }];
+    state.browserActive = 0;
+  }
+  const tab = state.browserTabs[state.browserActive] || state.browserTabs[0];
+  const site = tab.siteId ? getSite(g, tab.siteId) : null;
+  const progress = site ? getSiteProgress(g, site.id) : {};
+  const address = site ? `${site.domain}${tab.page && tab.page !== 'home' ? '/' + tab.page : ''}` : '';
+  const secure = site && site.state === 'online' && !(site.recoveryAt > Date.now());
+
+  const tabsHtml = state.browserTabs.map((t, idx) => {
+    const s = t.siteId ? getSite(g, t.siteId) : null;
+    const title = s ? s.title : (t.title || 'Новая вкладка');
+    const fav = s ? s.kind.slice(0, 1).toUpperCase() : '+';
+    return `<div class="chrome-tab ${idx===state.browserActive?'on':''}" data-action="browser-activate-tab" data-idx="${idx}">
+      <span class="chrome-fav">${fav}</span><span class="chrome-tab-title">${esc(title)}</span>
+      <button type="button" class="chrome-tab-x" data-action="browser-close-tab" data-idx="${idx}" aria-label="Закрыть">×</button>
+    </div>`;
+  }).join('') + `<button type="button" class="chrome-tab-add" data-action="browser-new-tab" title="Новая вкладка">+</button>`;
+
+  let pageHtml;
+  if (!site || tab.page === 'start') pageHtml = renderBrowserStart(g);
+  else pageHtml = renderSitePage(g, site, tab.page, progress);
+
+  const canBack = tab.histIdx > 0;
+  const canFwd = tab.history && tab.histIdx < tab.history.length - 1;
+
+  return `<div class="browser-app">
+    <div class="chrome-tabs">${tabsHtml}</div>
+    <div class="chrome-toolbar">
+      <button type="button" class="chrome-btn" data-action="browser-back" ${canBack?'':'disabled'} title="Назад">←</button>
+      <button type="button" class="chrome-btn" data-action="browser-forward" ${canFwd?'':'disabled'} title="Вперёд">→</button>
+      <button type="button" class="chrome-btn" data-action="browser-reload" title="Обновить">↻</button>
+      <div class="chrome-omnibox ${tab.loading?'is-loading':''}">
+        <span class="chrome-lock" title="${secure?'Secure · sim TLS':'Not secure'}">${secure?'🔒':'⚠️'}</span>
+        <form id="browserForm" class="chrome-form"><input name="address" value="${esc(address)}" placeholder="Введите адрес .null" autocomplete="off" spellcheck="false"></form>
+        ${tab.loading?'<span class="chrome-spinner"></span>':''}
+      </div>
+      ${site?`<button type="button" class="chrome-btn" data-action="browser-bookmark" data-site="${site.id}" title="В закладки">☆</button>`:''}
+    </div>
+    <div class="chrome-page ${tab.loading?'is-dim':''}">${pageHtml}</div>
+  </div>`;
+}
+
+
 function renderMap(g) {
   const scanner=getInstalledPlugin(g,'map-scanner');
   const points=LOCATIONS.map(loc=>`<button class="map-point" style="left:${loc.x}%;top:${loc.y}%" data-action="map-location" data-location="${loc.id}">${esc(loc.name)}</button>`).join('');
@@ -488,57 +783,43 @@ function renderMissionGuide(m, g) {
 
 
 function renderBlackWire(g) {
-  const items=g.missions.items.filter(m=>['available','accepted','submitted'].includes(m.status));
-  const selected=state.selectedMissionId?g.missions.items.find(x=>x.id===state.selectedMissionId):null;
-  const card=m=>{
-    const site=getSite(g,m.target);
+  const now = Date.now();
+  const boardLeft = typeof missionBoardTimer === 'function' ? missionBoardTimer(g, now) : 0;
+  const boardMin = Math.floor(boardLeft / 60000);
+  const boardSec = Math.floor((boardLeft % 60000) / 1000);
+  const boardIds = new Set(g.intel?.boardIds || []);
+  const available = g.missions.items.filter(m => m.status === 'available' && (boardIds.size ? boardIds.has(m.id) : true));
+  const active = g.missions.items.filter(m => m.status === 'accepted' || m.status === 'submitted');
+  const selected = state.selectedMissionId ? g.missions.items.find(x => x.id === state.selectedMissionId) : null;
+  const card = m => {
+    const site = getSite(g, m.target);
     return `<article class="contract-card ${state.selectedMissionId===m.id?'is-selected':''}">
-      <div class="contract-top"><strong>${esc(m.title)}</strong><span class="badge ${m.status==='accepted'?'amber':m.status==='submitted'?'green':'gray'}">${m.status==='accepted'?'ACTIVE':m.status==='submitted'?'VERIFYING':'AVAILABLE'}</span></div>
+      <div class="contract-top"><strong>${esc(m.title)}</strong><span class="badge ${m.status==='accepted'?'amber':m.status==='submitted'?'green':'gray'}">${m.status==='accepted'?'ACTIVE':m.status==='submitted'?'VERIFYING':(m.category||'JOB').toUpperCase()}</span></div>
       <p>${esc(m.objective)}</p>
-      <div class="contract-meta"><span>ID ${esc(m.id)}</span><span>ЦЕЛЬ ${esc(site?.domain||m.target)}</span><span>SEC ${site?.security||'—'}</span><span>${esc(m.difficulty)}</span></div>
-      <div class="contract-meta section-gap"><span>TOOLS ${(m.requiredPlugins||[]).map(id=>getPlugin(id)?.name||id).map(esc).join(' · ')||'Базовые'}</span></div>
-      <div class="contract-meta section-gap"><span class="text-green">+${fmt(m.reward)} CR</span><span>+${fmt(m.xp)} XP</span><span>CLIENT ${esc(m.client)}</span></div>
+      <div class="contract-meta"><span>ID ${esc(m.id)}</span><span>ЦЕЛЬ ${esc(site?.domain||m.target)}</span><span>${esc(m.difficulty)}</span></div>
+      <div class="contract-meta section-gap"><span class="text-green">+${fmt(m.reward)} CR</span><span>+${fmt(m.xp)} XP</span><span>${esc(m.client)}</span></div>
       <div class="divider"></div>
-      <div class="small muted">Подсказка: ${esc(m.hint)}</div>
+      <div class="small muted">${esc(m.hint||'')}</div>
       <div class="btn-row">
-        <button class="btn tiny" data-action="mission-details" data-id="${m.id}">ПОДРОБНЕЕ / ГАЙД</button>
-        ${m.status==='available'?`<button class="btn primary" data-action="accept-mission" data-id="${m.id}">ПРИНЯТЬ</button>`:m.status==='accepted'?`<span class="badge amber">ACTIVE</span>`:`<span class="badge green">ПРОВЕРКА · ${humanLeft(m.verifyAt-Date.now())}</span>`}
+        <button class="btn tiny" data-action="mission-details" data-id="${m.id}">ДЕТАЛИ</button>
+        ${m.status==='available'?`<button class="btn primary" data-action="accept-mission" data-id="${m.id}">ПРИНЯТЬ</button>`:''}
+        ${m.status==='accepted'?`<button class="btn tiny danger" data-action="cancel-mission" data-id="${m.id}">ОТМЕНИТЬ</button>`:''}
+        ${m.status==='submitted'?`<span class="badge green">ПРОВЕРКА · ${humanLeft(m.verifyAt-now)}</span>`:''}
       </div>
     </article>`;
   };
-  const locked=g.missions.items.filter(m=>m.status==='locked');
-  return `<div class="app-heading"><div><div class="eyebrow">BLACKWIRE / NPC CONTRACT BOARD</div><h2>BlackWire</h2><p>Биржа заказов от персонажей игрового мира. Без реальных пользователей и чата.</p></div><span class="badge">SOLO MODE</span></div>
-  <div class="grid-3"><div class="stat-box"><span>ACTIVE</span><strong>${g.missions.items.filter(m=>m.status==='accepted').length}</strong><small>активные контракты</small></div><div class="stat-box"><span>VERIFYING</span><strong>${g.missions.items.filter(m=>m.status==='submitted').length}</strong><small>ожидают проверки</small></div><div class="stat-box"><span>COMPLETED</span><strong>${g.player.contractsCompleted}</strong><small>закрыто</small></div></div>
-  <div class="notice section-gap">Контракты от NPC. Детали и требования — в карточке заказа. Операции выполняются через Terminal и плагины.</div>
+  return `<div class="app-heading"><div><div class="eyebrow">BLACKWIRE / CONTRACT BOARD</div><h2>BlackWire</h2><p>3–4 предложения · ротация 20 мин · активные сохраняются</p></div><span class="badge">SOLO</span></div>
+  <div class="grid-3">
+    <div class="stat-box"><span>OFFERS</span><strong>${available.length}</strong><small>доступно сейчас</small></div>
+    <div class="stat-box"><span>ACTIVE</span><strong>${active.length}</strong><small>в работе</small></div>
+    <div class="stat-box"><span>ROTATION</span><strong>${String(boardMin).padStart(2,'0')}:${String(boardSec).padStart(2,'0')}</strong><small>до смены доски</small></div>
+  </div>
+  ${active.length?`<div class="panel section-gap"><div class="panel-title"><span>АКТИВНЫЕ</span></div><div class="list">${active.map(card).join('')}</div></div>`:''}
+  <div class="section-gap list">${available.length?available.map(card).join(''):'<div class="empty-state"><b>Нет предложений</b><p>Дождись ротации доски.</p></div>'}</div>
   ${selected?renderMissionGuide(selected,g):''}
-  <div class="section-gap list">${items.length?items.map(card).join(''):'<div class="empty-state"><b>Нет доступных контрактов</b><p>Повысь уровень, чтобы открыть новые заказы.</p></div>'}</div>
-  ${locked.length?`<div class="panel section-gap"><div class="panel-title"><span>ЗАБЛОКИРОВАНО</span><small>${locked.length}</small></div><div class="list">${locked.slice(0,8).map(m=>`<div class="list-row"><div class="list-main"><strong>${esc(m.title)}</strong><small>Требуется уровень ${m.minLevel} · ${esc(m.difficulty)}</small></div><button class="btn tiny ghost" data-action="mission-details" data-id="${m.id}">ГАЙД</button></div>`).join('')}</div></div>`:''}`;
+  <div class="notice section-gap">Отмена активного контракта снимает его без награды. Собранные артефакты остаются.</div>`;
 }
 
-function renderMail(g) {
-  const pending=g.missions.items.filter(m=>m.status==='accepted'&&m.resultFileId);
-  const waitingFile=g.missions.items.filter(m=>m.status==='accepted'&&!m.resultFileId);
-  const selected=g.mail.messages.find(m=>m.id===state.selectedMail)||g.mail.messages[0];
-  const list=g.mail.messages.slice(0,30).map(m=>`<button class="mail-item ${m.status==='unread'?'unread':''}" data-action="mail-open" data-id="${m.id}"><strong>${esc(m.subject)}</strong><small>${formatTime(m.at)}</small><p>${esc(m.from)} · ${esc(m.body.slice(0,110))}${m.body.length>110?'…':''}</p></button>`).join('');
-  return `<div class="app-heading"><div><div class="eyebrow">N-MAIL / INTERNAL MESSAGING</div><h2>N-Mail</h2><p>Внутриигровые письма, контракты и отправка файлов.</p></div><span class="badge">${g.mail.messages.filter(m=>m.status==='unread').length} UNREAD</span></div>
-  ${pending.length?`<div class="panel"><div class="panel-title"><span>ГОТОВО К ОТПРАВКЕ</span><small>DELIVERY QUEUE</small></div><div class="list">${pending.map(m=>{const f=g.computer.files.find(x=>x.id===m.resultFileId);return `<div class="list-row"><div class="list-main"><strong>${esc(m.title)}</strong><small>${esc(m.client)} · ${esc(f?.name||'result file')}</small></div><button class="btn tiny primary" data-action="deliver-mission" data-id="${m.id}">ОТПРАВИТЬ</button></div>`;}).join('')}</div></div>`:''}
-  ${waitingFile.length?`<div class="notice warning section-gap">Есть активный контракт без файла результата. Собери данные через плагины в Terminal, затем export — файл появится здесь.<div class="btn-row section-gap">${waitingFile.map(m=>`<button class="btn tiny" data-action="mission-open-target" data-id="${m.id}">ОТКРЫТЬ ${esc(m.id)}</button>`).join('')}</div></div>`:''}
-  <div class="grid-2 section-gap" style="align-items:start"><div class="list">${list||'<div class="empty-state"><b>Входящие пусты</b><p>Письма появятся после контрактов и системных событий.</p></div>'}</div><div class="panel">${selected?`<div class="eyebrow">${selected.direction==='in'?'INCOMING MESSAGE':'SENT MESSAGE'}</div><h3 style="margin:8px 0;color:#e1ebf1;font-size:13px">${esc(selected.subject)}</h3><div class="kv"><span>От</span><b>${esc(selected.from)}</b></div><div class="kv"><span>Дата</span><b>${formatDate(selected.at)} ${formatTime(selected.at)}</b></div><div class="divider"></div><div class="mail-body">${esc(selected.body)}</div>${selected.attachments?.length?selected.attachments.map(id=>{const f=g.computer.files.find(x=>x.id===id);return f?`<button class="attachment" data-action="file-open" data-id="${esc(f.id)}">▣ ${esc(f.name)} · ${f.size} KB</button>`:''}).join(''):''}<div class="btn-row section-gap"><button class="btn tiny ghost" data-action="mail-mark" data-id="${selected.id}">ОТМЕТИТЬ ПРОЧИТАННЫМ</button></div>`:'<div class="empty-state"><b>Выбери письмо</b><p>Содержимое появится здесь.</p></div>'}${state.selectedFileId?(()=>{const f=g.computer.files.find(x=>x.id===state.selectedFileId);return f?`<div class="panel section-gap"><div class="panel-title"><span>ПРОСМОТР ВЛОЖЕНИЯ</span><button class="btn tiny ghost" data-action="file-close">ЗАКРЫТЬ</button></div><strong>${esc(f.name)}</strong><pre class="file-preview">${esc(String(f.content||'').slice(0,2400))}${String(f.content||'').length>2400?'\n… файл сокращён для просмотра':''}</pre></div>`:''})():''}</div></div>
-  <div class="notice section-gap">Почта работает только внутри вымышленной игры. Кнопка «ОТПРАВИТЬ» появляется только после создания файла результата в Browser.</div>`;
-}
-
-function renderBank(g) {
-  const status=bankStatus(g),risk=bankRisk(g),tx=g.economy.transactions.slice(0,30);
-  const missing=risk.missing.map(id=>getPlugin(id)?.name||id);
-  return `<div class="app-heading"><div><div class="eyebrow">ASTER UNION / GAME BANK</div><h2>Aster Bank</h2><p>Игровые кредиты и история экономики.</p></div><span class="badge amber">FICTIONAL BANK</span></div>
-  <div class="bank-balance"><span>AVAILABLE CREDITS</span><strong>${fmt(g.economy.credits)} CR</strong><small>Виртуальный счёт оператора · никакого реального платежа</small></div>
-  ${status.locked?`<div class="notice danger section-gap"><b>БАНК ЗАБЛОКИРОВАН</b><br>Осталось <b data-bank-until="${g.bank.lockUntil}">${humanLeft(status.remaining)}</b>. Банковские операции недоступны. Другие приложения и контракты продолжают работать; награды по контрактам во время блокировки конфискуются.</div>`:''}
-  <div class="panel section-gap"><div class="panel-title"><span>ЭНДГЕЙМ / РИСКОВАЯ СИМУЛЯЦИЯ</span><small>LEVEL ${BALANCE.bankUnlockLevel}+</small></div><p class="muted small">Только игровая проверка. Нужны Vault Decoder, Identity Veil и Trace Obfuscator. При виртуальной трассировке все кредиты конфискуются, а банк блокируется на 24 реальных часа.</p><div class="kv"><span>Требуемый уровень</span><b>${BALANCE.bankUnlockLevel}</b></div><div class="kv"><span>Вероятность трассировки</span><b class="text-red">${Math.round(risk.traceChance*100)}%</b></div><div class="kv"><span>Вероятность успеха</span><b class="text-green">${Math.round(risk.successChance*100)}%</b></div><div class="kv"><span>Награда при успехе</span><b class="text-green">+${fmt(BALANCE.bankReward)} CR</b></div>
-  ${missing.length?`<div class="notice warning section-gap">Не установлены: ${missing.map(esc).join(', ')}.</div>`:''}
-  ${g.computer.os<4?`<div class="notice warning section-gap">Для двух финальных плагинов требуется NULLBYTE OS 4.0. Текущая версия: ${g.computer.os}.0.</div>`:''}
-  <div class="btn-row section-gap"><button class="btn danger" data-action="bank-attempt" ${status.locked||!risk.unlocked||missing.length?'disabled':''}>ЗАПУСТИТЬ СИМУЛЯЦИЮ</button></div></div>
-  <div class="panel section-gap"><div class="panel-title"><span>ИСТОРИЯ ТРАНЗАКЦИЙ</span><small>${tx.length} RECORDS</small></div>${tx.length?tx.map(t=>`<div class="transaction-row"><div><strong>${esc(t.reason)}</strong><small>${formatDate(t.at)} · ${formatTime(t.at)}</small></div><b class="${t.type==='income'?'income':t.type==='confiscated'?'confiscated':'expense'}">${t.type==='income'?'+':'−'}${fmt(t.amount)} CR</b></div>`).join(''):'<div class="empty-state"><b>Нет транзакций</b><p>История появится после получения наград и покупок.</p></div>'}</div>`;
-}
 function terminalPrompt(term) {
   if (term?.plugin) {
     const p = getPlugin(term.plugin);
@@ -889,6 +1170,7 @@ function handleAction(action,el) {
   switch(action){
     case 'open-app':$('startMenu').hidden=true;$('startButton').setAttribute('aria-expanded','false');openApp(app);break;
     case 'close-window':closeWindow(el.closest('.app-window')?.dataset.window);break;
+    case 'toggle-pin-window': togglePinWindow(el.closest('.app-window')?.dataset.window); break;
     case 'minimize-window':minimizeWindow(el.closest('.app-window')?.dataset.window);break;
     case 'maximize-window':maximizeWindow(el.closest('.app-window')?.dataset.window);break;
     case 'taskbar-window':{const w=state.opened.get(el.dataset.window);if(!w)break;if(!w.minimized&&state.active===w.id)minimizeWindow(w.id);else focusWindow(w.id);break;}
@@ -915,8 +1197,40 @@ function handleAction(action,el) {
       else renderWindow('blackwire');
       break;
     }
+    case 'cancel-mission':{
+      confirm('Отменить контракт?',`Контракт <b>${esc(id)}</b> будет снят. Награда не будет выдана. Артефакты сохранятся.`,()=>{
+        const r=cancelMission(state.game,id);
+        actionResult(r);
+        if(r.ok){state.selectedMissionId=null;renderWindow('blackwire');}
+      });
+      break;
+    }
     case 'mission-close-guide':state.selectedMissionId=null;if(state.opened.has('blackwire'))renderWindow('blackwire');break;
     case 'mission-open-target':openMissionTarget(id);break;
+    
+    case 'browser-activate-tab': {
+      const idx = Number(btn.dataset.idx);
+      if (!Number.isNaN(idx)) { state.browserActive = idx; renderWindow('browser'); }
+      break;
+    }
+    case 'browser-close-tab': {
+      browserCloseTab(Number(btn.dataset.idx));
+      break;
+    }
+    case 'browser-new-tab': browserNewTab(); break;
+    case 'browser-back': browserBack(); break;
+    case 'browser-forward': browserForward(); break;
+    case 'browser-reload': browserReload(); break;
+    case 'browser-page': browserGoPage(btn.dataset.page); break;
+    case 'browser-bookmark': {
+      const sid = btn.dataset.site;
+      if (!sid) break;
+      const bm = state.game.browser.bookmarks || [];
+      if (!bm.includes(sid)) { bm.push(sid); state.game.browser.bookmarks = bm; toast('В закладках','success'); scheduleSave(); }
+      else toast('Уже в закладках');
+      break;
+    }
+
     case 'browser-tab':ensureBrowserTab(site);if(!state.opened.has('browser'))openApp('browser');renderWindow('browser');break;
     case 'copy-domain':{
       const d=el.dataset.domain||'';

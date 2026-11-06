@@ -96,3 +96,81 @@ code{font-family:var(--mono);color:#c5d3dc}
 .terminal-shell-compact .terminal-form{padding:6px 10px;border-top:1px solid #1a2a36;gap:6px}
 .terminal-shell-compact .terminal-form input{font-size:11px}
 .terminal-output div{user-select:text;-webkit-user-select:text}
+
+/* Window pin + resize */
+.window-resize{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,#3a5a70 50%);z-index:5}
+.app-window.is-pinned{border-color:#c9a227}
+.app-window.is-pinned .pin-btn.is-on,.pin-btn.is-on{color:#e2b657;filter:none}
+.pin-btn{font-size:11px;opacity:.75}
+.pin-btn.is-on{opacity:1}
+
+/* Browser chrome */
+.browser-app{display:flex;flex-direction:column;height:100%;min-height:0;background:#0e151c}
+.chrome-tabs{display:flex;align-items:flex-end;gap:2px;padding:6px 6px 0;background:#0a1016;overflow-x:auto;min-height:36px}
+.chrome-tab{display:flex;align-items:center;gap:6px;max-width:160px;padding:6px 8px;border-radius:8px 8px 0 0;background:#152029;color:#9eb0bd;font-size:10px;border:1px solid #243540;border-bottom:none;cursor:pointer}
+.chrome-tab.on{background:#182430;color:#e8eef3;border-color:#3a5a70}
+.chrome-tab-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.chrome-tab-x{border:0;background:transparent;color:#7a90a0;cursor:pointer;font-size:12px;line-height:1;padding:0 2px}
+.chrome-tab-add{width:28px;height:28px;border:0;border-radius:6px;background:#152029;color:#9eb0bd;cursor:pointer;margin-bottom:2px}
+.chrome-fav{width:14px;height:14px;border-radius:3px;background:#1e3a4a;display:grid;place-items:center;font-size:8px;font-weight:700}
+.chrome-toolbar{display:flex;align-items:center;gap:6px;padding:6px 8px;background:#182430;border-bottom:1px solid #243540}
+.chrome-btn{width:28px;height:28px;border:1px solid #2a3f4d;border-radius:6px;background:#0f1a22;color:#c5d4de;cursor:pointer}
+.chrome-btn:disabled{opacity:.35;cursor:default}
+.chrome-omnibox{flex:1;display:flex;align-items:center;gap:6px;padding:0 8px;height:30px;border-radius:16px;background:#0b1219;border:1px solid #2a3f4d}
+.chrome-omnibox.is-loading{border-color:#4d8db0}
+.chrome-form{flex:1}
+.chrome-form input{width:100%;border:0;background:transparent;color:#e8eef3;font-size:11px;outline:none}
+.chrome-spinner{width:12px;height:12px;border:2px solid #2a3f4d;border-top-color:#55b9e9;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.chrome-page{flex:1;min-height:0;overflow:auto;background:#0b1219}
+.chrome-page.is-dim{opacity:.7}
+.browser-start{padding:16px}
+.browser-start-hero h1{margin:0;font-size:18px;letter-spacing:.08em}
+.browser-start-search{display:flex;gap:8px;margin:12px 0}
+.browser-start-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+.start-tile{text-align:left;padding:10px;border-radius:8px;border:1px solid #2a3f4d;background:#121c26;color:#dce7ef;cursor:pointer}
+.start-tile small{display:block;color:#7a90a0;margin-top:4px}
+.browser-start-side{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;font-size:11px}
+.linkish{display:block;background:none;border:0;color:#55b9e9;cursor:pointer;text-align:left;padding:2px 0}
+
+/* Site pages */
+.site-page{min-height:100%}
+.site-hero{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px;border-bottom:1px solid #243540}
+.site-brand{font-size:14px;font-weight:700;letter-spacing:.06em}
+.site-brand span{opacity:.65;font-weight:500}
+.site-nav{display:flex;gap:4px;flex-wrap:wrap}
+.site-nav-link{border:0;background:transparent;color:#9eb0bd;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:10px}
+.site-nav-link.on{background:#1a2a36;color:#e8eef3}
+.site-body{padding:16px;font-size:12px;line-height:1.5}
+.site-note,.site-meta{color:#7a90a0;font-size:11px;margin-top:12px}
+.site-hero.shop{background:linear-gradient(120deg,#1a160e,#121820)}
+.site-hero.bank{background:linear-gradient(120deg,#0e1a16,#121820)}
+.site-hero.forum{background:linear-gradient(120deg,#10161f,#121820)}
+.site-hero.gov{background:linear-gradient(120deg,#141418,#1a1a1e);border-bottom-color:#333}
+.site-hero.util{background:linear-gradient(120deg,#14101a,#121820)}
+.site-hero.auto{background:linear-gradient(120deg,#0e161c,#121820)}
+.site-hero.device{background:linear-gradient(120deg,#0e1814,#121820)}
+.site-hero.wifi{background:linear-gradient(120deg,#0e1620,#121820)}
+.shop-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin:12px 0}
+.shop-card{padding:10px;border:1px solid #3a3220;border-radius:8px;background:#1a160e;display:flex;flex-direction:column;gap:4px}
+.bank-dash{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.bank-tile{padding:10px;background:#0e1a16;border:1px solid #1e3a30;border-radius:8px}
+.bank-tile span{display:block;font-size:9px;color:#7a90a0}
+.bank-chart{display:flex;align-items:flex-end;gap:6px;height:60px;margin:12px 0}
+.bank-chart i{flex:1;background:#2a6b54;border-radius:3px 3px 0 0;display:block}
+.forum-row{padding:8px 0;border-bottom:1px solid #1e2a36;display:flex;justify-content:space-between;gap:8px}
+.gov-box{display:inline-flex;gap:12px;padding:8px 12px;background:#1a1a1e;border:1px solid #333;margin:8px 0}
+.data-table{margin:8px 0;border:1px solid #2a3f4d;border-radius:6px;overflow:hidden}
+.dt-row{display:grid;grid-template-columns:1fr 1fr 1fr;padding:6px 10px;font-size:11px;border-bottom:1px solid #1e2a36}
+.dt-row.head{background:#152029;color:#7a90a0;font-size:9px;text-transform:uppercase}
+.util-meters{display:flex;gap:12px;margin:12px 0}
+.util-meters div{padding:8px 12px;background:#18122a;border-radius:8px;border:1px solid #2a2040}
+.auto-card{padding:10px;margin:6px 0;background:#0e161c;border-left:3px solid #55b9e9;border-radius:0 6px 6px 0}
+.phone-frame{width:120px;margin:0 auto 12px;padding:10px;border-radius:16px;background:#0a1010;border:2px solid #2a4a3a}
+.phone-screen{background:#102018;border-radius:8px;padding:12px;text-align:center;min-height:100px}
+.wifi-panel{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;padding:12px;background:#0e1620;border-radius:8px}
+.site-error{display:grid;place-items:center;min-height:240px;text-align:center;padding:24px}
+.site-error-code{font-size:48px;font-weight:700;color:#d77d86}
+
+/* Terminal window content already compact */
+.app-window-terminal .window-content{padding:0}

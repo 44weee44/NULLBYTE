@@ -1,5 +1,5 @@
 /* NULLBYTE game engine. Fictional, deterministic client-side simulation only. */
-import { createEmptyIntel, seedIntelFromSites, runWebRecon, migrateIntel, listIntelSummary, ensureIntel, runServerAnalysis, runWeaknessScan, runSimExploit, runUserSearch, runMobileIdentify, runMobileAnalysis, modifyVirtualUser, runDbExport, writeIntelFile } from './cyber.js';
+import { createEmptyIntel, seedIntelFromSites, runWebRecon, migrateIntel, listIntelSummary, ensureIntel, runServerAnalysis, runWeaknessScan, runSimExploit, runUserSearch, runMobileIdentify, runMobileAnalysis, modifyVirtualUser, runDbExport, writeIntelFile, processTemporaryRestores, listActiveTempChanges, applyTemporaryChange, openSession, closeSession } from './cyber.js';
 export const SAVE_VERSION = 1;
 export const BALANCE = {
   creditsStart: 650,
@@ -59,22 +59,25 @@ export const LOCATIONS = [
 const STARTER_CONTRACT_TOOLS=['site-analyzer','artifact-decoder','node-radar','weakness-lab','sim-exploit','data-exporter'];
 const DB_CONTRACT_TOOLS=[...STARTER_CONTRACT_TOOLS,'db-reader'];
 const MISSION_TEMPLATES = [
-  {id:'job-001',title:'Потерянная накладная',client:'Mira Voss',target:'volt-market',difficulty:'Лёгкая',minLevel:1,reward:180,xp:110,objective:'Найти игровую запись заказа VM-204 и передать файл клиенту.',hint:'В каталоге Volt Market хранится артефакт CATALOG-B7.',requiredPlugins:STARTER_CONTRACT_TOOLS},
-  {id:'job-002',title:'Сервисный журнал',client:'GridWorks Support',target:'gridworks',difficulty:'Средняя',minLevel:2,reward:360,xp:95,objective:'Получить виртуальный журнал GW-11 и отправить отчёт.',hint:'Сайт расположен в Промзоне. Защита выше базовой.',requiredPlugins:STARTER_CONTRACT_TOOLS},
-  {id:'job-003',title:'Автомобильная карточка',client:'Eli North',target:'neon-motors',difficulty:'Средняя',minLevel:2,reward:420,xp:110,objective:'Экспортировать карточку автомобиля NM-88.',hint:'Ищи игровой артефакт VIN-SIM-88.',requiredPlugins:STARTER_CONTRACT_TOOLS},
-  {id:'job-004',title:'Тема на форуме',client:'Cobalt Moderator',target:'cobalt-forum',difficulty:'Лёгкая',minLevel:3,reward:480,xp:125,objective:'Получить копию виртуального сообщения из темы форума.',hint:'Форум находится в Старом порту.',requiredPlugins:STARTER_CONTRACT_TOOLS},
-  {id:'job-005',title:'Запись муниципалитета',client:'Office 04',target:'civic-records',difficulty:'Сложная',minLevel:6,reward:780,xp:185,objective:'Извлечь и экспортировать виртуальную запись CR-29.',hint:'Нужен Virtual DB Reader для чтения этой цели.',requiredPlugins:DB_CONTRACT_TOOLS},
-  {id:'job-006',title:'Диагностика телефона',client:'Nora Vale',target:'pocket-mobile',difficulty:'Средняя',minLevel:3,reward:610,xp:150,objective:'Получить отчёт о состоянии демонстрационного телефона PM-22.',hint:'Телефон — полностью вымышленная цель NPC.',requiredPlugins:STARTER_CONTRACT_TOOLS},
-  {id:'job-007',title:'Точка доступа',client:'Harbor Cafe',target:'north-wifi',difficulty:'Средняя',minLevel:4,reward:820,xp:200,objective:'Экспортировать параметры игровой точки доступа AP-05.',hint:'Точка находится на Площади Маяк.',requiredPlugins:STARTER_CONTRACT_TOOLS},
-  {id:'job-008',title:'Архивный реестр',client:'Archive Keeper',target:'civic-records',difficulty:'Сложная',minLevel:6,reward:1250,xp:280,objective:'Получить расширенную запись муниципального архива.',hint:'Требуется редкий плагин Virtual DB Reader.',requiredPlugins:DB_CONTRACT_TOOLS},
-  {id:'job-009',title:'Сервисная диагностика',client:'Neon Motors',target:'neon-motors',difficulty:'Средняя',minLevel:5,reward:1700,xp:350,objective:'Подготовить виртуальный отчёт о состоянии сервисной карточки автомобиля.',hint:'NBS уже доступен. Проверь, что File Forge и обновление ОС не мешают покупке DB Reader.',requiredPlugins:STARTER_CONTRACT_TOOLS},
-  {id:'job-010',title:'Состояние городской точки',client:'Harbor Cafe',target:'north-wifi',difficulty:'Средняя',minLevel:5,reward:1100,xp:100,objective:'Передать отчёт о виртуальной точке доступа AP-05.',hint:'Точка отмечена на NullAtlas возле Площади Маяк.',requiredPlugins:STARTER_CONTRACT_TOOLS},
-  {id:'job-011',title:'Профиль устройства',client:'Pocket Mobile Support',target:'pocket-mobile',difficulty:'Сложная',minLevel:7,reward:2600,xp:240,objective:'Получить расширенную карточку демонстрационного телефона PM-22.',hint:'Изучи виртуальный адрес устройства через Browser и NullAtlas.',requiredPlugins:STARTER_CONTRACT_TOOLS},
-  {id:'job-012',title:'Энергорайон: журнал',client:'GridWorks Support',target:'gridworks',difficulty:'Сложная',minLevel:7,reward:3100,xp:280,objective:'Собрать новый отчёт по виртуальному журналу контроллера GW-11.',hint:'Виртуальная цель восстановилась после предыдущих заказов.',requiredPlugins:STARTER_CONTRACT_TOOLS},
-  {id:'job-013',title:'Обсуждение сообщества',client:'Cobalt Moderator',target:'cobalt-forum',difficulty:'Сложная',minLevel:8,reward:3600,xp:300,objective:'Передать архивную запись из виртуальной темы форума.',hint:'Проверь текущее состояние Cobalt Forum перед началом.',requiredPlugins:STARTER_CONTRACT_TOOLS},
-  {id:'job-014',title:'Сервисный архив',client:'Neon Motors',target:'neon-motors',difficulty:'Сложная',minLevel:8,reward:3900,xp:320,objective:'Экспортировать расширенную сервисную карточку NM-88.',hint:'Цель использует ту же безопасную последовательность операций.',requiredPlugins:STARTER_CONTRACT_TOOLS},
-  {id:'job-015',title:'Закрытая запись архива',client:'Archive Keeper',target:'civic-records',difficulty:'Очень сложная',minLevel:9,reward:4700,xp:400,objective:'Извлечь дополнительную виртуальную запись CR-29 и оформить набор данных.',hint:'Нужен Virtual DB Reader и NULLBYTE OS 3.0 или новее.',requiredPlugins:DB_CONTRACT_TOOLS},
-  {id:'job-016',title:'Аудит городской инфраструктуры',client:'GridWorks Director',target:'gridworks',difficulty:'Очень сложная',minLevel:9,reward:5200,xp:700,objective:'Подготовить итоговый отчёт о состоянии виртуальной инфраструктуры.',hint:'Это один из последних контрактов перед максимальным уровнем.',requiredPlugins:STARTER_CONTRACT_TOOLS}
+  {id:'job-001',title:'Потерянная накладная',client:'Mira Voss',target:'volt-market',category:'info',difficulty:'Лёгкая',minLevel:1,reward:180,xp:110,objective:'Найти игровую запись заказа VM-204 и передать файл клиенту.',hint:'В каталоге Volt Market хранится артефакт CATALOG-B7.',requiredPlugins:STARTER_CONTRACT_TOOLS},
+  {id:'job-002',title:'Сервисный журнал',client:'GridWorks Support',target:'gridworks',category:'server',difficulty:'Средняя',minLevel:2,reward:360,xp:95,objective:'Получить виртуальный журнал GW-11 и отправить отчёт.',hint:'Сайт расположен в Промзоне. Защита выше базовой.',requiredPlugins:STARTER_CONTRACT_TOOLS},
+  {id:'job-003',title:'Автомобильная карточка',client:'Eli North',target:'neon-motors',category:'info',difficulty:'Средняя',minLevel:2,reward:420,xp:110,objective:'Экспортировать карточку автомобиля NM-88.',hint:'Ищи игровой артефакт VIN-SIM-88.',requiredPlugins:STARTER_CONTRACT_TOOLS},
+  {id:'job-004',title:'Тема на форуме',client:'Cobalt Moderator',target:'cobalt-forum',category:'site',difficulty:'Лёгкая',minLevel:3,reward:480,xp:125,objective:'Получить копию виртуального сообщения из темы форума.',hint:'Форум находится в Старом порту.',requiredPlugins:STARTER_CONTRACT_TOOLS},
+  {id:'job-005',title:'Запись муниципалитета',client:'Office 04',target:'civic-records',category:'database',difficulty:'Сложная',minLevel:6,reward:780,xp:185,objective:'Извлечь и экспортировать виртуальную запись CR-29.',hint:'Нужен Virtual DB Reader для чтения этой цели.',requiredPlugins:DB_CONTRACT_TOOLS},
+  {id:'job-006',title:'Диагностика телефона',client:'Nora Vale',target:'pocket-mobile',category:'phone',difficulty:'Средняя',minLevel:3,reward:610,xp:150,objective:'Получить отчёт о состоянии демонстрационного телефона PM-22.',hint:'Телефон — полностью вымышленная цель NPC.',requiredPlugins:STARTER_CONTRACT_TOOLS},
+  {id:'job-007',title:'Точка доступа',client:'Harbor Cafe',target:'north-wifi',category:'network',difficulty:'Средняя',minLevel:4,reward:820,xp:200,objective:'Экспортировать параметры игровой точки доступа AP-05.',hint:'Точка находится на Площади Маяк.',requiredPlugins:STARTER_CONTRACT_TOOLS},
+  {id:'job-008',title:'Архивный реестр',client:'Archive Keeper',target:'civic-records',category:'database',difficulty:'Сложная',minLevel:6,reward:1250,xp:280,objective:'Получить расширенную запись муниципального архива.',hint:'Требуется редкий плагин Virtual DB Reader.',requiredPlugins:DB_CONTRACT_TOOLS},
+  {id:'job-009',title:'Сервисная диагностика',client:'Neon Motors',target:'neon-motors',category:'server',difficulty:'Средняя',minLevel:5,reward:1700,xp:350,objective:'Подготовить виртуальный отчёт о состоянии сервисной карточки автомобиля.',hint:'NBS уже доступен. Проверь File Forge и ОС.',requiredPlugins:STARTER_CONTRACT_TOOLS},
+  {id:'job-010',title:'Состояние городской точки',client:'Harbor Cafe',target:'north-wifi',category:'network',difficulty:'Средняя',minLevel:5,reward:1100,xp:100,objective:'Передать отчёт о виртуальной точке доступа AP-05.',hint:'Точка отмечена на NullAtlas.',requiredPlugins:STARTER_CONTRACT_TOOLS},
+  {id:'job-011',title:'Профиль устройства',client:'Pocket Mobile Support',target:'pocket-mobile',category:'phone',difficulty:'Сложная',minLevel:7,reward:2600,xp:240,objective:'Получить расширенную карточку демонстрационного телефона PM-22.',hint:'Изучи виртуальный адрес устройства через Browser.',requiredPlugins:STARTER_CONTRACT_TOOLS},
+  {id:'job-012',title:'Энергорайон: журнал',client:'GridWorks Support',target:'gridworks',category:'server',difficulty:'Сложная',minLevel:7,reward:3100,xp:280,objective:'Собрать новый отчёт по виртуальному журналу контроллера GW-11.',hint:'Виртуальная цель восстановилась после предыдущих заказов.',requiredPlugins:STARTER_CONTRACT_TOOLS},
+  {id:'job-013',title:'Обсуждение сообщества',client:'Cobalt Moderator',target:'cobalt-forum',category:'site',difficulty:'Сложная',minLevel:8,reward:3600,xp:300,objective:'Передать архивную запись из виртуальной темы форума.',hint:'Проверь текущее состояние Cobalt Forum.',requiredPlugins:STARTER_CONTRACT_TOOLS},
+  {id:'job-014',title:'Сервисный архив',client:'Neon Motors',target:'neon-motors',category:'info',difficulty:'Сложная',minLevel:8,reward:3900,xp:320,objective:'Экспортировать расширенную сервисную карточку NM-88.',hint:'Та же безопасная последовательность операций.',requiredPlugins:STARTER_CONTRACT_TOOLS},
+  {id:'job-015',title:'Закрытая запись архива',client:'Archive Keeper',target:'civic-records',category:'database',difficulty:'Очень сложная',minLevel:9,reward:4700,xp:400,objective:'Извлечь дополнительную виртуальную запись CR-29.',hint:'Нужен DB Reader и доступ.',requiredPlugins:DB_CONTRACT_TOOLS},
+  {id:'job-016',title:'Финальный городской отчёт',client:'Office 04',target:'civic-records',category:'database',difficulty:'Очень сложная',minLevel:9,reward:5200,xp:450,objective:'Сформировать полный пакет по муниципальным записям.',hint:'Подготовка к банковскому эндгейму.',requiredPlugins:DB_CONTRACT_TOOLS},
+  {id:'job-017',title:'Кто за аккаунтом',client:'Cobalt Moderator',target:'cobalt-forum',category:'analysis',difficulty:'Средняя',minLevel:4,reward:900,xp:180,objective:'Связать USER_ID с PHONE_ID через db-reader и map-scanner.',hint:'access → search → phone.',requiredPlugins:STARTER_CONTRACT_TOOLS},
+  {id:'job-018',title:'Временная правка',client:'Shadow Broker',target:'volt-market',category:'modify',difficulty:'Средняя',minLevel:4,reward:850,xp:170,objective:'Временно изменить balance у user (site-editor), зафиксировать артефакт.',hint:'Откат 30–60 мин автоматический.',requiredPlugins:STARTER_CONTRACT_TOOLS},
+  {id:'job-019',title:'Только разведка',client:'Mira Voss',target:'volt-market',category:'recon',difficulty:'Лёгкая',minLevel:1,reward:100,xp:60,objective:'WEB RECON voltmarket.null — domain в intel.',hint:'Достаточно site-analyzer.',requiredPlugins:['site-analyzer']},
 ];
 
 export function validNickname(value) { return /^[A-Za-z0-9]{2,12}$/.test(String(value || '')); }
@@ -106,6 +109,8 @@ export function createInitialState(tgUser=null) {
     stats:{operations:0,successfulOperations:0,failedOperations:0,bytesExported:0}
   };
   state0.intel = seedIntelFromSites(state0.world.sites, createEmptyIntel());
+  unlockMissions(state0);
+  rotateMissionBoard(state0, Date.now(), true);
   return state0;
 }
 
@@ -156,7 +161,7 @@ export function migrateSave(raw,tgUser=null) {
   out.world.npc=fresh.world.npc.map(base=>{const saved=savedNpcs.find(x=>x&&x.id===base.id)||{};return {...base,location:LOCATIONS.some(l=>l.id===saved.location)?saved.location:base.location,nextAt:finite(saved.nextAt)||base.nextAt};});
   if (!Array.isArray(out.missions.items)) out.missions.items=fresh.missions.items;
   const savedMissions=out.missions.items;
-  out.missions.items=fresh.missions.items.map(base=>{const saved=savedMissions.find(x=>x&&x.id===base.id)||{};return {...base,status:['locked','available','accepted','submitted','completed'].includes(saved.status)?saved.status:base.status,acceptedAt:finite(saved.acceptedAt),submittedAt:finite(saved.submittedAt),verifyAt:finite(saved.verifyAt),resultFileId:typeof saved.resultFileId==='string'?saved.resultFileId:'',rewardPaid:Boolean(saved.rewardPaid),completedAt:finite(saved.completedAt),snapshot:saved.snapshot&&typeof saved.snapshot==='object'?saved.snapshot:null};});
+  out.missions.items=fresh.missions.items.map(base=>{const saved=savedMissions.find(x=>x&&x.id===base.id)||{};return {...base,status:['locked','available','accepted','submitted','completed','cancelled'].includes(saved.status)?saved.status:base.status,acceptedAt:finite(saved.acceptedAt),submittedAt:finite(saved.submittedAt),verifyAt:finite(saved.verifyAt),resultFileId:typeof saved.resultFileId==='string'?saved.resultFileId:'',rewardPaid:Boolean(saved.rewardPaid),completedAt:finite(saved.completedAt),snapshot:saved.snapshot&&typeof saved.snapshot==='object'?saved.snapshot:null};});
   if (!Array.isArray(out.mail.messages)) out.mail.messages=fresh.mail.messages;
   out.mail.messages=out.mail.messages.filter(m=>m&&typeof m==='object').slice(0,100).map(m=>({id:(String(m.id||idempotencyKey('mail')).replace(/[^A-Za-z0-9_-]/g,'').slice(0,80)||idempotencyKey('mail')),direction:m.direction==='out'?'out':'in',from:String(m.from||'NULLBYTE').slice(0,60),to:String(m.to||'operator').slice(0,60),subject:String(m.subject||'Без темы').slice(0,120),body:String(m.body||'').slice(0,4000),at:finite(m.at)||Date.now(),attachments:Array.isArray(m.attachments)?m.attachments.filter(x=>typeof x==='string').slice(0,10):[],status:['unread','read','sent'].includes(m.status)?m.status:'read'}));
   if(!Array.isArray(out.computer.files)) out.computer.files=[];
@@ -263,7 +268,7 @@ export function uninstallPlugin(state,pluginId) {
 }
 export function acceptMission(state,missionId) {
   const m=state.missions.items.find(x=>x.id===missionId);
-  if(!m||m.status!=='available') return {ok:false,reason:'Контракт сейчас недоступен.'};
+  if(!m||!(m.status==='available'||m.status==='locked')) return {ok:false,reason:'Контракт сейчас недоступен.'};
   if(state.player.level<m.minLevel) return {ok:false,reason:`Требуется уровень ${m.minLevel}.`};
   const missing=(m.requiredPlugins||[]).filter(id=>!getInstalledPlugin(state,id));
   if(missing.length)return {ok:false,reason:`Для контракта нужны плагины: ${missing.map(id=>getPlugin(id)?.name||id).join(', ')}.`};
@@ -273,6 +278,66 @@ export function acceptMission(state,missionId) {
   m.snapshot={siteRevision:state.world.sites.find(s=>s.id===m.target)?.revision||1,security:state.world.sites.find(s=>s.id===m.target)?.security||1};
   return {ok:true,message:`Контракт ${m.id} принят. Цель закреплена в личном мире.`};
 }
+
+export function cancelMission(state, missionId) {
+  const m = state.missions.items.find(x => x.id === missionId);
+  if (!m || (m.status !== 'accepted' && m.status !== 'submitted')) {
+    return { ok: false, reason: 'Нет активного контракта для отмены.' };
+  }
+  m.status = 'cancelled';
+  m.cancelledAt = Date.now();
+  m.resultFileId = '';
+  m.verifyAt = 0;
+  // free board eligibility later via rotation
+  return { ok: true, message: `Контракт ${m.id} отменён. Награда не выдаётся.` };
+}
+
+/** Keep 3–4 available offers; never touch accepted/submitted. */
+export function rotateMissionBoard(state, now = Date.now(), force = false) {
+  ensureIntel(state);
+  if (!state.intel.nextBoardAt) state.intel.nextBoardAt = now + 20 * 60 * 1000;
+  if (!force && state.intel.nextBoardAt > now) {
+    return { rotated: false, nextBoardAt: state.intel.nextBoardAt, offered: state.intel.boardIds || [] };
+  }
+  state.intel.nextBoardAt = now + 20 * 60 * 1000;
+  unlockMissions(state);
+  const activeIds = new Set(
+    state.missions.items.filter(m => m.status === 'accepted' || m.status === 'submitted').map(m => m.id)
+  );
+  const eligible = state.missions.items.filter(m =>
+    m.status === 'available' && !activeIds.has(m.id) && m.minLevel <= state.player.level
+  );
+  const bucket = Math.floor(now / (20 * 60 * 1000));
+  const scored = eligible.map(m => {
+    let h = 2166136261;
+    const s = `${state.meta?.seed || 'nb'}:${bucket}:${m.id}`;
+    for (let k = 0; k < s.length; k++) { h ^= s.charCodeAt(k); h = Math.imul(h, 16777619); }
+    return { m, score: h >>> 0 };
+  }).sort((a, b) => a.score - b.score);
+  const want = Math.min(4, Math.max(3, Math.min(eligible.length, 3 + (bucket % 2))));
+  const picked = [];
+  const seenCat = new Set();
+  for (const { m } of scored) {
+    if (picked.length >= want) break;
+    const cat = m.category || 'info';
+    if (seenCat.has(cat)) continue;
+    picked.push(m); seenCat.add(cat);
+  }
+  for (const { m } of scored) {
+    if (picked.length >= want) break;
+    if (!picked.includes(m)) picked.push(m);
+  }
+  state.intel.boardIds = picked.map(m => m.id);
+  return { rotated: true, nextBoardAt: state.intel.nextBoardAt, offered: state.intel.boardIds };
+}
+
+export function missionBoardTimer(state, now = Date.now()) {
+  ensureIntel(state);
+  if (!state.intel.nextBoardAt) state.intel.nextBoardAt = now + 20 * 60 * 1000;
+  return Math.max(0, state.intel.nextBoardAt - now);
+}
+
+
 export function getSite(state,siteId) { return state.world.sites.find(s=>s.id===siteId); }
 export function getSiteProgress(state,siteId) {
   if(!state.world.progress[siteId]) state.world.progress[siteId]={analyzed:false,decoded:false,node:false,weakness:false,access:false,database:false,exported:false,modified:false,report:null,lastOperationAt:0};
@@ -805,22 +870,21 @@ export function processTimedEvents(state,now=Date.now()) {
   unlockMissions(state);
   state.meta.updatedAt=now;
   
-  // Available mission board refresh every 20 minutes (active jobs untouched).
-  if (!state.intel) state.intel = seedIntelFromSites(state.world?.sites || [], createEmptyIntel());
-  if (!state.intel.nextBoardAt) state.intel.nextBoardAt = now + 20 * 60 * 1000;
-  if (state.intel.nextBoardAt <= now) {
-    state.intel.nextBoardAt = now + 20 * 60 * 1000;
-    const pool = state.missions.items.filter(m => m.status === 'available' || m.status === 'locked');
-    // Re-roll availability for non-active: unlock by level only; shuffle reward flavor lightly
-    for (const m of state.missions.items) {
-      if (m.status === 'locked' && m.minLevel <= state.player.level) m.status = 'available';
-    }
-    notices.push('BlackWire: доска доступных заказов обновлена.');
-  }
+  // Temporary world mutations auto-restore (30–60 min).
+  notices.push(...processTemporaryRestores(state, now));
+  // Mission board rotation every 20 minutes (active jobs untouched).
+  const rot = rotateMissionBoard(state, now, false);
+  if (rot.rotated) notices.push(`BlackWire: новые предложения (${(rot.offered||[]).join(', ') || '—'}).`);
 
   return notices;
 }
-function unlockMissions(state) { for(const m of state.missions.items) if(m.status==='locked'&&m.minLevel<=state.player.level)m.status='available'; }
+function unlockMissions(state) {
+  // Level-gate only: mark eligible locked contracts as available so progression tests and free-play work.
+  // Board rotation still reshuffles the *offer list* every 20m without touching accepted.
+  for (const m of state.missions.items) {
+    if (m.status === 'locked' && m.minLevel <= state.player.level) m.status = 'available';
+  }
+}
 function updateLevel(state) {
   let next=state.player.level;
   while(next<BALANCE.maxLevel&&state.player.xp>=BALANCE.xpToLevel[next])next++;

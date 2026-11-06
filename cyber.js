@@ -61,6 +61,8 @@ export function createEmptyIntel() {
     relations: [],
     operations: [],
     suspicion: {},
+    temporaryChanges: [],
+    sessions: {},
     nextBoardAt: 0
   };
 }
@@ -217,6 +219,8 @@ export function migrateIntel(rawIntel, sites) {
     relations: Array.isArray(rawIntel.relations) ? rawIntel.relations.slice(-600) : [],
     operations: Array.isArray(rawIntel.operations) ? rawIntel.operations.slice(0, 100) : [],
     suspicion: rawIntel.suspicion && typeof rawIntel.suspicion === 'object' ? rawIntel.suspicion : {},
+    temporaryChanges: Array.isArray(rawIntel.temporaryChanges) ? rawIntel.temporaryChanges.slice(-80) : [],
+    sessions: rawIntel.sessions && typeof rawIntel.sessions === 'object' ? rawIntel.sessions : {},
     nextBoardAt: Number(rawIntel.nextBoardAt) || 0
   };
   return seedIntelFromSites(sites, merged);
@@ -602,6 +606,116 @@ export function runMobileAnalysis(state, phoneId) {
 }
 
 // ───────────── DATA MODIFY ─────────────
+
+/** Schedule a temporary world mutation; baseline restored after 30–60 min. */
+export function applyTemporaryChange(state, {
+  targetType, targetId, path, previousValue, nextValue, label
+}) {
+  const intel = ensureIntel(state);
+  if (!Array.isArray(intel.temporaryChanges)) intel.temporaryChanges = [];
+  const now = Date.now();
+  // Duration 30–60 minutes, deterministic-ish per target+path+time bucket
+  const mins = 30 + (hash32(`${targetId}:${path}:${Math.floor(now / 60000)}`) % 31);
+  const restoreAt = now + mins * 60 * 1000;
+
+  // If same target+path already mutated, keep original baseline from first change
+  const existing = intel.temporaryChanges.find(
+    c => c.targetType === targetType && c.targetId === targetId && c.path === path && !c.restored
+  );
+  const baseline = existing ? existing.baseline : previousValue;
+  if (existing) {
+    existing.nextValue = nextValue;
+    existing.changedAt = now;
+    // Do not extend restoreAt indefinitely — keep original deadline
+    existing.label = label || existing.label;
+  } else {
+    intel.temporaryChanges.push({
+      id: `tmp_${hash32(`${targetId}:${path}:${now}`).toString(16)}`,
+      targetType,
+      targetId,
+      path,
+      baseline,
+      nextValue,
+      label: label || path,
+      changedAt: now,
+      restoreAt,
+      restored: false
+    });
+  }
+  intel.temporaryChanges = intel.temporaryChanges.slice(-80);
+  return { restoreAt, mins, baseline };
+}
+
+/** Process expired temporary changes once; kick sessions on affected targets. */
+export function processTemporaryRestores(state, now = Date.now()) {
+  const intel = ensureIntel(state);
+  if (!Array.isArray(intel.temporaryChanges)) return [];
+  const notices = [];
+  for (const c of intel.temporaryChanges) {
+    if (c.restored || !c.restoreAt || c.restoreAt > now) continue;
+    // Restore baseline
+    if (c.targetType === 'user') {
+      const user = intel.users[c.targetId];
+      if (user && c.path in user) user[c.path] = c.baseline;
+    } else if (c.targetType === 'server') {
+      const server = intel.servers[c.targetId];
+      if (server) {
+        if (c.path === 'accessLevel') server.accessLevel = c.baseline || 'none';
+        else if (c.path in server) server[c.path] = c.baseline;
+        server.logs = server.logs || [];
+        server.logs.push({ at: now, event: 'auto_restore', path: c.path });
+      }
+    } else if (c.targetType === 'device') {
+      const dev = intel.devices[c.targetId];
+      if (dev && c.path in dev) dev[c.path] = c.baseline;
+    } else if (c.targetType === 'site') {
+      const site = (state.world?.sites || []).find(s => s.id === c.targetId);
+      if (site && c.path === 'siteText') site.siteText = c.baseline;
+      if (site && c.path === 'revision') { /* leave revision */ }
+    }
+    c.restored = true;
+    c.restoredAt = now;
+    // Kick session on this target
+    if (intel.sessions) {
+      for (const [sid, sess] of Object.entries(intel.sessions)) {
+        if (sess && sess.targetId === c.targetId && sess.active) {
+          sess.active = false;
+          sess.endedAt = now;
+          sess.reason = 'target_restored';
+        }
+      }
+    }
+    notices.push(`Восстановлено: ${c.label || c.path} (${c.targetId})`);
+  }
+  return notices;
+}
+
+export function openSession(state, targetId, pluginId) {
+  const intel = ensureIntel(state);
+  if (!intel.sessions) intel.sessions = {};
+  const id = `sess_${targetId}`;
+  intel.sessions[id] = {
+    id, targetId, pluginId, active: true, openedAt: Date.now()
+  };
+  return intel.sessions[id];
+}
+
+export function closeSession(state, targetId, reason = 'exit') {
+  const intel = ensureIntel(state);
+  const sess = intel.sessions?.[`sess_${targetId}`];
+  if (sess && sess.active) {
+    sess.active = false;
+    sess.endedAt = Date.now();
+    sess.reason = reason;
+  }
+}
+
+export function listActiveTempChanges(state) {
+  const intel = ensureIntel(state);
+  const now = Date.now();
+  return (intel.temporaryChanges || []).filter(c => !c.restored && c.restoreAt > now);
+}
+
 export function modifyVirtualUser(state, userId, field, value) {
   const intel = ensureIntel(state);
   const user = intel.users[userId];
@@ -610,28 +724,50 @@ export function modifyVirtualUser(state, userId, field, value) {
   if (!server || ACCESS_RANK[server.accessLevel] < ACCESS_RANK.user) {
     return { ok: false, lines: [{ text: 'INSUFFICIENT_ACCESS — need access ≥ user', type: 'error' }] };
   }
-  const allowed = ['balance','reputation','accountStatus'];
-  if (!allowed.includes(field)) return { ok: false, lines: [{ text: `FIELD_DENIED — allowed: ${allowed.join(', ')}`, type: 'error' }] };
+  const allowed = ['balance', 'reputation', 'accountStatus'];
+  if (!allowed.includes(field)) {
+    return { ok: false, lines: [{ text: `FIELD_DENIED — allowed: ${allowed.join(', ')}`, type: 'error' }] };
+  }
 
   const prev = user[field];
-  if (field === 'balance' || field === 'reputation') user[field] = Number(value);
-  else user[field] = String(value).slice(0, 40);
+  const next = (field === 'balance' || field === 'reputation') ? Number(value) : String(value).slice(0, 40);
+  user[field] = next;
 
-  server.logs.push({ at: Date.now(), event: 'record_modify', userId, field, prev, next: user[field] });
+  const tmp = applyTemporaryChange(state, {
+    targetType: 'user',
+    targetId: userId,
+    path: field,
+    previousValue: prev,
+    nextValue: next,
+    label: `${user.username}.${field}`
+  });
+  openSession(state, server.id, 'site-editor');
+
+  server.logs = server.logs || [];
+  server.logs.push({ at: Date.now(), event: 'record_modify', userId, field, prev, next, restoreAt: tmp.restoreAt });
   bumpSuspicion(intel, server.id, 12);
   addArtifact(intel, {
-    type: 'modification', label: `${userId}.${field}`, targetId: userId, sourcePlugin: 'site-editor',
-    data: { field, prev, next: user[field] }, confidence: 1, verified: true
+    type: 'modification',
+    label: `${userId}.${field}`,
+    targetId: userId,
+    sourcePlugin: 'site-editor',
+    data: { field, prev, next, restoreAt: tmp.restoreAt, temporary: true },
+    confidence: 1,
+    verified: true
   });
+
+  const leftMin = Math.ceil((tmp.restoreAt - Date.now()) / 60000);
   const lines = [
     { text: 'NULLBYTE // VIRTUAL RECORD MODIFY', type: 'blue' },
     { text: `User: ${user.username} (${user.id})`, type: '' },
-    { text: `${field}: ${prev} → ${user[field]}`, type: 'green' },
+    { text: `${field}: ${prev} → ${next}`, type: 'green' },
+    { text: `TEMPORARY — auto-restore in ~${leftMin} min (baseline saved)`, type: 'amber' },
     { text: `Logged on ${server.hostname} · suspicion ${intel.suspicion[server.id]}%`, type: 'muted' }
   ];
-  logOperation(intel, { pluginId: 'site-editor', targetId: userId, summary: `MODIFY ${field}` });
-  return { ok: true, lines, user };
+  logOperation(intel, { pluginId: 'site-editor', targetId: userId, summary: `MODIFY ${field} tmp` });
+  return { ok: true, lines, user, restoreAt: tmp.restoreAt };
 }
+
 
 export function runDbExport(state, siteId) {
   const intel = ensureIntel(state);

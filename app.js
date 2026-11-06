@@ -81,7 +81,7 @@ function refreshSystem() {
   $('menuNickname').textContent=state.game.player.nickname.toUpperCase();
   $('saveStatus').textContent=state.provider;
   $('systemStatus').textContent=bankStatus(state.game).locked?'SYSTEM READY / BANK LOCKED':'SYSTEM READY';
-  document.querySelectorAll('.taskbar-app').forEach(btn=>btn.classList.toggle('active',btn.dataset.window===state.active));
+  document.querySelectorAll('.taskbar-app').forEach(item=>item.classList.toggle('active',item.dataset.window===state.active));
 }
 function updateClock() {
   const now=new Date();$('clockTime').textContent=new Intl.DateTimeFormat('ru-RU',{hour:'2-digit',minute:'2-digit'}).format(now);
@@ -318,7 +318,7 @@ function maximizeWindow(id) {
   const win=state.opened.get(id),el=document.querySelector(`[data-window="${id}"]`);if(!win||!el)return;
   if(!win.maximized){win.oldRect={left:el.style.left,top:el.style.top,width:el.style.width,height:el.style.height};win.maximized=true;el.classList.add('is-maximized');}
   else{win.maximized=false;el.classList.remove('is-maximized');if(win.oldRect)Object.assign(el.style,win.oldRect);}
-  const btn=el.querySelector('[data-action="maximize-window"]');btn.textContent=win.maximized?'❐':'□';btn.title=win.maximized?'Восстановить':'Развернуть';focusWindow(id);
+  const maxBtn=el.querySelector('[data-action="maximize-window"]');if(maxBtn){maxBtn.textContent=win.maximized?'❐':'□';maxBtn.title=win.maximized?'Восстановить':'Развернуть';}focusWindow(id);
 }
 function renderWindow(id) {const el=document.querySelector(`[data-window="${id}"] [data-content]`);if(!el)return;el.innerHTML=renderApp(id);wireAppContent(id,el);}
 function refreshOpenApps(ids=null) {for(const id of (ids||[...state.opened.keys()]))if(state.opened.has(id))renderWindow(id);renderTaskbar();}
@@ -1059,7 +1059,9 @@ function renderMail(g) {
   ${pending.length?`<div class="panel"><div class="panel-title"><span>ГОТОВО К ОТПРАВКЕ</span><small>DELIVERY QUEUE</small></div><div class="list">${pending.map(m=>{const f=g.computer.files.find(x=>x.id===m.resultFileId);return `<div class="list-row"><div class="list-main"><strong>${esc(m.title)}</strong><small>${esc(m.client)} · ${esc(f?.name||'result file')}</small></div><button class="btn tiny primary" data-action="deliver-mission" data-id="${m.id}">ОТПРАВИТЬ</button></div>`;}).join('')}</div></div>`:''}
   <div class="grid-2 section-gap" style="align-items:start"><div class="list">${list||'<div class="empty-state"><b>Входящие пусты</b><p>Письма появятся после контрактов и системных событий.</p></div>'}</div><div class="panel">${selected?`<div class="eyebrow">${selected.direction==='in'?'INCOMING MESSAGE':'SENT MESSAGE'}</div><h3 style="margin:8px 0;color:#e1ebf1;font-size:13px">${esc(selected.subject)}</h3><div class="kv"><span>От</span><b>${esc(selected.from)}</b></div><div class="kv"><span>Дата</span><b>${formatDate(selected.at)} ${formatTime(selected.at)}</b></div><div class="divider"></div><div class="mail-body">${esc(selected.body)}</div>${selected.attachments?.length?selected.attachments.map(id=>{const f=g.computer.files.find(x=>x.id===id);return f?`<button class="attachment" data-action="file-open" data-id="${esc(f.id)}">▣ ${esc(f.name)} · ${f.size} KB</button>`:''}).join(''):''}<div class="btn-row section-gap"><button class="btn tiny ghost" data-action="mail-mark" data-id="${selected.id}">ОТМЕТИТЬ ПРОЧИТАННЫМ</button></div>`:'<div class="empty-state"><b>Выбери письмо</b><p>Содержимое появится здесь.</p></div>'}${state.selectedFileId?(()=>{const f=g.computer.files.find(x=>x.id===state.selectedFileId);return f?`<div class="panel section-gap"><div class="panel-title"><span>ПРОСМОТР ВЛОЖЕНИЯ</span><button class="btn tiny ghost" data-action="file-close">ЗАКРЫТЬ</button></div><strong>${esc(f.name)}</strong><pre class="file-preview">${esc(String(f.content||'').slice(0,2400))}${String(f.content||'').length>2400?'\n… файл сокращён для просмотра':''}</pre></div>`:''})():''}</div></div>
   <div class="notice section-gap">Почта работает только внутри вымышленной игры. Никакие реальные email-адреса или внешние сообщения не используются.</div>`;
-}function renderBank(g) {
+}
+
+function renderBank(g) {
   const status=bankStatus(g),risk=bankRisk(g),tx=g.economy.transactions.slice(0,30);
   const missing=risk.missing.map(id=>getPlugin(id)?.name||id);
   return `<div class="app-heading"><div><div class="eyebrow">ASTER UNION / GAME BANK</div><h2>Aster Bank</h2><p>Игровые кредиты и история экономики.</p></div><span class="badge amber">FICTIONAL BANK</span></div>
@@ -1071,6 +1073,8 @@ function renderMail(g) {
   <div class="btn-row section-gap"><button class="btn danger" data-action="bank-attempt" ${status.locked||!risk.unlocked||missing.length?'disabled':''}>ЗАПУСТИТЬ СИМУЛЯЦИЮ</button></div></div>
   <div class="panel section-gap"><div class="panel-title"><span>ИСТОРИЯ ТРАНЗАКЦИЙ</span><small>${tx.length} RECORDS</small></div>${tx.length?tx.map(t=>`<div class="transaction-row"><div><strong>${esc(t.reason)}</strong><small>${formatDate(t.at)} · ${formatTime(t.at)}</small></div><b class="${t.type==='income'?'income':t.type==='confiscated'?'confiscated':'expense'}">${t.type==='income'?'+':'−'}${fmt(t.amount)} CR</b></div>`).join(''):'<div class="empty-state"><b>Нет транзакций</b><p>История появится после получения наград и покупок.</p></div>'}</div>`;
 }
+
+
 function renderHelp() {
   const sections=[
     ['Игровой цикл','Browser → домен. Terminal: run site-analyzer / цепочка плагинов. intel — база разведки. N-Mail — сдача. Авто/прочие устройства: LOCKED.'],,
@@ -1262,7 +1266,7 @@ function handleAction(action,el) {
       break;
     }
     case 'browser-home':state.browserTabs=[];state.game.browser.activeSite='';renderWindow('browser');break;
-    case 'browser-close-tab':{state.browserTabs=state.browserTabs.filter(t=>t.id!==el.dataset.tab);state.game.browser.activeSite=state.browserTabs[state.browserTabs.length-1]?.siteId||'';renderWindow('browser');break;}
+    
     case 'bookmark':case 'bookmark-site':{const ok=addBookmark(state.game,site);toast(ok?'Закладка сохранена.':'Не удалось сохранить закладку.',ok?'success':'error');scheduleSave();renderWindow('browser');break;}
     case 'site-operation':runSiteOperation(site,el.dataset.op);break;
     case 'export-result':exportResult(id);break;

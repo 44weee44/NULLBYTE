@@ -4,7 +4,7 @@ import {
   acceptMission, cancelMission, missionBoardTimer, rotateMissionBoard, getSite, getSiteProgress, operateSite, exportMissionResult, submitMission,
   processTimedEvents, bankStatus, bankRisk, attemptBankSimulation, saveEditorFile, validateNbs, runNbs,
   recordHistory, addBookmark, idempotencyKey,
-  PLUGIN_SHELLS, PLUGIN_ANIM, runPluginShellCommand, pluginShellBootLines, resolveSiteRef
+  PLUGIN_SHELLS, PLUGIN_ANIM, runPluginShellCommand, pluginShellBootLines, resolveSiteRef, savePlayerNamedFile, findFileByName
 } from './engine.js';
 import { bankLogin, bankTransfer, getBankSession, searchNpcs, pluginDocs, touchNpc, NPC_POOL_SIZE } from './npc.js';
 import { extendedPluginDocs } from './operations.js';
@@ -271,10 +271,40 @@ function openApp(id) {
   element.style.height=`${height}px`;
   element.style.left=`${Math.min(win.left,Math.max(8,area.clientWidth-width-8))}px`;
   element.style.top=`${Math.min(win.top,Math.max(8,area.clientHeight-height-8))}px`;
-  element.innerHTML=`<header class="window-bar"><span class="window-app-mark">${icon(terminalIconId(id))}</span><strong class="window-title">${esc(title)}</strong><span class="window-path">${esc(path)}</span><div class="window-controls"><button type="button" data-action="toggle-pin-window" class="pin-btn" title="Поверх остальных" aria-label="Поверх остальных">📌</button><button type="button" data-action="minimize-window" title="Свернуть" aria-label="Свернуть">—</button><button type="button" data-action="maximize-window" title="Развернуть" aria-label="Развернуть">□</button><button type="button" data-action="close-window" title="Закрыть" aria-label="Закрыть">×</button></div></header><div class="window-content" data-content></div><div class="window-resize" data-resize></div>`;
+  element.innerHTML=`<header class="window-bar"><span class="window-app-mark">${icon(terminalIconId(id))}</span><strong class="window-title">${esc(title)}</strong><span class="window-path">${esc(path)}</span><div class="window-controls"><button type="button" data-action="toggle-pin-window" class="pin-btn" title="Поверх остальных (Always on Top)" aria-label="Поверх остальных"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M14 2l1.5 1.5-1 1L16 6l2.5-.5L20 7l-6 6-1.5-1.5L14 10l-1.5 1.5L4 20l-.5-3.5L12 9.5 10.5 8 14 2z"/></svg></button><button type="button" data-action="minimize-window" title="Свернуть" aria-label="Свернуть">—</button><button type="button" data-action="maximize-window" title="Развернуть" aria-label="Развернуть">□</button><button type="button" data-action="close-window" title="Закрыть" aria-label="Закрыть">×</button></div></header><div class="window-content" data-content></div><div class="window-resize" data-resize></div>`;
   $('windowLayer').append(element);wireWindow(id,element);renderWindow(id);focusWindow(id);renderTaskbar();
   if(isTerm)requestAnimationFrame(()=>element.querySelector('.terminal-form input')?.focus({preventScroll:true}));
 }
+
+function onGlobalPointerMove(e){
+  const d=state.drag;if(!d)return;
+  const element=document.querySelector(`[data-window="${d.id}"]`);
+  if(!element)return;
+  if(d.resize){
+    const area=$('desktopWorkspace');
+    const w=Math.max(280,Math.min(area.clientWidth-8,d.startW+(e.clientX-d.sx)));
+    const h=Math.max(180,Math.min(area.clientHeight-8,d.startH+(e.clientY-d.sy)));
+    element.style.width=w+'px';element.style.height=h+'px';
+    const win=state.opened.get(d.id);if(win){win.width=w;win.height=h;}
+    return;
+  }
+  const area=$('desktopWorkspace');
+  const ww=element.offsetWidth;
+  const x=Math.max(-ww+80,Math.min(area.clientWidth-60,e.clientX-d.workspace.left-d.dx));
+  const y=Math.max(0,Math.min(area.clientHeight-40,e.clientY-d.workspace.top-d.dy));
+  element.style.left=x+'px';element.style.top=y+'px';
+  const win=state.opened.get(d.id);if(win){win.left=x;win.top=y;}
+}
+function onGlobalPointerUp(e){
+  if(state.drag&&(e.pointerId===undefined||e.pointerId===state.drag.pointerId)) state.drag=null;
+}
+if(!window.__nbDragGlobal){
+  window.__nbDragGlobal=true;
+  document.addEventListener('pointermove',onGlobalPointerMove,{passive:false});
+  document.addEventListener('pointerup',onGlobalPointerUp);
+  document.addEventListener('pointercancel',onGlobalPointerUp);
+}
+
 function wireWindow(id,element) {
   element.addEventListener('pointerdown',e=>{
     if(e.target.closest('.window-controls')||e.target.closest('[data-resize]'))return;
@@ -821,16 +851,32 @@ function renderBrowser(g, winId) {
 
 
 function renderMap(g) {
-  const scanner=getInstalledPlugin(g,'map-scanner');
-  const points=LOCATIONS.map(loc=>`<button class="map-point" style="left:${loc.x}%;top:${loc.y}%" data-action="map-location" data-location="${loc.id}">${esc(loc.name)}</button>`).join('');
-  const npcs=g.world.npc.map(n=>`<div class="list-row"><div class="list-main"><strong>${esc(n.name)} <span class="muted">· ${esc(n.role)}</span></strong><small>${esc(LOCATIONS.find(l=>l.id===n.location)?.name||'Неизвестно')} · ${esc(n.device||'Виртуальное устройство')} · ${esc(n.address||'')}${scanner?`<br>${esc(n.data||'')}`:''} · следующий маршрут ${formatTime(n.nextAt)}</small></div><span class="badge">NPC</span></div>`).join('');
-  const sites=g.world.sites.map(s=>{const loc=LOCATIONS.find(l=>l.pois.includes(s.id));return `<div class="list-row"><div class="list-main"><strong>${esc(s.title)}</strong><small>${esc(s.domain)} · ${esc(s.region)} / ${esc(s.district)}${scanner&&loc?` · X:${loc.x} Y:${loc.y}`:''}</small></div><button class="btn tiny ghost" data-action="browser-tab" data-site="${s.id}">САЙТ</button></div>`;}).join('');
-  return `<div class="app-heading"><div><div class="eyebrow">NULLATLAS / WORLD MAP</div><h2>NullAtlas</h2><p>Карта ограниченного вымышленного мира. Координаты условные.</p></div><span class="badge ${scanner?'green':'gray'}">${scanner?'ATLAS SCANNER ACTIVE':'BASIC MAP'}</span></div>
-  <div class="map-canvas">${points}<span class="map-label" style="left:8%;top:10%">СЕВЕРНЫЕ ОКРАИНЫ</span><span class="map-label" style="right:7%;bottom:11%">ЦЕНТРАЛЬНЫЙ РАЙОН</span></div>
-  <div class="notice section-gap">${scanner?'Atlas Scanner показывает условные координаты POI и дополнительные сведения NPC.':'Установи Atlas Scanner в NULForge, чтобы открыть координаты POI и дополнительные сведения NPC.'} Карта не использует GPS и не показывает реальные IP или адреса.</div>
-  <div class="panel section-gap"><div class="panel-title"><span>NPC / МАРШРУТЫ</span><small>СОХРАНЯЕМЫЕ РАСПИСАНИЯ</small></div><div class="list">${npcs}</div></div>
-  <div class="panel section-gap"><div class="panel-title"><span>POINTS OF INTEREST</span><small>ВЫМЫШЛЕННЫЕ ОБЪЕКТЫ</small></div><div class="list">${sites}</div></div>`;
+  const selected = state.mapSelected || null;
+  const locs = typeof LOCATIONS !== 'undefined' ? LOCATIONS : [];
+  const points = locs.map(loc => `<button class="map-point ${selected===loc.id?'on':''}" style="left:${loc.x}%;top:${loc.y}%" data-action="map-location" data-location="${loc.id}">${esc(loc.name)}</button>`).join('');
+  let detail = '<div class="empty-state"><b>Выбери регион на карте</b><p>Снизу появится сетевой ключ региона для Signal Mapper / подключения.</p></div>';
+  if (selected) {
+    const loc = locs.find(l => l.id === selected);
+    const regionIdx = locs.indexOf(loc);
+    const rid = `region_${regionIdx >= 0 ? regionIdx % 8 : 0}`;
+    const netKey = `NET-${String(selected).toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8) || 'ZONE'}`;
+    const ssid = loc ? `${loc.name.replace(/\s+/g,'')}-AP` : 'AP';
+    // persist for plugins
+    if (!g.ops) g.ops = {};
+    if (!g.ops.regionAccess) g.ops.regionAccess = {};
+    detail = `<div class="panel"><div class="panel-title"><span>РЕГИОН</span><small>${esc(loc?.name||selected)}</small></div>
+      <div class="kv"><span>Region ID</span><b>${esc(rid)}</b></div>
+      <div class="kv"><span>Network key</span><b class="text-green">${esc(netKey)}</b></div>
+      <div class="kv"><span>SSID</span><b>${esc(ssid)}</b></div>
+      <p class="muted small section-gap">Скопируй ключ. В Terminal: <code>run signal-mapper</code> → <code>map ${esc(rid)}</code> или используй ключ в mobile/web chain.</p>
+      <button class="btn tiny" data-action="copy-text" data-text="${esc(netKey)}">КОПИРОВАТЬ КЛЮЧ</button>
+    </div>`;
+  }
+  return `<div class="app-heading"><div><div class="eyebrow">CITY MAP / REGIONS</div><h2>Карта</h2><p>Регионы и сетевые ключи. Клик по точке не открывает браузер.</p></div><span class="badge">MAP</span></div>
+  <div class="map-canvas section-gap">${points}</div>
+  <div class="section-gap">${detail}</div>`;
 }
+
 
 function missionSteps(m, g) {
   const site = getSite(g, m.target);
@@ -1060,18 +1106,63 @@ async function runTerminalCommand(termId, raw) {
       if (out) out.innerHTML = '';
       return;
     }
+    // save <name> after analyze / server-index
+    if (lower.startsWith('save ') || lower === 'save') {
+      const name = cmd.slice(4).trim() || term.pendingSave?.defaultName;
+      if (!term.pendingSave) {
+        termAdd(termId, 'Нечего сохранять. Сначала analyze / index.', 'error');
+        return;
+      }
+      if (!name) {
+        termAdd(termId, 'save <имя_файла>', 'error');
+        return;
+      }
+      const meta = {
+        siteId: term.pendingSave.siteId,
+        type: term.pendingSave.type || 'encrypted',
+        encrypted: true,
+        path: '/recon/',
+        ext: '.enc'
+      };
+      const r = savePlayerNamedFile(state.game, name, term.pendingSave.content, meta);
+      if (!r.ok) { termAdd(termId, r.reason, 'error'); return; }
+      term.pendingSave = null;
+      termAdd(termId, `Saved: ${r.file.name}`, 'green');
+      termAdd(termId, 'Открой Files или: artifact-decoder → decode <имя>', 'muted');
+      scheduleSave();
+      refreshOpenApps(['files','computer']);
+      return;
+    }
+    if (lower === 'exit server' || lower.startsWith('exit server')) {
+      const result = runPluginShellCommand(state.game, term.plugin || 'sim-exploit', 'exit server');
+      for (const line of result.lines || []) termAdd(termId, line.text, line.type || '');
+      scheduleSave();
+      return;
+    }
     term.busy = true;
     try {
-      await animateWork(termId, term.plugin);
+      // Longer analysis for site-analyzer / server-index
+      const heavy = (term.plugin === 'site-analyzer' || term.plugin === 'server-index') && /^(analyze|scan|index|dump)\b/i.test(cmd);
+      if (heavy) {
+        for (const step of ['connecting…','fingerprint…','payload map…','cipher pack…']) {
+          termAdd(termId, step, 'muted');
+          await sleep(450);
+        }
+      } else {
+        await animateWork(termId, term.plugin);
+      }
       const result = runPluginShellCommand(state.game, term.plugin, cmd);
       for (const line of result.lines || []) {
         termAdd(termId, line.text, line.type || '');
-        await sleep(20);
+        await sleep(24);
+      }
+      if (result.pendingSave) {
+        term.pendingSave = result.pendingSave;
       }
       if (result.exit) term.plugin = null;
       if (result.progressUpdated || result.exportFile) scheduleSave();
       if (result.exportFile) toast('Файл готов → N-Mail', 'success');
-      if (result.progressUpdated) refreshOpenApps(['browser', 'mail', 'blackwire', 'computer']);
+      if (result.progressUpdated) refreshOpenApps(['browser', 'mail', 'blackwire', 'computer', 'files']);
     } finally {
       term.busy = false;
       const input = document.querySelector(`[data-window="${termId}"] .terminal-form input`);
@@ -1325,6 +1416,12 @@ function handleAction(action,el) {
         <p><b>Далее:</b> ${(p.next||[]).map(esc).join(', ')||'—'}</p>`,confirm:'ЗАКРЫТЬ',cancel:'',onConfirm:()=>{}});
       break;
     }
+    case 'copy-text':{
+      const t=el.dataset.text||'';
+      if(navigator.clipboard?.writeText) navigator.clipboard.writeText(t).then(()=>toast('Скопировано','success')).catch(()=>toast(t,'info'));
+      else toast(t,'info');
+      break;
+    }
     case 'open-app':$('startMenu').hidden=true;$('startButton').setAttribute('aria-expanded','false');openApp(app);break;
     case 'close-window':closeWindow(el.closest('.app-window')?.dataset.window);break;
     case 'toggle-pin-window': togglePinWindow(el.closest('.app-window')?.dataset.window); break;
@@ -1473,13 +1570,9 @@ function handleAction(action,el) {
     case 'file-close':state.selectedFileId=null;renderWindow('mail');break;
     case 'mail-mark':{const m=state.game.mail.messages.find(x=>x.id===id);if(m)m.status='read';scheduleSave();renderWindow('mail');break;}
     case 'map-location':{
-      const loc=LOCATIONS.find(x=>x.id===el.dataset.location);
-      if(loc){
-        const s=state.game.world.sites.find(x=>loc.pois.includes(x.id));
-        const residents=state.game.world.npc.filter(n=>n.location===loc.id);
-        if(s){ensureBrowserTab(s.id);openApp('browser');renderWindow('browser');}
-        else showModal({title:loc.name,eyebrow:'NULLATLAS / LOCATION',body:`Район игрового мира: ${esc(loc.city||'NULLBYTE')} . Здесь сейчас ${residents.length} NPC.`,fields:`<div class="panel"><div class="panel-title"><span>ПЕРСОНАЖИ В РАЙОНЕ</span></div>${residents.map(n=>`<div class="list-row"><div class="list-main"><strong>${esc(n.name)}</strong><small>${esc(n.role)} · ${esc(n.device||'Виртуальное устройство')}</small></div></div>`).join('')||'<div class="muted small">Сейчас персонажей нет.</div>'}</div>`,confirm:'ЗАКРЫТЬ',cancel:'',onConfirm:()=>true});
-      }
+      const locId=el.dataset.location;
+      state.mapSelected=locId;
+      renderWindow('map');
       break;
     }
     case 'bank-attempt':{const risk=bankRisk(state.game);confirm('Запустить банковскую симуляцию?',`Вероятность виртуальной трассировки: <b>${Math.round(risk.traceChance*100)}%</b>.<br>При неудаче будут конфискованы все <b>${fmt(state.game.economy.credits)} CR</b>, а Aster Bank заблокируется на <b>24 часа</b> реального времени. Другие контракты останутся доступны, но их награды во время блокировки будут конфискованы. Продолжить?`,()=>actionResult(attemptBankSimulation(state.game,true)),{danger:true,confirmText:'ПОДТВЕРЖДАЮ РИСК'});break;}

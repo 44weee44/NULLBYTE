@@ -385,7 +385,7 @@ export const PLUGIN_SHELLS = {
 
   'site-analyzer': {
     boot: 'Site Analyzer v1.0 — разбор вымышленной цели.',
-    help: 'analyze <domain> | scan <domain> | help | exit',
+    help: 'analyze <domain> | save <имя> | help | exit',
     commands: ['analyze', 'scan', 'help', 'exit']
   },
   'artifact-decoder': {
@@ -398,14 +398,10 @@ export const PLUGIN_SHELLS = {
     help: 'discover <ARTIFACT_ID> | scan <host|domain> | help | exit',
     commands: ['discover', 'find', 'help', 'exit']
   },
-  'weakness-lab': {
-    boot: 'Weakness Lab v1.2 — модель защиты цели.',
-    help: 'probe <NODE|server> | scan <server> | help | exit',
+  'weakness-lab': { boot: 'Weakness Lab', help: 'vuln <filename> | help | exit',
     commands: ['probe', 'weakness', 'help', 'exit']
   },
-  'sim-exploit': {
-    boot: 'Sim Exploit v2.0 — безопасная симуляция доступа.',
-    help: 'simulate <VECTOR|WEAKNESS_KEY> | use <vuln_id> | help | exit',
+  'sim-exploit': { boot: 'Sim Exploit / Server', help: 'enter <VULN_PATH> | help | exit',
     commands: ['simulate', 'exploit', 'help', 'exit']
   },
   'data-exporter': {
@@ -533,6 +529,156 @@ function touchCooldown(state, pluginId) {
  * Execute a command inside an active plugin shell.
  * Returns { ok, lines:[{text,type}], key?, progressUpdated?, exportFile? }
  */
+
+/** Create encrypted recon dump; returns file meta */
+export function createEncryptedSiteDump(state, site, suggestedName) {
+  const body = [
+    'NULLBYTE ENC SITE DUMP v2',
+    `DOMAIN=${site.domain}`,
+    `SITE_ID=${site.id}`,
+    `KIND=${site.kind}`,
+    `SEC=${site.security}`,
+    `ARTIFACT=${site.artifact||''}`,
+    '---CIPHER---',
+    // fake cipher payload
+    Array.from({length:12},(_,i)=>`BLK${i}:${Math.abs(hashQuick(site.id+i)).toString(16)}`).join('\n')
+  ].join('\n');
+  return {
+    encrypted: true,
+    content: body,
+    siteId: site.id,
+    domain: site.domain
+  };
+}
+
+function hashQuick(s){let h=2166136261;for(let i=0;i<String(s).length;i++){h^=String(s).charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
+
+export function savePlayerNamedFile(state, name, content, meta={}) {
+  name = String(name||'dump').replace(/[^\w.\-]+/g,'_').slice(0,40);
+  if (!name.includes('.')) name += (meta.ext || '.enc');
+  if ((state.computer.files||[]).some(f => f.name === name)) {
+    return { ok: false, reason: `Файл «${name}» уже есть. Выбери другое имя.` };
+  }
+  const file = {
+    id: idempotencyKey('file'),
+    name,
+    type: meta.type || 'encrypted',
+    size: Math.max(1, Math.ceil(String(content).length/1024)),
+    content: String(content),
+    path: meta.path || '/recon/',
+    createdAt: Date.now(),
+    encrypted: meta.encrypted !== false,
+    meta: { ...meta, siteId: meta.siteId }
+  };
+  state.computer.files.unshift(file);
+  state.computer.files = state.computer.files.slice(0, 100);
+  return { ok: true, file };
+}
+
+export function findFileByName(state, name) {
+  const n = String(name||'').trim();
+  return (state.computer.files||[]).find(f => f.name === n || f.name === n + '.enc' || f.id === n);
+}
+
+export function decryptSiteFileInPlace(state, file) {
+  if (!file) return { ok: false, reason: 'Файл не найден.' };
+  const siteId = file.meta?.siteId;
+  const site = siteId ? getSite(state, siteId) : null;
+  const decoded = [
+    'NULLBYTE DECODED SITE REPORT',
+    `FILE=${file.name}`,
+    `DOMAIN=${site?.domain || file.meta?.domain || '—'}`,
+    `SITE_ID=${siteId||'—'}`,
+    `KIND=${site?.kind||'—'}`,
+    `SECURITY=${site?.security??'—'}`,
+    `ARTIFACT=${site?.artifact||'—'}`,
+    '--- SURFACE ---',
+    site ? `Title: ${site.title}` : '',
+    site ? `Data mark: ${String(site.data||'').slice(0,120)}` : '',
+    'Status: readable',
+    'Next: weakness-lab → vuln <filename>'
+  ].filter(Boolean).join('\n');
+  file.content = decoded;
+  file.encrypted = false;
+  file.type = 'site-report';
+  file.meta = { ...(file.meta||{}), decrypted: true, stage: 'decoded' };
+  if (site) {
+    const r = operateSite(state, site.id, 'decode', null);
+    if (!r.ok && r.reason) {
+      // still allow file decode if analyze was done via file path
+    }
+  }
+  return { ok: true, file };
+}
+
+export function findVulnFromFile(state, file) {
+  if (!file) return { ok: false, reason: 'Файл не найден.' };
+  if (file.encrypted) return { ok: false, reason: 'Сначала расшифруй файл (artifact-decoder).' };
+  const siteId = file.meta?.siteId;
+  const site = siteId ? getSite(state, siteId) : null;
+  if (site?.kind === 'bank') return { ok: false, reason: 'Банк — отдельный протокол.' };
+  const h = hashQuick((siteId||file.name)+'vuln');
+  const path = `/var/null/${(site?.domain||'node').split('.')[0]}/v${(h%90+10)}/gate-${(h%9000+1000).toString(16)}`;
+  file.meta = { ...(file.meta||{}), vulnPath: path, stage: 'vuln' };
+  if (site) operateSite(state, site.id, 'weakness', null);
+  return { ok: true, path, siteId, file };
+}
+
+export function enterServerSession(state, vulnPath) {
+  ensureOps(state);
+  // find file with this vuln
+  const file = (state.computer.files||[]).find(f => f.meta?.vulnPath === vulnPath || f.meta?.vulnPath === String(vulnPath).trim());
+  let siteId = file?.meta?.siteId;
+  if (!siteId) {
+    // try match path fragment to site
+    for (const s of state.world.sites) {
+      if (String(vulnPath).includes((s.domain||'').split('.')[0])) { siteId = s.id; break; }
+    }
+  }
+  if (!siteId) return { ok: false, reason: 'Vuln path не связан с известной целью.' };
+  const site = getSite(state, siteId);
+  if (!site) return { ok: false, reason: 'Сайт не найден.' };
+  if (site.kind === 'bank') return { ok: false, reason: 'Банк недоступен через этот вход.' };
+  const r = operateSite(state, siteId, 'exploit', null);
+  if (!r.ok) return { ok: false, reason: r.reason };
+  state.ops.serverSession = {
+    siteId,
+    domain: site.domain,
+    vulnPath: String(vulnPath),
+    enteredAt: Date.now(),
+    modified: false,
+    kickAt: null
+  };
+  return { ok: true, site, session: state.ops.serverSession };
+}
+
+export function exitServerSession(state) {
+  if (!state.ops?.serverSession) return { ok: false, reason: 'Не на сервере.' };
+  const s = state.ops.serverSession;
+  state.ops.serverSession = null;
+  return { ok: true, siteId: s.siteId };
+}
+
+export function markServerModified(state) {
+  if (!state.ops?.serverSession) return;
+  const sess = state.ops.serverSession;
+  sess.modified = true;
+  const site = getSite(state, sess.siteId);
+  const sec = site?.security || 3;
+  const minutes = ({1:60,2:40,3:20,4:10,5:5})[Math.min(5,Math.max(1,sec))] || 20;
+  sess.kickAt = Date.now() + minutes * 60 * 1000;
+  // hidden timer — also set site recovery
+  if (site) site.recoveryAt = sess.kickAt;
+}
+
+export function processServerSessionKick(state, now=Date.now()) {
+  const sess = state.ops?.serverSession;
+  if (!sess || !sess.kickAt || sess.kickAt > now) return [];
+  state.ops.serverSession = null;
+  return ['Сессия сервера прервана. Изменения откатываются.'];
+}
+
+
 export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = null) {
   const shell = PLUGIN_SHELLS[pluginId];
   if (!shell) return { ok: false, lines: [{ text: 'Плагин не поддерживает интерактивный режим.', type: 'error' }] };
@@ -561,6 +707,8 @@ export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = 
   }
 
   // —— site-analyzer ——
+  
+  // —— FILE-BASED WEB PIPELINE ——
   if (pluginId === 'site-analyzer' && (cmd === 'analyze' || cmd === 'scan')) {
     const recon = runWebRecon(state, arg1);
     if (!recon.ok) return { ok: false, lines: recon.lines };
@@ -569,152 +717,151 @@ export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = 
     if (site.recoveryAt > Date.now()) return { ok: false, lines: [{ text: `Цель восстанавливается ~${Math.ceil((site.recoveryAt-Date.now())/60000)} мин.`, type: 'error' }] };
     const r = operateSite(state, site.id, 'analyze', null);
     if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
-    ensureOps(state);
-    for (const k of state.ops.keys) if (k.stage === 'analyze' && k.siteId === site.id && !k.used) k.used = true;
-    state.ops.keys.push({ id: idempotencyKey('key'), stage: 'analyze', siteId: site.id, token: recon.signature, createdAt: Date.now(), used: false });
-    state.ops.keys = state.ops.keys.slice(-40);
     touchCooldown(state, pluginId);
-    return { ok: true, lines: recon.lines, key: recon.signature, progressUpdated: true };
-  }
-
-  if (pluginId === 'artifact-decoder' && cmd === 'decode') {
-    const key = findOpKey(state, arg1);
-    if (!key || key.stage !== 'analyze' || key.used) {
-      return { ok: false, lines: [{ text: 'Нужна свежая SIGNATURE от Site Analyzer (SIG/…).', type: 'error' }] };
-    }
-    const site = getSite(state, key.siteId);
-    if (!site) return { ok: false, lines: [{ text: 'Цель ключа исчезла.', type: 'error' }] };
-    const r = operateSite(state, site.id, 'decode', null);
-    if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
-    key.used = true;
-    const next = issueOpKey(state, 'decode', site.id);
-    touchCooldown(state, pluginId);
-    ensureIntel(state);
+    // Longer analysis output — no tip chain hints
     const lines = [
-      { text: 'NULLBYTE // ARTIFACT DECODER', type: 'blue' },
-      { text: `Artifact marker: ${site.artifact}`, type: '' },
-      { text: `Payload hint: ${String(site.data).slice(0, 80)}`, type: '' },
-      { text: `EXTRACT >> ARTIFACT_ID = ${next.token}`, type: 'green' },
-      { text: 'Next: node-radar → discover <ARTIFACT_ID> | scan <host>', type: 'muted' }
+      { text: 'NULLBYTE // SITE ANALYZER', type: 'blue' },
+      { text: `Target: ${site.domain}`, type: '' },
+      { text: 'Crawling surface…', type: 'muted' },
+      { text: 'Fingerprinting stack…', type: 'muted' },
+      { text: 'Collecting cipher blocks…', type: 'muted' },
+      { text: 'Dump ready (encrypted).', type: 'green' },
+      { text: 'Как назвать файл? Введи: save <имя>', type: 'blue' }
     ];
-    return { ok: true, lines, key: next.token, progressUpdated: true };
+    const dump = createEncryptedSiteDump(state, site);
+    return {
+      ok: true,
+      lines,
+      progressUpdated: true,
+      pendingSave: { kind: 'site-enc', siteId: site.id, content: dump.content, defaultName: `${site.domain.split('.')[0]}-scan` }
+    };
   }
 
-  if (pluginId === 'node-radar' && (cmd === 'discover' || cmd === 'find' || cmd === 'scan')) {
-    // Prefer server analysis from intel; still advance pipeline if key valid
-    let siteId = null;
-    let lines = [];
-    const key = findOpKey(state, arg1);
-    if (key && key.stage === 'decode' && !key.used) {
-      const site = getSite(state, key.siteId);
-      const r = operateSite(state, site.id, 'node', null);
-      if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
-      key.used = true;
-      siteId = site.id;
-      const next = issueOpKey(state, 'node', site.id);
-      const srv = runServerAnalysis(state, site.id);
-      lines = (srv.lines || []).concat([
-        { text: `EXTRACT >> NODE_KEY = ${next.token}`, type: 'green' }
-      ]);
-      touchCooldown(state, pluginId);
-      return { ok: true, lines, key: next.token, progressUpdated: true, siteId };
+  // Global-ish: save <name> while pending — handled in terminal if pendingSave on result
+  // Also support explicit save command inside analyzer
+  if (pluginId === 'site-analyzer' && cmd === 'save') {
+    return { ok: false, lines: [{ text: 'Сначала analyze <domain>, затем save <имя> в том же плагине.', type: 'error' }] };
+  }
+
+  if (pluginId === 'artifact-decoder' && (cmd === 'decode' || cmd === 'open')) {
+    const file = findFileByName(state, arg1);
+    if (!file) return { ok: false, lines: [{ text: 'Файл не найден. Укажи имя: decode <filename>', type: 'error' }] };
+    if (!file.encrypted && file.meta?.decrypted) {
+      return { ok: true, lines: [{ text: `Уже расшифрован: ${file.name}`, type: 'muted' }, { text: file.content.slice(0, 400), type: '' }] };
     }
-    // Free scan by domain/host without key still gives intel but not pipeline
-    const srv = runServerAnalysis(state, arg1);
-    if (!srv.ok) return srv;
+    const r = decryptSiteFileInPlace(state, file);
+    if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
     touchCooldown(state, pluginId);
-    return { ok: true, lines: srv.lines, progressUpdated: true, siteId: srv.siteId };
+    return {
+      ok: true,
+      lines: [
+        { text: 'NULLBYTE // ARTIFACT DECODER', type: 'blue' },
+        { text: `Decrypted in-place: ${file.name}`, type: 'green' },
+        { text: file.content.split('\n').slice(0, 10).join('\n'), type: '' },
+        { text: 'Дальше: weakness-lab → vuln <filename>', type: 'muted' }
+      ],
+      progressUpdated: true
+    };
   }
 
-  if (pluginId === 'weakness-lab' && (cmd === 'probe' || cmd === 'weakness' || cmd === 'scan')) {
-    const key = findOpKey(state, arg1);
-    let siteId = null;
-    if (key && key.stage === 'node' && !key.used) {
-      const site = getSite(state, key.siteId);
-      const r = operateSite(state, site.id, 'weakness', null);
-      if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
-      key.used = true;
-      siteId = site.id;
-      const next = issueOpKey(state, 'weakness', site.id);
-      const scan = runWeaknessScan(state, site.id);
-      const lines = (scan.lines || []).concat([
-        { text: `EXTRACT >> WEAKNESS_PIPELINE = ${next.token}`, type: 'green' }
-      ]);
-      touchCooldown(state, pluginId);
-      return { ok: true, lines, key: next.token, progressUpdated: true, vectorId: scan.vectorId };
-    }
-    const scan = runWeaknessScan(state, arg1);
-    if (!scan.ok) return scan;
+  if (pluginId === 'weakness-lab' && (cmd === 'vuln' || cmd === 'probe' || cmd === 'scan')) {
+    const file = findFileByName(state, arg1);
+    if (!file) return { ok: false, lines: [{ text: 'vuln <filename> — нужен расшифрованный отчёт.', type: 'error' }] };
+    const r = findVulnFromFile(state, file);
+    if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
     touchCooldown(state, pluginId);
-    return { ok: true, lines: scan.lines, progressUpdated: true, vectorId: scan.vectorId };
+    return {
+      ok: true,
+      lines: [
+        { text: 'NULLBYTE // WEAKNESS LAB', type: 'blue' },
+        { text: `Scanned: ${file.name}`, type: '' },
+        { text: 'Weakness found.', type: 'green' },
+        { text: `VULN_PATH = ${r.path}`, type: 'green' },
+        { text: 'Дальше: sim-exploit → enter <VULN_PATH>', type: 'muted' }
+      ],
+      key: r.path,
+      progressUpdated: true
+    };
   }
 
-  if (pluginId === 'sim-exploit' && (cmd === 'simulate' || cmd === 'exploit' || cmd === 'use')) {
-    const key = findOpKey(state, arg1);
-    const mission = state.missions.items.find(m => m.status === 'accepted' && (key ? m.target === key.siteId : true));
-    if (key && key.stage === 'weakness' && !key.used) {
-      const site = getSite(state, key.siteId);
-      const r = operateSite(state, site.id, 'exploit', mission?.id || null);
-      if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
-      key.used = true;
-      if (r.success === false) {
-        touchCooldown(state, pluginId);
-        return { ok: true, lines: [{ text: r.message, type: 'error' }], progressUpdated: true };
-      }
-      const ex = runSimExploit(state, site.id, mission?.id || null);
-      const next = issueOpKey(state, 'access', site.id);
-      // Prefer session from intel
-      const session = ex.session || next.token;
-      // align pipeline key to session
-      next.token = session;
-      touchCooldown(state, pluginId);
-      const lines = (ex.lines || []).concat([{ text: `Pipeline SESSION bound.`, type: 'muted' }]);
-      return { ok: true, lines, key: session, progressUpdated: true, success: ex.success !== false };
-    }
-    // Direct vector id exploit
-    const ex = runSimExploit(state, arg1, mission?.id || null);
+  if (pluginId === 'sim-exploit' && (cmd === 'enter' || cmd === 'exploit' || cmd === 'use')) {
+    const path = parts.slice(1).join(' ') || arg1;
+    const r = enterServerSession(state, path);
+    if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
     touchCooldown(state, pluginId);
-    return { ok: true, lines: ex.lines, key: ex.session, progressUpdated: true, success: ex.success !== false, siteId: ex.siteId };
+    return {
+      ok: true,
+      lines: [
+        { text: 'NULLBYTE // SERVER SESSION', type: 'blue' },
+        { text: `Connected: ${r.site.domain}`, type: 'green' },
+        { text: `shell@${r.site.domain}:~$`, type: '' },
+        { text: 'Доступны server-index / site-editor / data-exporter на этом сервере.', type: 'muted' },
+        { text: 'Выход: exit server', type: 'muted' }
+      ],
+      progressUpdated: true,
+      serverSession: true
+    };
   }
 
-  if (pluginId === 'db-reader' && (cmd === 'read' || cmd === 'query' || cmd === 'search' || cmd === 'export')) {
-    if (cmd === 'search') {
-      const r = runUserSearch(state, parts.slice(1).join(' '));
-      touchCooldown(state, pluginId);
-      return { ok: r.ok, lines: r.lines, progressUpdated: true };
-    }
-    if (cmd === 'export') {
-      const site = resolveSiteRef(state, arg1) || getSite(state, arg1);
-      if (!site) return { ok: false, lines: [{ text: 'Укажи site id / domain', type: 'error' }] };
-      const r = runDbExport(state, site.id);
-      // pipeline database flag if access
-      const p = getSiteProgress(state, site.id);
-      if (p.access) { p.database = true; }
-      touchCooldown(state, pluginId);
-      return { ok: r.ok, lines: r.lines, progressUpdated: true };
-    }
-    // read with access key
-    const key = findOpKey(state, arg1);
-    if (key && key.stage === 'access' && !key.used) {
-      const site = getSite(state, key.siteId);
-      if (site?.kind === 'database') {
-        const r = operateSite(state, site.id, 'database', null);
-        if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
-        key.used = true;
-        const next = issueOpKey(state, 'database', site.id);
-        const exp = runDbExport(state, site.id);
-        touchCooldown(state, pluginId);
-        return { ok: true, lines: (exp.lines||[]).concat([{ text: `EXTRACT >> DB_KEY = ${next.token}`, type: 'green' }]), key: next.token, progressUpdated: true };
-      }
-      key.used = true;
-      const exp = runDbExport(state, key.siteId);
-      touchCooldown(state, pluginId);
-      return { ok: true, lines: exp.lines, progressUpdated: true };
-    }
-    return { ok: false, lines: [{ text: 'db-reader: search <q> | export <domain> | read <SESSION>', type: 'error' }] };
+  // exit server from any plugin or shell
+  if ((cmd === 'exit' && arg1 === 'server') || (rawLine || '').trim().toLowerCase() === 'exit server') {
+    const r = exitServerSession(state);
+    if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+    return { ok: true, lines: [{ text: 'Disconnected from server.', type: 'muted' }], exit: false };
   }
 
-  if (pluginId === 'data-exporter' && (cmd === 'export' || cmd === 'pack')) {
+  if (pluginId === 'node-radar' && (cmd === 'discover' || cmd === 'scan' || cmd === 'find')) {
+    // Optional secondary recon — no longer required in main chain
+    const site = resolveSiteRef(state, arg1) || getSite(state, state.ops?.serverSession?.siteId);
+    if (!site) return { ok: false, lines: [{ text: 'scan <domain>', type: 'error' }] };
+    const srv = typeof runServerAnalysis === 'function' ? runServerAnalysis(state, site.id) : { ok: true, lines: [{ text: site.domain, type: '' }] };
+    touchCooldown(state, pluginId);
+    return { ok: true, lines: (srv.lines || [{ text: 'Node ok', type: 'green' }]), progressUpdated: true };
+  }
+
+  if (pluginId === 'server-index' && (cmd === 'index' || cmd === 'dump')) {
+    if (!state.ops?.serverSession) return { ok: false, lines: [{ text: 'Нужна сессия сервера (sim-exploit → enter).', type: 'error' }] };
+    const site = getSite(state, state.ops.serverSession.siteId);
+    const content = [
+      'NULLBYTE ENC SERVER INDEX',
+      `DOMAIN=${site.domain}`,
+      `SITE=${site.id}`,
+      '---CIPHER---',
+      ...Array.from({length:8},(_,i)=>`U${i}:${hashQuick(site.id+'u'+i).toString(16)}`)
+    ].join('\n');
+    touchCooldown(state, pluginId);
+    return {
+      ok: true,
+      lines: [
+        { text: 'SERVER INDEX — deep scan…', type: 'blue' },
+        { text: 'Users / roles / devices collected (encrypted).', type: 'muted' },
+        { text: 'Как назвать файл? save <имя>', type: 'blue' }
+      ],
+      pendingSave: { kind: 'server-enc', siteId: site.id, content, defaultName: `${site.domain.split('.')[0]}-index`, type: 'server-index-enc' }
+    };
+  }
+
+  if (pluginId === 'target-extractor' && (cmd === 'decode' || cmd === 'decrypt') && arg1) {
+    // decrypt server index in place
+    const file = findFileByName(state, arg1);
+    if (!file) return { ok: false, lines: [{ text: 'Файл не найден', type: 'error' }] };
+    const siteId = file.meta?.siteId || state.ops?.serverSession?.siteId;
+    const site = getSite(state, siteId);
+    const users = Object.values(state.intel?.users || {}).slice(0, 8);
+    file.content = [
+      'NULLBYTE SERVER INDEX (DECODED)',
+      `DOMAIN=${site?.domain||'—'}`,
+      `USERS=${users.length}`,
+      ...users.map(u => `- ${u.id} ${u.username} role=${u.role}`)
+    ].join('\n');
+    file.encrypted = false;
+    file.type = 'server-index';
+    file.meta = { ...(file.meta||{}), decrypted: true };
+    touchCooldown(state, pluginId);
+    return { ok: true, lines: [{ text: `Decoded in-place: ${file.name}`, type: 'green' }, { text: file.content.slice(0, 500), type: '' }] };
+  }
+
+if (pluginId === 'data-exporter' && (cmd === 'export' || cmd === 'pack')) {
     const key = findOpKey(state, arg1);
     if (!key || key.used) {
       return { ok: false, lines: [{ text: 'Нужен SESSION_TOKEN / ACCESS ключ.', type: 'error' }] };
@@ -774,7 +921,7 @@ export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = 
   
   if (pluginId === 'phone-call') {
     if (cmd === 'call') {
-      const ref = args.join(' ') || arg1;
+      const ref = parts.slice(1).join(' ') || arg1;
       let npc = touchNpc(state, ref) || searchNpcs(state, ref, 3)[0];
       if (!npc) {
         const devices = Object.values(state.intel?.devices || {});
@@ -800,7 +947,7 @@ export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = 
     if (cmd === 'say' || cmd === 'talk') {
       if (!state._callTarget) return { ok: false, lines: [{ text: 'Сначала call <цель>', type: 'error' }] };
       const npc = touchNpc(state, state._callTarget);
-      const msg = args.join(' ') || arg1 || '';
+      const msg = parts.slice(1).join(' ') || arg1 || '';
       if (!msg) return { ok: false, lines: [{ text: 'say <текст>', type: 'error' }] };
       const r = npcReply(state, npc, msg);
       const lines = [
@@ -853,7 +1000,7 @@ export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = 
   
   if (pluginId === 'device-scout') {
     if (cmd === 'scout' || cmd === 'scan') {
-      const ref = args.join(' ') || arg1;
+      const ref = parts.slice(1).join(' ') || arg1;
       const devices = Object.values(state.intel?.devices || {});
       let hits = devices.filter(d => JSON.stringify(d).toLowerCase().includes(String(ref).toLowerCase()));
       if (!hits.length && ref) hits = devices.slice(0, 3);
@@ -942,6 +1089,9 @@ export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = 
       return { ok: true, lines: [{ text: `Archive → ${r.file.name}`, type: 'green' }, { text: 'Открой Files или прикрепи в N-Mail', type: 'muted' }] };
     }
   }
+  if (pluginId === 'site-editor' && (cmd === 'set' || cmd === 'edit' || cmd === 'hijack' || cmd === 'paylink')) {
+    if (state.ops?.serverSession) markServerModified(state);
+  }
   if (pluginId === 'site-editor' && (cmd === 'hijack' || cmd === 'paylink')) {
     const siteId = arg1;
     const r = hijackPaymentLink(state, siteId, arg2 || 'operator-wallet');
@@ -979,7 +1129,7 @@ export function operateSite(state,siteId,operation,missionId=null) {
   if(operation==='analyze') { p.analyzed=true; p.report={domain:site.domain,security:site.security,artifact:site.artifact,kind:site.kind}; }
   else if(operation==='decode') { if(!p.analyzed) return {ok:false,reason:'Сначала выполни анализ сайта.'}; p.decoded=true; }
   else if(operation==='node') { if(!p.decoded) return {ok:false,reason:'Сначала расшифруй игровой артефакт.'}; p.node=true; }
-  else if(operation==='weakness') { if(!p.node) return {ok:false,reason:'Сначала обнаружь виртуальный узел.'}; p.weakness=true; }
+  else if(operation==='weakness') { if(!p.decoded && !p.node) return {ok:false,reason:'Сначала расшифруй отчёт или обнаружь узел.'}; p.node=true; p.weakness=true; }
   else if(operation==='exploit') {
     if(!p.weakness) return {ok:false,reason:'Сначала найди игровую слабость.'};
     const required=site.kind==='database'?6:1;

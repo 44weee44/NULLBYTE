@@ -1,5 +1,9 @@
 /* NULLBYTE game engine. Fictional, deterministic client-side simulation only. */
 import { createEmptyIntel, seedIntelFromSites, runWebRecon, migrateIntel, listIntelSummary, ensureIntel, runServerAnalysis, runWeaknessScan, runSimExploit, runUserSearch, runMobileIdentify, runMobileAnalysis, modifyVirtualUser, runDbExport, writeIntelFile, processTemporaryRestores, listActiveTempChanges, applyTemporaryChange, openSession, closeSession } from './cyber.js';
+import { createEmptyNpcWorld, migrateNpcWorld, getNpc, touchNpc, bankLogin, getBankSession, expireBankSessions, bankTransfer, requestNpcTransfer, searchNpcs, pluginDocs, NPC_POOL_SIZE, ensureBankAccount, generateNpc, tickNpcCommerce } from './npc.js';
+// tickNpcCommerce imported via npc named exports below
+import { createEmptyOpsState, migrateOps, processPaymentLinkRestores, buildServerIndex, extractTarget, createArchive, signalMapRegion, grantRegionKey, hijackPaymentLink, recoveryMsForSecurity, REGIONS, MOBILE_PLUGIN_META, extendedPluginDocs } from './operations.js';
+import { npcReply, openingLine, moneyDialogue, dialogueStats, getTrust } from './dialogue.js';
 export const SAVE_VERSION = 1;
 export const BALANCE = {
   creditsStart: 650,
@@ -15,6 +19,9 @@ export const BALANCE = {
 };
 
 export const PLUGINS = [
+  ...MOBILE_PLUGIN_META.filter(p=>p.id!=='phone-call'),
+  { id:'phone-call', name:'Phone Call', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:2, minOs:1, ram:1, storage:80, cooldown:0, description:'Звонок с доступного виртуального телефона NPC.', effect:'Диалог и просьбы о переводе.', starter:true },
+
   { id:'site-analyzer', name:'Site Analyzer', category:'Анализ сайтов', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:120, cooldown:0, description:'WEB RECON: DNS, fingerprint, surface, артефакты разведки.', effect:'Карта домена и SIGNATURE для pipeline.', starter:true },
   { id:'artifact-decoder', name:'Artifact Decoder', category:'Расшифровка', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:180, cooldown:0, description:'Преобразует условный игровой артефакт в подсказку.', effect:'Открывает шаг декодирования.', starter:true },
   { id:'node-radar', name:'Node Radar', category:'Обнаружение узлов', version:'1.1.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:260, cooldown:5000, description:'Находит симулируемый узел цели в личном мире.', effect:'Показывает игровой host-node.', starter:true },
@@ -109,6 +116,8 @@ export function createInitialState(tgUser=null) {
     stats:{operations:0,successfulOperations:0,failedOperations:0,bytesExported:0}
   };
   state0.intel = seedIntelFromSites(state0.world.sites, createEmptyIntel());
+  state0.npcWorld = createEmptyNpcWorld();
+  state0.ops = createEmptyOpsState();
   unlockMissions(state0);
   rotateMissionBoard(state0, Date.now(), true);
   return state0;
@@ -144,6 +153,8 @@ export function migrateSave(raw,tgUser=null) {
   out.cooldowns={...fresh.cooldowns,...(raw.cooldowns||{})};
   out.stats={...fresh.stats,...(raw.stats||{})};
   out.intel=migrateIntel(raw.intel, out.world?.sites||fresh.world.sites);
+  out.npcWorld=migrateNpcWorld(raw.npcWorld);
+  out.ops=migrateOps(raw.ops);
   out.ops={keys:Array.isArray(raw.ops?.keys)?raw.ops.keys.filter(k=>k&&typeof k==='object').slice(-40).map(k=>({id:String(k.id||'').slice(0,64),stage:String(k.stage||''),siteId:String(k.siteId||''),token:String(k.token||'').slice(0,80),createdAt:finite(k.createdAt),used:Boolean(k.used)})):[ ]};
   for (const key of ['files','installedPlugins']) if (!Array.isArray(out.computer[key])) out.computer[key]=fresh.computer[key];
   for (const key of ['transactions']) if (!Array.isArray(out.economy[key])) out.economy[key]=fresh.economy[key];
@@ -346,6 +357,21 @@ export function getSiteProgress(state,siteId) {
 
 /* —— Terminal plugin sessions / one-time operation keys —— */
 export const PLUGIN_SHELLS = {
+
+  'device-scout': { boot:'Device Scout v1', help:'scout <ref> | help | exit', commands:['scout','scan','help','exit'] },
+  'signal-mapper': { boot:'Signal Mapper v1', help:'map <region_id> | regions | help | exit', commands:['map','regions','help','exit'] },
+  'mobile-decoder': { boot:'Mobile Decoder v1', help:'decode <DEVICE_ID> | help | exit', commands:['decode','help','exit'] },
+  'mobile-access': { boot:'Mobile Access v1', help:'access <DEVICE_ID> | status | help | exit', commands:['access','status','help','exit'] },
+  'mobile-forensics': { boot:'Mobile Forensics v1', help:'forensics <DEVICE_ID> | help | exit', commands:['forensics','dump','help','exit'] },
+  'server-index': { boot:'Server Index v1', help:'index <SERVER_ID> | help | exit', commands:['index','list','help','exit'] },
+  'target-extractor': { boot:'Target Extractor v1', help:'extract <USER_ID> | help | exit', commands:['extract','help','exit'] },
+  'archive-exporter': { boot:'Archive Exporter v1', help:'pack [fileId...] | list | help | exit', commands:['pack','list','help','exit'] },
+  'phone-call': {
+    boot: 'Phone Call v1.0 — звонок с виртуального устройства.',
+    help: 'call <npc|phone|name> | say <текст> | ask <сумма> | trust | log | hangup | help | exit',
+    commands: ['call', 'ask', 'trust', 'hangup', 'help', 'exit']
+  },
+
   'map-scanner': {
     boot: 'Mobile / Geo Link v1.0 — идентификация устройств.',
     help: 'phone <USER_ID|PHONE_ID> | forensics <PHONE_ID> | help | exit',
@@ -745,7 +771,185 @@ export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = 
     return { ok: r.ok, lines: r.lines, progressUpdated: r.ok };
   }
 
-  return { ok: false, lines: [{ text: `Неизвестная команда «${cmd}». Введи help.`, type: 'error' }] };
+  
+  if (pluginId === 'phone-call') {
+    if (cmd === 'call') {
+      const ref = args.join(' ') || arg1;
+      let npc = touchNpc(state, ref) || searchNpcs(state, ref, 3)[0];
+      if (!npc) {
+        const devices = Object.values(state.intel?.devices || {});
+        const dev = devices.find(d => d.id === ref || String(d.phone||'') === ref);
+        if (dev) {
+          const idx = Math.abs(String(dev.userId||ref).length * 131 + 17) % 2000;
+          npc = touchNpc(state, `npc_${String(idx).padStart(4,'0')}`);
+        }
+      }
+      if (!npc) return { ok: false, lines: [{ text: 'Абонент не найден. call <npc_id|имя|телефон>', type: 'error' }] };
+      state._callTarget = npc.id;
+      const open = openingLine(state, npc);
+      const trust = getTrust(state, npc.id);
+      const st = dialogueStats(state, npc.id);
+      return { ok: true, lines: [
+        { text: 'NULLBYTE // PHONE CALL', type: 'blue' },
+        { text: `Connected: ${npc.name} · ${npc.trait} · mood ${npc.mood}`, type: 'green' },
+        { text: `Trust: ${trust}/100 · asks ${st.attempts.asks||0} · paid ${st.attempts.success||0}/2`, type: 'muted' },
+        { text: `NPC: ${open}`, type: '' },
+        { text: 'say <текст> · ask <сумма> · trust · log · hangup', type: 'muted' }
+      ]};
+    }
+    if (cmd === 'say' || cmd === 'talk') {
+      if (!state._callTarget) return { ok: false, lines: [{ text: 'Сначала call <цель>', type: 'error' }] };
+      const npc = touchNpc(state, state._callTarget);
+      const msg = args.join(' ') || arg1 || '';
+      if (!msg) return { ok: false, lines: [{ text: 'say <текст>', type: 'error' }] };
+      const r = npcReply(state, npc, msg);
+      const lines = [
+        { text: `You: ${msg}`, type: 'muted' },
+        { text: `NPC: ${r.text}`, type: r.blocked ? 'error' : 'green' }
+      ];
+      if (r.hangup) { state._callTarget = null; lines.push({ text: '[звонок завершён]', type: 'muted' }); }
+      if (r.blocked) state._callTarget = null;
+      return { ok: true, lines };
+    }
+    if (cmd === 'ask') {
+      if (!state._callTarget) return { ok: false, lines: [{ text: 'Сначала call <цель>', type: 'error' }] };
+      const npc = touchNpc(state, state._callTarget);
+      const r = requestNpcTransfer(state, state._callTarget, arg1);
+      const line = moneyDialogue(state, npc, r);
+      const lines = [
+        { text: `You: попроси ${arg1} CR`, type: 'muted' },
+        { text: `NPC: ${line}`, type: r.ok ? 'green' : 'error' }
+      ];
+      if (r.ok) lines.push({ text: `+${r.amount} CR · trust ${getTrust(state, npc.id)} · success ${r.successCount}/2`, type: 'green' });
+      if (r.blocked) { state._callTarget = null; lines.push({ text: '[контакт прерван]', type: 'error' }); }
+      return { ok: true, lines, progressUpdated: r.ok };
+    }
+    if (cmd === 'trust') {
+      if (!state._callTarget) return { ok: false, lines: [{ text: 'Нет активного звонка.', type: 'error' }] };
+      const st = dialogueStats(state, state._callTarget);
+      return { ok: true, lines: [
+        { text: `Trust: ${st.trust}/100`, type: 'blue' },
+        { text: `Asks: ${st.attempts.asks||0} · successful transfers: ${st.attempts.success||0}/2`, type: 'muted' }
+      ]};
+    }
+    if (cmd === 'log') {
+      if (!state._callTarget) return { ok: false, lines: [{ text: 'Нет активного звонка.', type: 'error' }] };
+      const st = dialogueStats(state, state._callTarget);
+      if (!st.log.length) return { ok: true, lines: [{ text: 'История пуста', type: 'muted' }] };
+      return { ok: true, lines: st.log.slice(-10).map(e => ({ text: `${e.role === 'npc' ? 'NPC' : 'You'}: ${e.text}`, type: e.role==='npc'?'':'muted' })) };
+    }
+    if (cmd === 'hangup') {
+      if (state._callTarget) {
+        const npc = touchNpc(state, state._callTarget);
+        const r = npcReply(state, npc, '', 'bye');
+        state._callTarget = null;
+        return { ok: true, lines: [{ text: `NPC: ${r.text}`, type: 'muted' }, { text: 'Звонок завершён.', type: 'muted' }] };
+      }
+      state._callTarget = null;
+      return { ok: true, lines: [{ text: 'Нет активного звонка.', type: 'muted' }] };
+    }
+  }
+
+  
+  if (pluginId === 'device-scout') {
+    if (cmd === 'scout' || cmd === 'scan') {
+      const ref = args.join(' ') || arg1;
+      const devices = Object.values(state.intel?.devices || {});
+      let hits = devices.filter(d => JSON.stringify(d).toLowerCase().includes(String(ref).toLowerCase()));
+      if (!hits.length && ref) hits = devices.slice(0, 3);
+      if (!hits.length) return { ok: false, lines: [{ text: 'Устройства не найдены в intel. Сначала web chain / map-scanner.', type: 'error' }] };
+      return { ok: true, lines: [
+        { text: 'DEVICE SCOUT RESULTS', type: 'blue' },
+        ...hits.slice(0, 8).map(d => ({ text: `${d.id} · ${d.model || 'device'} · user ${d.userId || '—'}`, type: 'green' }))
+      ]};
+    }
+  }
+  if (pluginId === 'signal-mapper') {
+    if (cmd === 'regions') {
+      return { ok: true, lines: REGIONS.map(r => ({ text: `${r.id} · ${r.name} · ${r.netKey}`, type: '' })) };
+    }
+    if (cmd === 'map') {
+      const rid = arg1 || 'region_0';
+      const res = signalMapRegion(state, rid);
+      return { ok: true, lines: [
+        { text: `REGION ${res.region.name}`, type: 'blue' },
+        { text: `Key: ${res.keyKnown ? res.region.netKey : '(unknown — grant via mission)'}`, type: 'muted' },
+        ...res.nodes.map(n => ({ text: `[${n.type}] ${n.id} ${n.label}`, type: 'green' }))
+      ]};
+    }
+  }
+  if (pluginId === 'mobile-decoder') {
+    if (cmd === 'decode') {
+      const id = arg1;
+      const dev = state.intel?.devices?.[id];
+      if (!dev) return { ok: false, lines: [{ text: 'DEVICE_ID не найден', type: 'error' }] };
+      const content = `DEVICE PROFILE\nID: ${dev.id}\nMODEL: ${dev.model||'—'}\nUSER: ${dev.userId||'—'}\nOS: virt-mobile\n`;
+      state.computer.files.unshift({ id: 'file_mdec_'+Date.now().toString(36), name: `${id}-profile.mdev`, type: 'device-profile', size: 1, content, path: '/mobile/', createdAt: Date.now() });
+      return { ok: true, lines: [{ text: 'Профиль записан в Files', type: 'green' }, { text: content, type: '' }] };
+    }
+  }
+  if (pluginId === 'mobile-access') {
+    if (cmd === 'access') {
+      const id = arg1;
+      if (!state.intel?.devices?.[id]) return { ok: false, lines: [{ text: 'Нет такого DEVICE_ID', type: 'error' }] };
+      if (!state.ops) state.ops = { mobileAccess: {} };
+      if (!state.ops.mobileAccess) state.ops.mobileAccess = {};
+      state.ops.mobileAccess[id] = { level: 'user', expiresAt: Date.now() + 30*60*1000 };
+      return { ok: true, lines: [{ text: `Mobile access GRANTED · ${id}`, type: 'green' }, { text: 'Сессия ~30 мин. Дальше: mobile-forensics / phone-call', type: 'muted' }] };
+    }
+    if (cmd === 'status') {
+      const list = Object.entries(state.ops?.mobileAccess || {}).filter(([,v]) => v.expiresAt > Date.now());
+      return { ok: true, lines: list.length ? list.map(([id,v]) => ({ text: `${id} · ${v.level}`, type: 'green' })) : [{ text: 'Нет активных mobile-сессий', type: 'muted' }] };
+    }
+  }
+  if (pluginId === 'mobile-forensics') {
+    if (cmd === 'forensics' || cmd === 'dump') {
+      const id = arg1;
+      const acc = state.ops?.mobileAccess?.[id];
+      if (!acc || acc.expiresAt < Date.now()) return { ok: false, lines: [{ text: 'Нужен mobile-access', type: 'error' }] };
+      const content = ['FORENSICS '+id,'Contacts: 12','Messages: 48','Calls: 9','Accounts: 3','Notes: 2'].join('\n');
+      state.computer.files.unshift({ id: 'file_for_'+Date.now().toString(36), name: `${id}-forensics.mfor`, type: 'forensics', size: 1, content, path: '/mobile/', createdAt: Date.now() });
+      return { ok: true, lines: content.split('\n').map((t,i) => ({ text: t, type: i===0?'blue':'' })) };
+    }
+  }
+  if (pluginId === 'server-index') {
+    if (cmd === 'index') {
+      const r = buildServerIndex(state, arg1);
+      if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+      return { ok: true, lines: [{ text: `Index → ${r.file.name}`, type: 'green' }, { text: `Users: ${r.snap.users.length}`, type: '' }] };
+    }
+    if (cmd === 'list') {
+      const keys = Object.keys(state.ops?.serverIndex || {});
+      return { ok: true, lines: keys.length ? keys.map(k => ({ text: k, type: '' })) : [{ text: 'пусто', type: 'muted' }] };
+    }
+  }
+  if (pluginId === 'target-extractor') {
+    if (cmd === 'extract') {
+      const r = extractTarget(state, arg1);
+      if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+      return { ok: true, lines: [{ text: `Target → ${r.file.name}`, type: 'green' }] };
+    }
+  }
+  if (pluginId === 'archive-exporter') {
+    if (cmd === 'list') {
+      const arcs = state.ops?.archives || [];
+      return { ok: true, lines: arcs.length ? arcs.map(a => ({ text: `${a.name} · ${a.count} files`, type: '' })) : [{ text: 'нет архивов', type: 'muted' }] };
+    }
+    if (cmd === 'pack') {
+      const ids = args.length ? args : [];
+      const r = createArchive(state, ids);
+      if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+      return { ok: true, lines: [{ text: `Archive → ${r.file.name}`, type: 'green' }, { text: 'Открой Files или прикрепи в N-Mail', type: 'muted' }] };
+    }
+  }
+  if (pluginId === 'site-editor' && (cmd === 'hijack' || cmd === 'paylink')) {
+    const siteId = arg1;
+    const r = hijackPaymentLink(state, siteId, arg2 || 'operator-wallet');
+    if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+    return { ok: true, lines: [{ text: `Payment link diverted ~${r.minutes} min`, type: 'green' }, { text: 'Скрытый таймер. Сайт восстановится сам.', type: 'muted' }] };
+  }
+
+return { ok: false, lines: [{ text: `Неизвестная команда «${cmd}». Введи help.`, type: 'error' }] };
 }
 
 export function pluginShellBootLines(pluginId) {
@@ -1020,3 +1224,10 @@ export function addBookmark(state,siteId) {if(!getSite(state,siteId))return fals
 export function recordHistory(state,siteId) {if(!getSite(state,siteId))return;state.browser.history.unshift({siteId,at:Date.now()});state.browser.history=state.browser.history.slice(0,50);state.browser.activeSite=siteId;}
 
 export { listIntelSummary, seedIntelFromSites, createEmptyIntel };
+
+export { pluginDocs, searchNpcs, bankLogin, bankTransfer, getBankSession, touchNpc, getNpc, NPC_POOL_SIZE, requestNpcTransfer };
+export { createArchive, buildServerIndex, extractTarget, signalMapRegion, hijackPaymentLink, REGIONS, extendedPluginDocs };
+export function allPluginDocs(){ return { ...pluginDocs(), ...extendedPluginDocs() }; }
+
+
+export { npcReply, openingLine, moneyDialogue, dialogueStats } from './dialogue.js';

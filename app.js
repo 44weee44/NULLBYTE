@@ -539,6 +539,8 @@ function browserNewTab() {
 }
 function browserCloseTab(idx) {
   ensureBrowserState();
+  idx = Number(idx);
+  if (Number.isNaN(idx) || idx < 0 || idx >= state.browserTabs.length) return;
   if (state.browserTabs.length <= 1) {
     state.browserTabs = [{ id: 'tab_start', siteId: '', page: 'start', title: 'Новая вкладка', history: [{ page: 'start' }], histIdx: 0 }];
     state.browserActive = 0;
@@ -1048,6 +1050,27 @@ async function runTerminalCommand(termId, raw) {
   else termAdd(termId, 'unknown — help', 'error');
 }
 
+
+function renderMail(g) {
+  const pending=g.missions.items.filter(m=>m.status==='accepted'&&m.resultFileId);
+  const selected=g.mail.messages.find(m=>m.id===state.selectedMail)||g.mail.messages[0];
+  const list=g.mail.messages.slice(0,30).map(m=>`<button class="mail-item ${m.status==='unread'?'unread':''}" data-action="mail-open" data-id="${m.id}"><strong>${esc(m.subject)}</strong><small>${formatTime(m.at)}</small><p>${esc(m.from)} · ${esc(m.body.slice(0,110))}${m.body.length>110?'…':''}</p></button>`).join('');
+  return `<div class="app-heading"><div><div class="eyebrow">N-MAIL / INTERNAL MESSAGING</div><h2>N-Mail</h2><p>Внутриигровые письма, контракты и отправка файлов.</p></div><span class="badge">${g.mail.messages.filter(m=>m.status==='unread').length} UNREAD</span></div>
+  ${pending.length?`<div class="panel"><div class="panel-title"><span>ГОТОВО К ОТПРАВКЕ</span><small>DELIVERY QUEUE</small></div><div class="list">${pending.map(m=>{const f=g.computer.files.find(x=>x.id===m.resultFileId);return `<div class="list-row"><div class="list-main"><strong>${esc(m.title)}</strong><small>${esc(m.client)} · ${esc(f?.name||'result file')}</small></div><button class="btn tiny primary" data-action="deliver-mission" data-id="${m.id}">ОТПРАВИТЬ</button></div>`;}).join('')}</div></div>`:''}
+  <div class="grid-2 section-gap" style="align-items:start"><div class="list">${list||'<div class="empty-state"><b>Входящие пусты</b><p>Письма появятся после контрактов и системных событий.</p></div>'}</div><div class="panel">${selected?`<div class="eyebrow">${selected.direction==='in'?'INCOMING MESSAGE':'SENT MESSAGE'}</div><h3 style="margin:8px 0;color:#e1ebf1;font-size:13px">${esc(selected.subject)}</h3><div class="kv"><span>От</span><b>${esc(selected.from)}</b></div><div class="kv"><span>Дата</span><b>${formatDate(selected.at)} ${formatTime(selected.at)}</b></div><div class="divider"></div><div class="mail-body">${esc(selected.body)}</div>${selected.attachments?.length?selected.attachments.map(id=>{const f=g.computer.files.find(x=>x.id===id);return f?`<button class="attachment" data-action="file-open" data-id="${esc(f.id)}">▣ ${esc(f.name)} · ${f.size} KB</button>`:''}).join(''):''}<div class="btn-row section-gap"><button class="btn tiny ghost" data-action="mail-mark" data-id="${selected.id}">ОТМЕТИТЬ ПРОЧИТАННЫМ</button></div>`:'<div class="empty-state"><b>Выбери письмо</b><p>Содержимое появится здесь.</p></div>'}${state.selectedFileId?(()=>{const f=g.computer.files.find(x=>x.id===state.selectedFileId);return f?`<div class="panel section-gap"><div class="panel-title"><span>ПРОСМОТР ВЛОЖЕНИЯ</span><button class="btn tiny ghost" data-action="file-close">ЗАКРЫТЬ</button></div><strong>${esc(f.name)}</strong><pre class="file-preview">${esc(String(f.content||'').slice(0,2400))}${String(f.content||'').length>2400?'\n… файл сокращён для просмотра':''}</pre></div>`:''})():''}</div></div>
+  <div class="notice section-gap">Почта работает только внутри вымышленной игры. Никакие реальные email-адреса или внешние сообщения не используются.</div>`;
+}function renderBank(g) {
+  const status=bankStatus(g),risk=bankRisk(g),tx=g.economy.transactions.slice(0,30);
+  const missing=risk.missing.map(id=>getPlugin(id)?.name||id);
+  return `<div class="app-heading"><div><div class="eyebrow">ASTER UNION / GAME BANK</div><h2>Aster Bank</h2><p>Игровые кредиты и история экономики.</p></div><span class="badge amber">FICTIONAL BANK</span></div>
+  <div class="bank-balance"><span>AVAILABLE CREDITS</span><strong>${fmt(g.economy.credits)} CR</strong><small>Виртуальный счёт оператора · никакого реального платежа</small></div>
+  ${status.locked?`<div class="notice danger section-gap"><b>БАНК ЗАБЛОКИРОВАН</b><br>Осталось <b data-bank-until="${g.bank.lockUntil}">${humanLeft(status.remaining)}</b>. Банковские операции недоступны. Другие приложения и контракты продолжают работать; награды по контрактам во время блокировки конфискуются.</div>`:''}
+  <div class="panel section-gap"><div class="panel-title"><span>ЭНДГЕЙМ / РИСКОВАЯ СИМУЛЯЦИЯ</span><small>LEVEL ${BALANCE.bankUnlockLevel}+</small></div><p class="muted small">Только игровая проверка. Нужны Vault Decoder, Identity Veil и Trace Obfuscator. При виртуальной трассировке все кредиты конфискуются, а банк блокируется на 24 реальных часа.</p><div class="kv"><span>Требуемый уровень</span><b>${BALANCE.bankUnlockLevel}</b></div><div class="kv"><span>Вероятность трассировки</span><b class="text-red">${Math.round(risk.traceChance*100)}%</b></div><div class="kv"><span>Вероятность успеха</span><b class="text-green">${Math.round(risk.successChance*100)}%</b></div><div class="kv"><span>Награда при успехе</span><b class="text-green">+${fmt(BALANCE.bankReward)} CR</b></div>
+  ${missing.length?`<div class="notice warning section-gap">Не установлены: ${missing.map(esc).join(', ')}.</div>`:''}
+  ${g.computer.os<4?`<div class="notice warning section-gap">Для двух финальных плагинов требуется NULLBYTE OS 4.0. Текущая версия: ${g.computer.os}.0.</div>`:''}
+  <div class="btn-row section-gap"><button class="btn danger" data-action="bank-attempt" ${status.locked||!risk.unlocked||missing.length?'disabled':''}>ЗАПУСТИТЬ СИМУЛЯЦИЮ</button></div></div>
+  <div class="panel section-gap"><div class="panel-title"><span>ИСТОРИЯ ТРАНЗАКЦИЙ</span><small>${tx.length} RECORDS</small></div>${tx.length?tx.map(t=>`<div class="transaction-row"><div><strong>${esc(t.reason)}</strong><small>${formatDate(t.at)} · ${formatTime(t.at)}</small></div><b class="${t.type==='income'?'income':t.type==='confiscated'?'confiscated':'expense'}">${t.type==='income'?'+':'−'}${fmt(t.amount)} CR</b></div>`).join(''):'<div class="empty-state"><b>Нет транзакций</b><p>История появится после получения наград и покупок.</p></div>'}</div>`;
+}
 function renderHelp() {
   const sections=[
     ['Игровой цикл','Browser → домен. Terminal: run site-analyzer / цепочка плагинов. intel — база разведки. N-Mail — сдача. Авто/прочие устройства: LOCKED.'],,
@@ -1209,21 +1232,21 @@ function handleAction(action,el) {
     case 'mission-open-target':openMissionTarget(id);break;
     
     case 'browser-activate-tab': {
-      const idx = Number(btn.dataset.idx);
+      const idx = Number(el.dataset.idx);
       if (!Number.isNaN(idx)) { state.browserActive = idx; renderWindow('browser'); }
       break;
     }
     case 'browser-close-tab': {
-      browserCloseTab(Number(btn.dataset.idx));
+      browserCloseTab(Number(el.dataset.idx));
       break;
     }
     case 'browser-new-tab': browserNewTab(); break;
     case 'browser-back': browserBack(); break;
     case 'browser-forward': browserForward(); break;
     case 'browser-reload': browserReload(); break;
-    case 'browser-page': browserGoPage(btn.dataset.page); break;
+    case 'browser-page': browserGoPage(el.dataset.page); break;
     case 'browser-bookmark': {
-      const sid = btn.dataset.site;
+      const sid = el.dataset.site;
       if (!sid) break;
       const bm = state.game.browser.bookmarks || [];
       if (!bm.includes(sid)) { bm.push(sid); state.game.browser.bookmarks = bm; toast('В закладках','success'); scheduleSave(); }
@@ -1274,12 +1297,18 @@ function handleAction(action,el) {
 function onUiAction(event){
   const button=event.target.closest('[data-action]');
   if(!button)return;
-  // Avoid double-firing when both pointerup and click fire.
+  // Prefer the innermost action target (e.g. tab close over tab activate).
   const now=Date.now();
   if(button._nbActAt && now-button._nbActAt<350)return;
   button._nbActAt=now;
-  event.preventDefault();
-  try{handleAction(button.dataset.action,button);}catch(err){console.error('[NULLBYTE] action',button.dataset.action,err);toast(String(err.message||err),'error');}
+  // Don't preventDefault on inputs; only on actionable chrome controls
+  if(!event.target.closest('input,textarea,select')) event.preventDefault();
+  try{
+    handleAction(button.dataset.action,button);
+  }catch(err){
+    console.error('[NULLBYTE] action',button.dataset.action,err);
+    toast(String(err.message||err),'error');
+  }
 }
 document.addEventListener('click',onUiAction);
 document.addEventListener('pointerup',onUiAction);

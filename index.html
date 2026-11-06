@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#0b1219">
   <meta name="description" content="NULLBYTE — одиночный симулятор хакерской жизни в вымышленном цифровом мире.">
-  <link rel="icon" href="nullbyte-mark.svg" type="image/svg+xml">
+  <link rel="icon" href="icon.png" type="image/png">
+  <link rel="apple-touch-icon" href="icon.png">
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="style.css">
   <title>NULLBYTE OS</title>
@@ -14,7 +15,7 @@
 <body>
   <section class="boot-screen" id="bootScreen" aria-label="Загрузка NULLBYTE">
     <div class="boot-center">
-      <div class="boot-logo"><img src="nullbyte-mark.svg" alt="NULLBYTE"></div>
+      <div class="boot-logo"><img src="icon.png" alt="NULLBYTE"></div>
       <div class="boot-wordmark">NULLBYTE <span>OS</span></div>
       <div class="boot-version">PERSONAL WORKSTATION // BUILD 1.0.0</div>
       <div class="boot-terminal" id="bootLog" aria-live="polite"></div>
@@ -27,7 +28,7 @@
   <main class="desktop-shell" id="desktopShell" hidden>
     <header class="top-panel">
       <button class="top-brand" id="startButton" type="button" aria-label="Меню приложений" aria-expanded="false">
-        <img src="nullbyte-mark.svg" alt=""><strong>NULLBYTE</strong><span>OS</span>
+        <img src="icon.png" alt=""><strong>NULLBYTE</strong><span>OS</span>
       </button>
       <div class="top-center"><span class="status-dot"></span><span id="systemStatus">SYSTEM READY</span><span class="top-divider">/</span><span id="sessionLabel">OPERATOR</span></div>
       <div class="top-right"><span id="saveStatus">LOCAL SAVE</span><span class="top-divider">/</span><span id="topRam">RAM 0/4 GB</span></div>
@@ -38,7 +39,7 @@
       <div class="desktop-icons" id="desktopIcons" aria-label="Приложения рабочего стола"></div>
       <div class="window-layer" id="windowLayer" aria-label="Окна приложений"></div>
       <section class="start-menu" id="startMenu" hidden>
-        <div class="start-menu-head"><img src="nullbyte-mark.svg" alt=""><div><b>NULLBYTE OS</b><small>PERSONAL WORKSTATION</small></div></div>
+        <div class="start-menu-head"><img src="icon.png" alt=""><div><b>NULLBYTE OS</b><small>PERSONAL WORKSTATION</small></div></div>
         <div class="start-menu-apps" id="startMenuApps"></div>
         <div class="start-menu-foot"><span id="menuNickname">OPERATOR</span><button type="button" data-action="open-app" data-app="help">СПРАВКА</button></div>
       </section>
@@ -46,7 +47,7 @@
     </section>
 
     <footer class="taskbar">
-      <div class="taskbar-brand"><img src="nullbyte-mark.svg" alt=""><div><b>NULLBYTE</b><small>WORKSTATION</small></div></div>
+      <div class="taskbar-brand"><img src="icon.png" alt=""><div><b>NULLBYTE</b><small>WORKSTATION</small></div></div>
       <div class="taskbar-divider"></div>
       <div class="taskbar-apps" id="taskbarApps" aria-label="Открытые окна"></div>
       <div class="taskbar-tray"><span class="tray-state"><i></i> ONLINE</span><span class="taskbar-divider"></span><div class="tray-clock"><time id="clockTime">--:--</time><time id="clockDate">--.--.----</time></div></div>

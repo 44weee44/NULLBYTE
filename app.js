@@ -4,7 +4,7 @@ import {
   acceptMission, cancelMission, missionBoardTimer, rotateMissionBoard, getSite, getSiteProgress, operateSite, exportMissionResult, submitMission,
   processTimedEvents, bankStatus, bankRisk, attemptBankSimulation, saveEditorFile, validateNbs, runNbs,
   recordHistory, addBookmark, idempotencyKey,
-  PLUGIN_SHELLS, PLUGIN_ANIM, runPluginShellCommand, pluginShellBootLines, resolveSiteRef, savePlayerNamedFile, findFileByName
+  PLUGIN_SHELLS, PLUGIN_ANIM, runPluginShellCommand, pluginShellBootLines, resolveSiteRef, savePlayerNamedFile, findFileByName, markServerModified
 } from './engine.js';
 import { bankLogin, bankTransfer, getBankSession, searchNpcs, pluginDocs, touchNpc, NPC_POOL_SIZE } from './npc.js';
 import { extendedPluginDocs } from './operations.js';
@@ -489,9 +489,37 @@ function renderComputer(g) {
   <div class="panel section-gap"><div class="panel-title"><span>ФАЙЛЫ НАКОПИТЕЛЯ</span><small>${g.computer.files.length+g.editor.files.length} ITEMS</small></div>${renderFiles(g)}</div>`;
 }
 function renderFiles(g) {
-  const files=[...g.computer.files,...g.editor.files];if(!files.length)return `<div class="empty-state"><b>Накопитель пуст</b><p>Файлы результатов появятся после выполнения контрактов. NBS-файлы открываются с уровня 5.</p></div>`;
-  return `<div class="list">${files.map(f=>`<div class="list-row"><div class="list-main"><strong>${esc(f.name)}</strong><small>${esc(f.type||'NBS script')} · ${f.size} KB · ${formatDate(f.createdAt||f.updatedAt||Date.now())}</small></div><span class="badge">${f.type==='dataset'?'DATASET':'NBS'}</span></div>`).join('')}</div>`;
+  const files = [...(g.computer.files||[]), ...(g.editor.files||[])];
+  const usage = getHardwareUsage(g);
+  const selected = files.find(f => f.id === state.selectedFileId) || null;
+  const list = files.length ? files.map(f => {
+    const on = f.id === state.selectedFileId ? 'on' : '';
+    const badge = f.encrypted ? 'ENC' : (f.type || 'file');
+    return `<button type="button" class="list-row file-row ${on}" data-action="file-select" data-id="${esc(f.id)}">
+      <div class="list-main"><strong>${esc(f.name)}</strong><small>${esc(badge)} · ${f.size||1} KB · ${esc(f.path||'/')}</small></div>
+    </button>`;
+  }).join('') : '<div class="empty-state"><b>Нет файлов</b><p>Отчёты анализа появятся после site-analyzer → save.</p></div>';
+  const body = selected
+    ? `<div class="file-viewer">
+        <div class="file-viewer-head">
+          <div><div class="eyebrow">${selected.encrypted?'ENCRYPTED':'FILE'}</div><h3 style="margin:4px 0;font-size:13px">${esc(selected.name)}</h3>
+          <small class="muted">${esc(selected.type||'file')} · ${selected.size||1} KB · ${esc(selected.path||'')}</small></div>
+          <div class="btn-row">
+            <button type="button" class="btn tiny ghost" data-action="file-copy-content" data-id="${esc(selected.id)}">Копировать</button>
+            <button type="button" class="btn tiny danger" data-action="file-delete" data-id="${esc(selected.id)}">Удалить</button>
+          </div>
+        </div>
+        <pre class="file-viewer-body" style="user-select:text;white-space:pre-wrap;max-height:min(420px,55vh);overflow:auto;padding:12px;background:#0a1016;border:1px solid #243540;border-radius:8px;margin-top:10px;font-size:11px;line-height:1.45">${esc(String(selected.content||'(пусто)'))}</pre>
+      </div>`
+    : `<div class="empty-state"><b>Выбери файл</b><p>Слева список · справа содержимое для копирования host / vuln / id.</p></div>`;
+  return `<div class="app-heading"><div><div class="eyebrow">FILE SYSTEM</div><h2>Files</h2><p>Локальные файлы · ${fmt(usage.used/1024)} / ${usage.total/1024} GB</p></div><span class="badge">${files.length}</span></div>
+  <div class="grid-2 section-gap" style="align-items:start;gap:12px">
+    <div class="panel" style="padding:8px;max-height:min(480px,60vh);overflow:auto">${list}</div>
+    <div class="panel" style="padding:12px">${body}</div>
+  </div>`;
 }
+
+
 function renderDarkShop(g) {
   const usage=getHardwareUsage(g);
   return `<div class="app-heading"><div><div class="eyebrow">DARK SHOP / HARDWARE</div><h2>DarkShop</h2><p>Игровые компоненты для виртуальной рабочей станции.</p></div><span class="badge amber">COMPONENTS</span></div>
@@ -852,27 +880,25 @@ function renderBrowser(g, winId) {
 
 function renderMap(g) {
   const selected = state.mapSelected || null;
-  const locs = typeof LOCATIONS !== 'undefined' ? LOCATIONS : [];
-  const points = locs.map(loc => `<button class="map-point ${selected===loc.id?'on':''}" style="left:${loc.x}%;top:${loc.y}%" data-action="map-location" data-location="${loc.id}">${esc(loc.name)}</button>`).join('');
-  let detail = '<div class="empty-state"><b>Выбери регион на карте</b><p>Снизу появится сетевой ключ региона для Signal Mapper / подключения.</p></div>';
+  const locs = LOCATIONS || [];
+  const points = locs.map(loc => `<button type="button" class="map-point ${selected===loc.id?'on':''}" style="left:${loc.x}%;top:${loc.y}%" data-action="map-location" data-location="${loc.id}">${esc(loc.name)}</button>`).join('');
+  let detail = '<div class="empty-state"><b>Выбери регион</b><p>Снизу — сетевой ключ и сайты региона.</p></div>';
   if (selected) {
     const loc = locs.find(l => l.id === selected);
-    const regionIdx = locs.indexOf(loc);
-    const rid = `region_${regionIdx >= 0 ? regionIdx % 8 : 0}`;
-    const netKey = `NET-${String(selected).toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8) || 'ZONE'}`;
-    const ssid = loc ? `${loc.name.replace(/\s+/g,'')}-AP` : 'AP';
-    // persist for plugins
-    if (!g.ops) g.ops = {};
-    if (!g.ops.regionAccess) g.ops.regionAccess = {};
-    detail = `<div class="panel"><div class="panel-title"><span>РЕГИОН</span><small>${esc(loc?.name||selected)}</small></div>
-      <div class="kv"><span>Region ID</span><b>${esc(rid)}</b></div>
+    const netKey = loc?.netKey || ('NET-'+String(selected).toUpperCase());
+    const ssid = loc?.ssid || 'AP';
+    const siteList = (loc?.pois||[]).map(id => getSite(g,id)).filter(Boolean);
+    detail = `<div class="panel"><div class="panel-title"><span>${esc(loc?.name||selected)}</span><small>${esc(loc?.region||'')}</small></div>
       <div class="kv"><span>Network key</span><b class="text-green">${esc(netKey)}</b></div>
       <div class="kv"><span>SSID</span><b>${esc(ssid)}</b></div>
-      <p class="muted small section-gap">Скопируй ключ. В Terminal: <code>run signal-mapper</code> → <code>map ${esc(rid)}</code> или используй ключ в mobile/web chain.</p>
-      <button class="btn tiny" data-action="copy-text" data-text="${esc(netKey)}">КОПИРОВАТЬ КЛЮЧ</button>
+      <div class="btn-row section-gap"><button type="button" class="btn tiny" data-action="copy-text" data-text="${esc(netKey)}">КОПИРОВАТЬ КЛЮЧ</button></div>
+      <div class="panel-title section-gap"><span>САЙТЫ РЕГИОНА</span><small>${siteList.length}</small></div>
+      ${siteList.map(s=>`<div class="list-row"><div class="list-main"><strong>${esc(s.title)}</strong><small>${esc(s.domain)} · ${esc(s.kind)}</small></div>
+        <button type="button" class="btn tiny ghost" data-action="browser-tab" data-site="${s.id}">Открыть</button></div>`).join('')||'<div class="muted">Нет точек</div>'}
+      <p class="muted small section-gap">Signal Mapper: map region или ключ ${esc(netKey)}</p>
     </div>`;
   }
-  return `<div class="app-heading"><div><div class="eyebrow">CITY MAP / REGIONS</div><h2>Карта</h2><p>Регионы и сетевые ключи. Клик по точке не открывает браузер.</p></div><span class="badge">MAP</span></div>
+  return `<div class="app-heading"><div><div class="eyebrow">NULL CITY MAP</div><h2>Карта</h2><p>6 регионов · сетевые ключи · локальные сайты</p></div><span class="badge">MAP</span></div>
   <div class="map-canvas section-gap">${points}</div>
   <div class="section-gap">${detail}</div>`;
 }
@@ -964,6 +990,9 @@ function renderBlackWire(g) {
 }
 
 function terminalPrompt(term) {
+  if (state.game?.ops?.serverSession && !term?.plugin) {
+    return `shell@${state.game.ops.serverSession.domain}:~$`;
+  }
   if (term?.plugin) {
     const p = getPlugin(term.plugin);
     const short = (p?.id || term.plugin).replace(/[^a-z0-9]/gi, '').slice(0, 10);
@@ -1084,6 +1113,72 @@ async function runTerminalCommand(termId, raw) {
   termAdd(termId, `${terminalPrompt(term)} ${cmd}`, 'prompt');
   term.scrollPin = true;
 
+  // —— SERVER SHELL (when connected) ——
+  if (state.game.ops?.serverSession && !term.plugin) {
+    const sess = state.game.ops.serverSession;
+    const lower = cmd.toLowerCase();
+    const parts = cmd.split(/\s+/);
+    const one = (parts[0]||'').toLowerCase();
+    if (lower === 'exit server' || lower === 'exit' || lower === 'logout') {
+      const r = runPluginShellCommand(state.game, 'sim-exploit', 'exit server');
+      for (const line of (r.lines||[])) termAdd(termId, line.text, line.type||'');
+      scheduleSave();
+      return;
+    }
+    if (lower === 'help') {
+      termAdd(termId, 'SERVER SHELL — команды узла (не локальный ПК)', 'blue');
+      termAdd(termId, 'whoami | users | services | read <file> | set user <id> <field> <val>', 'muted');
+      termAdd(termId, 'delete user <id> | posts | ban <id> | exit server', 'muted');
+      return;
+    }
+    if (one === 'whoami') {
+      termAdd(termId, `shell@${sess.domain}  site=${sess.siteId}`, 'green');
+      return;
+    }
+    if (one === 'users') {
+      const users = Object.values(state.game.intel?.users||{}).slice(0, 15);
+      if (!users.length) termAdd(termId, 'Нет записей users в intel. server-index → decode.', 'muted');
+      users.forEach(u => termAdd(termId, `${u.id}  ${u.username}  role=${u.role}`));
+      return;
+    }
+    if (one === 'services') {
+      termAdd(termId, 'http 443  up', '');
+      termAdd(termId, 'ssh  22   filtered', '');
+      termAdd(termId, `domain ${sess.domain}`, 'muted');
+      return;
+    }
+    if (one === 'set' && parts[1] === 'user') {
+      const uid = parts[2]; const field = parts[3]; const val = parts.slice(4).join(' ');
+      const u = state.game.intel?.users?.[uid];
+      if (!u) { termAdd(termId, 'user not found', 'error'); return; }
+      if (field === 'username' || field === 'role') { u[field] = val; termAdd(termId, `updated ${uid}.${field}=${val}`, 'green'); }
+      else termAdd(termId, 'fields: username | role', 'error');
+      if (typeof markServerModified === 'function') markServerModified(state.game);
+      else if (state.game.ops?.serverSession) { state.game.ops.serverSession.modified = true; }
+      scheduleSave();
+      return;
+    }
+    if (one === 'delete' && parts[1] === 'user') {
+      const uid = parts[2];
+      if (state.game.intel?.users?.[uid]) { delete state.game.intel.users[uid]; termAdd(termId, `deleted ${uid}`, 'green'); }
+      else termAdd(termId, 'not found', 'error');
+      scheduleSave();
+      return;
+    }
+    if (one === 'posts') {
+      termAdd(termId, 'forum posts (sim): post_01 likes=12 | post_02 likes=3', 'muted');
+      return;
+    }
+    if (one === 'ban') {
+      termAdd(termId, `ban flag set for ${parts[1]||'?'} (sim)`, 'green');
+      scheduleSave();
+      return;
+    }
+    termAdd(termId, `server: неизвестная команда «${cmd}». help`, 'error');
+    return;
+  }
+
+
   if (term.plugin) {
     const lower = cmd.toLowerCase();
     if (lower === 'exit' || lower === 'quit') {
@@ -1141,28 +1236,38 @@ async function runTerminalCommand(termId, raw) {
     }
     term.busy = true;
     try {
-      // Longer analysis for site-analyzer / server-index
-      const heavy = (term.plugin === 'site-analyzer' || term.plugin === 'server-index') && /^(analyze|scan|index|dump)\b/i.test(cmd);
-      if (heavy) {
-        for (const step of ['connecting…','fingerprint…','payload map…','cipher pack…']) {
-          termAdd(termId, step, 'muted');
-          await sleep(450);
-        }
+      const shellMeta = PLUGIN_SHELLS[term.plugin];
+      const cmd0 = (cmd.split(/\s+/)[0]||'').toLowerCase();
+      const allowed = shellMeta?.commands || [];
+      if (allowed.length && !allowed.includes(cmd0) && cmd0 !== 'save' && !(cmd0==='exit' && cmd.toLowerCase().includes('server'))) {
+        termAdd(termId, `Нет такой команды: ${cmd0}. Введи help`, 'error');
       } else {
-        await animateWork(termId, term.plugin);
+        const heavy = (term.plugin === 'site-analyzer' || term.plugin === 'server-index') && /^(analyze|scan|index|dump)\b/i.test(cmd);
+        if (heavy) {
+          for (const step of ['connecting…','fingerprint…','payload map…','cipher pack…']) {
+            termAdd(termId, step, 'muted');
+            await sleep(400);
+          }
+        }
+        const result = runPluginShellCommand(state.game, term.plugin, cmd);
+        for (const line of result.lines || []) {
+          termAdd(termId, line.text, line.type || '');
+          await sleep(20);
+        }
+        if (result.pendingSave) term.pendingSave = result.pendingSave;
+        if (result.serverSession) {
+          term.plugin = null;
+          const win = document.querySelector(`[data-window="${termId}"]`);
+          if (win?.querySelector('.terminal-form .term-prompt')) win.querySelector('.terminal-form .term-prompt').textContent = terminalPrompt(term);
+          const tool = win?.querySelector('.terminal-toolbar .term-mode');
+          if (tool) tool.textContent = 'server';
+          termAdd(termId, 'Локальные команды ПК отключены. help — серверные.', 'muted');
+        }
+        if (result.exit) term.plugin = null;
+        if (result.progressUpdated || result.exportFile) scheduleSave();
+        if (result.exportFile) toast('Файл готов → N-Mail', 'success');
+        if (result.progressUpdated) refreshOpenApps(['browser', 'mail', 'blackwire', 'computer', 'files']);
       }
-      const result = runPluginShellCommand(state.game, term.plugin, cmd);
-      for (const line of result.lines || []) {
-        termAdd(termId, line.text, line.type || '');
-        await sleep(24);
-      }
-      if (result.pendingSave) {
-        term.pendingSave = result.pendingSave;
-      }
-      if (result.exit) term.plugin = null;
-      if (result.progressUpdated || result.exportFile) scheduleSave();
-      if (result.exportFile) toast('Файл готов → N-Mail', 'success');
-      if (result.progressUpdated) refreshOpenApps(['browser', 'mail', 'blackwire', 'computer', 'files']);
     } finally {
       term.busy = false;
       const input = document.querySelector(`[data-window="${termId}"] .terminal-form input`);
@@ -1175,7 +1280,8 @@ async function runTerminalCommand(termId, raw) {
   const parts = cmd.split(/\s+/);
   const one = (parts[0] || '').toLowerCase();
   if (lower === 'help') {
-    termAdd(termId, 'help | clear | plugins | run <plugin> | mission list', 'blue');
+    termAdd(termId, 'help | clear | plugins | run <plugin> | files | mission list', 'blue');
+    termAdd(termId, 'files — открыть файловый менеджер / list', 'muted');
     termAdd(termId, 'intel | ops | rm <file> — разведка / журнал / удаление файла', 'blue');
   } else if (lower === 'clear') {
     term.lines = [];
@@ -1183,7 +1289,17 @@ async function runTerminalCommand(termId, raw) {
     if (out) out.innerHTML = '';
   } else if (lower === 'whoami') termAdd(termId, state.game.player.nickname);
   else if (lower === 'status' || lower === 'info') termAdd(termId, `LEVEL ${state.game.player.level} · XP ${state.game.player.xp}`);
-  else if (lower === 'plugins' || lower === 'pkg list') {
+  else if (one === 'files' || lower === 'files' || lower.startsWith('files ')) {
+    const sub = (parts[1]||'open').toLowerCase();
+    if (sub === 'list') {
+      const files = state.game.computer.files||[];
+      if (!files.length) termAdd(termId, 'Нет файлов.', 'muted');
+      else files.slice(0,40).forEach(f=>termAdd(termId, `${f.name}  [${f.encrypted?'ENC':(f.type||'file')}]`));
+    } else {
+      openApp('files');
+      termAdd(termId, 'Files opened.', 'green');
+    }
+  } else if (lower === 'plugins' || lower === 'pkg list') {
     termAdd(termId, PLUGINS.map(p => `${state.game.computer.installedPlugins.includes(p.id)?'[on]':'[  ]'} ${p.id}${PLUGIN_SHELLS[p.id]?' [shell]':''}`).join('\n'));
   } else if (lower.startsWith('plugin info ')) {
     const q = cmd.slice(12).trim().toLowerCase();
@@ -1261,6 +1377,10 @@ function renderBank(g) {
   const missing=risk.missing.map(id=>getPlugin(id)?.name||id);
   return `<div class="app-heading"><div><div class="eyebrow">ASTER UNION / GAME BANK</div><h2>Aster Bank</h2><p>Игровые кредиты и история экономики.</p></div><span class="badge amber">FICTIONAL BANK</span></div>
   <div class="bank-balance"><span>AVAILABLE CREDITS</span><strong>${fmt(g.economy.credits)} CR</strong><small>Виртуальный счёт оператора · никакого реального платежа</small></div>
+  <div class="panel section-gap"><div class="panel-title"><span>КОШЕЛЁК ОПЕРАТОРА</span><small>WALLET</small></div>
+  <div class="kv"><span>Номер</span><b id="playerWallet">${esc(g.player.walletId||'—')}</b></div>
+  <button type="button" class="btn tiny" data-action="copy-text" data-text="${esc(g.player.walletId||'')}">КОПИРОВАТЬ НОМЕР</button>
+  <p class="muted small">NPC переводят на этот номер · только внутриигровые CR</p></div>
   ${status.locked?`<div class="notice danger section-gap"><b>БАНК ЗАБЛОКИРОВАН</b><br>Осталось <b data-bank-until="${g.bank.lockUntil}">${humanLeft(status.remaining)}</b>. Банковские операции недоступны. Другие приложения и контракты продолжают работать; награды по контрактам во время блокировки конфискуются.</div>`:''}
   <div class="panel section-gap"><div class="panel-title"><span>ЭНДГЕЙМ / РИСКОВАЯ СИМУЛЯЦИЯ</span><small>LEVEL ${BALANCE.bankUnlockLevel}+</small></div><p class="muted small">Только игровая проверка. Нужны Vault Decoder, Identity Veil и Trace Obfuscator. При виртуальной трассировке все кредиты конфискуются, а банк блокируется на 24 реальных часа.</p><div class="kv"><span>Требуемый уровень</span><b>${BALANCE.bankUnlockLevel}</b></div><div class="kv"><span>Вероятность трассировки</span><b class="text-red">${Math.round(risk.traceChance*100)}%</b></div><div class="kv"><span>Вероятность успеха</span><b class="text-green">${Math.round(risk.successChance*100)}%</b></div><div class="kv"><span>Награда при успехе</span><b class="text-green">+${fmt(BALANCE.bankReward)} CR</b></div>
   ${missing.length?`<div class="notice warning section-gap">Не установлены: ${missing.map(esc).join(', ')}.</div>`:''}
@@ -1560,7 +1680,7 @@ function handleAction(action,el) {
       else if(f) toast(String(f.content||'').slice(0,200),'info');
       break;
     }
-    case 'file-select':state.selectedFileId=id;renderWindow('files');break;
+    case 'file-select':state.selectedFileId=id;if(!state.opened.has('files'))openApp('files');else{const w=state.opened.get('files');if(w)w.minimized=false;renderWindow('files');focusWindow('files');}break;
     case 'file-delete':{
       const all=[state.game.computer.files,state.game.editor.files];
       for(const arr of all){const i=arr.findIndex(f=>f.id===id);if(i>=0){arr.splice(i,1);break;}}

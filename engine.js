@@ -54,13 +54,37 @@ export const SITES = [
   {id:'civic-records',domain:'civicrecords.null',title:'Civic Records',kind:'database',security:4,region:'Центр',district:'Муниципальный квартал',description:'Портал виртуальных городских записей.',artifact:'CIVIC-ROW-29',data:'Виртуальная запись объекта CR-29',siteText:'Портал городских записей.'},
   {id:'pocket-mobile',domain:'pocketmobile.null',title:'Pocket Mobile',kind:'device',security:2,region:'Северный сектор',district:'Жилой квартал',description:'Демо-портал телефона NPC.',artifact:'PHONE-SIM-22',data:'Состояние виртуального устройства PM-22',siteText:'Диагностика устройств доступна.'},
   {id:'north-wifi',domain:'northwifi.null',title:'North Wi-Fi',kind:'wifi',security:3,region:'Старый порт',district:'Площадь Маяк',description:'Симулируемая точка доступа городского пространства.',artifact:'AP-SIM-05',data:'Параметры игровой точки доступа AP-05',siteText:'Гостевая сеть доступна в симуляции.'}
+,
+  {id:'harbor-bay',domain:'harborbay.null',title:'Harbor Bay Marina',kind:'shop',security:2,region:'Бейшор-Хайтс',district:'Причал',description:'Марина и аренда причалов.',artifact:'SLIP-44',data:'Причал B-12 забронирован',siteText:'Расписание приливов онлайн.'},
+  {id:'fisherman-net',domain:'fishnet.null',title:'Fisherman Net',kind:'forum',security:1,region:'Бейшор-Хайтс',district:'Набережная',description:'Форум рыбаков и портовых смен.',artifact:'POST-F9',data:'Тред про ночную смену',siteText:'Уважай правила порта.'},
+  {id:'pulse-social',domain:'pulse.null',title:'Pulse',kind:'forum',security:2,region:'Мидтаун-Спайн',district:'Медиа',description:'Городская соцсеть.',artifact:'FEED-01',data:'Пост #8841',siteText:'Лента обновляется.'},
+  {id:'city-gazette',domain:'gazette.null',title:'City Gazette',kind:'utility',security:2,region:'Мидтаун-Спайн',district:'Пресса',description:'Городская газета.',artifact:'ISSUE-312',data:'Колонка редактора',siteText:'Свежий выпуск.'},
+  {id:'forge-parts',domain:'forgeparts.null',title:'Forge Parts Co',kind:'shop',security:2,region:'Айронрич',district:'Склады',description:'Промкомплектующие.',artifact:'SKU-778',data:'Партия подшипников',siteText:'Опт и розница.'},
+  {id:'rail-yard',domain:'railyard.null',title:'Rail Yard Ops',kind:'utility',security:3,region:'Айронрич',district:'Пути',description:'Логистика ж/д узла.',artifact:'TRAIN-09',data:'Состав 09-A',siteText:'Расписание путей.'},
+  {id:'drive-thru',domain:'drivethru.null',title:'Drive Thru Auto',kind:'auto',security:2,region:'Саутгейт',district:'Трасса',description:'Экспресс-сервис авто.',artifact:'TICKET-22',data:'Талон 22',siteText:'Очередь на подъёмник.'},
+  {id:'lot-47',domain:'lot47.null',title:'Lot 47 Parking',kind:'utility',security:1,region:'Саутгейт',district:'Парковка',description:'Парковочный оператор.',artifact:'SPOT-47',data:'Место 47-C',siteText:'Оплата по часу.'},
+  {id:'neighbors-board',domain:'neighbors.null',title:'Neighbors Board',kind:'forum',security:1,region:'Окридж',district:'Дворы',description:'Доска объявлений района.',artifact:'AD-15',data:'Продам диван',siteText:'Будь вежлив.'},
+  {id:'green-mart',domain:'greenmart.null',title:'Green Mart',kind:'shop',security:1,region:'Окридж',district:'Ритейл',description:'Продуктовый маркет.',artifact:'CART-3',data:'Заказ #3',siteText:'Акции недели.'},
+  {id:'dark-drop',domain:'darkdrop.null',title:'Dark Drop',kind:'forum',security:3,region:'Шэдоулайн',district:'Теневой',description:'Закрытый дроп-форум.',artifact:'DROP-7',data:'Лот 7',siteText:'Без реальных сделок.'},
+  {id:'null-chan',domain:'nullchan.null',title:'Null Chan',kind:'forum',security:2,region:'Шэдоулайн',district:'Борды',description:'Имиджборд симуляции.',artifact:'THREAD-404',data:'Тред /tech/',siteText:'Анонимность условная.'},
+  {id:'sunrise-clinic',domain:'sunriseclinic.null',title:'Sunrise Clinic',kind:'utility',security:3,region:'Мидтаун-Спайн',district:'Мед',description:'Клиника записи приёма.',artifact:'APPT-88',data:'Приём 88',siteText:'Только симуляция.'},
+  {id:'byte-cafe',domain:'bytecafe.null',title:'Byte Café',kind:'shop',security:1,region:'Мидтаун-Спайн',district:'Кафе',description:'Кофейня с терминалами.',artifact:'ORDER-LATTE',data:'Латте x2',siteText:'Wi-Fi для гостей.'},
+  {id:'parcel-hub',domain:'parcelhub.null',title:'Parcel Hub',kind:'shop',security:2,region:'Айронрич',district:'Доставка',description:'Служба посылок.',artifact:'PKG-901',data:'Посылка 901',siteText:'Трекинг внутри .null.'},
+  {id:'skyline-realty',domain:'skyline.null',title:'Skyline Realty',kind:'utility',security:2,region:'Бейшор-Хайтс',district:'Недвижимость',description:'Агентство аренды.',artifact:'LIST-12',data:'Лот 12',siteText:'Виртуальные объекты.'},
+  {id:'campus-net',domain:'campus.null',title:'Campus Net',kind:'forum',security:1,region:'Окридж',district:'Кампус',description:'Студенческая сеть.',artifact:'CLASS-101',data:'Расписание',siteText:'Учёба в симуляции.'},
+  {id:'metro-pass',domain:'metropass.null',title:'Metro Pass',kind:'utility',security:2,region:'Саутгейт',district:'Транспорт',description:'Транспортные карты.',artifact:'PASS-55',data:'Карта 55',siteText:'Проезд виртуальный.'},
+  {id:'signal-tower',domain:'signtower.null',title:'Signal Tower',kind:'wifi',security:2,region:'Шэдоулайн',district:'Вышка',description:'Релейная точка.',artifact:'RELAY-3',data:'Узел 3',siteText:'Только покрытие.'},
+  {id:'ledger-club',domain:'ledgerclub.null',title:'Ledger Club',kind:'bank',security:4,region:'Мидтаун-Спайн',district:'Клуб',description:'Закрытый учётный клуб (не Aster).',artifact:'LEDGER-X',data:'Членство X',siteText:'Отдельный контур.'}
+
 ];
 
 export const LOCATIONS = [
-  {id:'north',name:'Северный сектор',city:'Новый Архив',region:'Север',x:68,y:22,pois:['aster-bank','neon-motors','pocket-mobile']},
-  {id:'oldport',name:'Старый порт',city:'Новый Архив',region:'Запад',x:24,y:47,pois:['volt-market','cobalt-forum','north-wifi']},
-  {id:'industrial',name:'Промзона',city:'Новый Архив',region:'Юг',x:56,y:77,pois:['gridworks']},
-  {id:'center',name:'Центр',city:'Новый Архив',region:'Восток',x:78,y:56,pois:['civic-records']}
+  {id:'bayshore',name:'Бейшор-Хайтс',city:'Нулл-Сити',region:'Побережье',x:22,y:28,pois:['volt-market','harbor-bay','fisherman-net','north-wifi'],netKey:'NET-BAYSHORE',ssid:'Bayshore-Mesh'},
+  {id:'midtown',name:'Мидтаун-Спайн',city:'Нулл-Сити',region:'Центр',x:52,y:42,pois:['aster-bank','civic-records','pulse-social','city-gazette'],netKey:'NET-MIDTOWN',ssid:'Spine-Public'},
+  {id:'ironreach',name:'Айронрич',city:'Нулл-Сити',region:'Промпояс',x:78,y:30,pois:['gridworks','forge-parts','rail-yard'],netKey:'NET-IRON',ssid:'IronAP-03'},
+  {id:'southgate',name:'Саутгейт',city:'Нулл-Сити',region:'Юг',x:48,y:72,pois:['neon-motors','drive-thru','lot-47'],netKey:'NET-SOUTH',ssid:'Southgate-Wi'},
+  {id:'oakridge',name:'Окридж',city:'Нулл-Сити',region:'Жилой',x:28,y:60,pois:['pocket-mobile','neighbors-board','green-mart'],netKey:'NET-OAK',ssid:'Oakridge-Home'},
+  {id:'shadowline',name:'Шэдоулайн',city:'Нулл-Сити',region:'Подсеть',x:72,y:68,pois:['cobalt-forum','dark-drop','null-chan'],netKey:'NET-SHADOW',ssid:'Shadow-Node'}
 ];
 
 const STARTER_CONTRACT_TOOLS=['site-analyzer','artifact-decoder','node-radar','weakness-lab','sim-exploit','data-exporter'];
@@ -194,7 +218,8 @@ export function migrateSave(raw,tgUser=null) {
   out.processedEvents=out.processedEvents.filter(x=>typeof x==='string').slice(-500);
   if(!out.stats||typeof out.stats!=='object')out.stats=fresh.stats;
   for(const key of Object.keys(fresh.stats))out.stats[key]=Math.max(0,Math.floor(finite(out.stats[key])));
-  if (!validNickname(out.player.nickname)) out.player.nickname='';
+  if (!validNickname(out.player.nickname)) if(!out.player.walletId){let h=0;const s=String(out.player.nickname||'op');for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))|0;out.player.walletId='CR-'+String(10000000+(Math.abs(h)%90000000));}
+  out.player.nickname='';
   out.player.telegramId=String(out.player.telegramId||'').slice(0,40);
   out.player.level=Math.max(1,Math.min(BALANCE.maxLevel,Math.floor(finite(out.player.level)||1)));
   for(const key of ['xp','reputation','contractsCompleted','totalEarned'])out.player[key]=clamp(out.player[key],0,1e9);
@@ -385,8 +410,8 @@ export const PLUGIN_SHELLS = {
 
   'site-analyzer': {
     boot: 'Site Analyzer v1.0 — разбор вымышленной цели.',
-    help: 'analyze <domain> | save <имя> | help | exit',
-    commands: ['analyze', 'scan', 'help', 'exit']
+    help: 'analyze <domain> — разведка сайта, затем save <имя> · save <имя> — сохранить dump · help · exit',
+    commands: ['analyze', 'scan', 'save', 'help', 'exit']
   },
   'artifact-decoder': {
     boot: 'Artifact Decoder v1.0 — расшифровка игрового артефакта по ключу анализа.',
@@ -398,10 +423,10 @@ export const PLUGIN_SHELLS = {
     help: 'discover <ARTIFACT_ID> | scan <host|domain> | help | exit',
     commands: ['discover', 'find', 'help', 'exit']
   },
-  'weakness-lab': { boot: 'Weakness Lab', help: 'vuln <filename> | help | exit',
+  'weakness-lab': { boot: 'Weakness Lab', help: 'vuln <filename> — найти VULN_PATH в расшифрованном отчёте · help · exit',
     commands: ['probe', 'weakness', 'help', 'exit']
   },
-  'sim-exploit': { boot: 'Sim Exploit / Server', help: 'enter <VULN_PATH> | help | exit',
+  'sim-exploit': { boot: 'Sim Exploit / Server', help: 'enter <VULN_PATH> — войти на сервер цели · exit server — с сервера · help · exit',
     commands: ['simulate', 'exploit', 'help', 'exit']
   },
   'data-exporter': {

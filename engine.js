@@ -218,8 +218,13 @@ export function migrateSave(raw,tgUser=null) {
   out.processedEvents=out.processedEvents.filter(x=>typeof x==='string').slice(-500);
   if(!out.stats||typeof out.stats!=='object')out.stats=fresh.stats;
   for(const key of Object.keys(fresh.stats))out.stats[key]=Math.max(0,Math.floor(finite(out.stats[key])));
-  if (!validNickname(out.player.nickname)) if(!out.player.walletId){let h=0;const s=String(out.player.nickname||'op');for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))|0;out.player.walletId='CR-'+String(10000000+(Math.abs(h)%90000000));}
-  out.player.nickname='';
+  if (!validNickname(out.player.nickname)) out.player.nickname='';
+  else out.player.nickname=String(out.player.nickname).trim();
+  if (!out.player.walletId) {
+    let h=0; const s=String(out.player.nickname||out.player.telegramId||'op');
+    for (let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))|0;
+    out.player.walletId='CR-'+String(10000000+(Math.abs(h)%90000000));
+  }
   out.player.telegramId=String(out.player.telegramId||'').slice(0,40);
   out.player.level=Math.max(1,Math.min(BALANCE.maxLevel,Math.floor(finite(out.player.level)||1)));
   for(const key of ['xp','reputation','contractsCompleted','totalEarned'])out.player[key]=clamp(out.player[key],0,1e9);

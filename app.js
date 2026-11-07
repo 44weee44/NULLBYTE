@@ -125,7 +125,7 @@ function boot() {
   const lines=['NULLBYTE firmware 1.0.2','Initializing virtual hardware profile','Loading fictional world snapshot','Mounting player save container','Starting desktop services'];
   const log=$('bootLog'),bar=$('bootProgress');let index=0;
   const run=()=>{if(index<lines.length){const row=document.createElement('div');row.textContent=lines[index++];log.append(row);bar.style.width=`${index/lines.length*100}%`;setTimeout(run,220);}else setTimeout(finishBoot,280);};
-  const skip=()=>finishBoot();$('bootSkip').addEventListener('click',skip);run();
+  const skip=()=>finishBoot();(document.getElementById('bootSkip')||{addEventListener(){},style:{}}).addEventListener('click',skip);run();
 }
 let bootFinished=false;
 async function finishBoot() {
@@ -158,8 +158,15 @@ async function finishBoot() {
   renderDesktopIcons();renderTaskbar();updateClock();
   processTimedEvents(state.game);
   $('saveStatus').textContent=state.provider;
-  if(!state.game.player.nickname) {showNicknameModal();if(loaded.warning)toast(loaded.warning,'error');}
-  else {toast(`С возвращением, ${state.game.player.nickname}.`, 'success');if(loaded.warning)toast(loaded.warning,'error');}
+  const nick = String(state.game.player.nickname||'').trim();
+  state.game.player.nickname = nick;
+  if(!nick) {
+    showNicknameModal();
+    if(loaded.warning) toast(loaded.warning,'error');
+  } else {
+    toast(`С возвращением, ${nick}.`, 'success');
+    if(loaded.warning) toast(loaded.warning,'error');
+  }
   if(state.game.player.nickname && !state.saveBlocked) {
     await persist();
   } else {

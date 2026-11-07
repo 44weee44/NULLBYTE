@@ -248,3 +248,14 @@ h1,h2,h3,strong,.window-title{
 .boot-terminal{width:100%;min-height:72px;text-align:left;font-size:10px;color:#7d92a3;background:#0006;border:1px solid #1a2833;border-radius:8px;padding:10px 12px;margin-top:6px}
 .boot-progress{width:100%;height:3px;background:#142028;border-radius:2px;overflow:hidden;margin-top:4px}
 .boot-progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,#2a6f8f,#5ec8ff);transition:width .35s ease}
+
+/* Boot layout fix */
+.boot-center{display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;width:min(420px,92vw);margin-top:-8vh;}
+.boot-logo{margin:0 auto 2px;width:96px;height:96px;background:transparent!important;border:none!important;box-shadow:none!important;}
+.boot-logo img{animation:bootFadeIn 1.6s ease-out forwards;opacity:0;background:transparent;}
+.boot-terminal{
+  width:100%;min-height:64px;text-align:left;font-size:10px;color:#7d92a3;
+  background:transparent!important;border:none!important;box-shadow:none!important;
+  padding:8px 4px;margin-top:4px;
+}
+.boot-skip{display:none!important;}

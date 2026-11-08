@@ -166,8 +166,8 @@ code{font-family:var(--mono);color:#c5d3dc}
 .util-meters{display:flex;gap:12px;margin:12px 0}
 .util-meters div{padding:8px 12px;background:#18122a;border-radius:8px;border:1px solid #2a2040}
 .auto-card{padding:10px;margin:6px 0;background:#0e161c;border-left:3px solid #55b9e9;border-radius:0 6px 6px 0}
-.phone-frame{width:120px;margin:0 auto 12px;padding:10px;border-radius:16px;background:#0a1010;border:2px solid #2a4a3a}
-.phone-screen{background:#102018;border-radius:8px;padding:12px;text-align:center;min-height:100px}
+
+
 .wifi-panel{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;padding:12px;background:#0e1620;border-radius:8px}
 .site-error{display:grid;place-items:center;min-height:240px;text-align:center;padding:24px}
 .site-error-code{font-size:48px;font-weight:700;color:#d77d86}
@@ -272,3 +272,45 @@ h1,h2,h3,strong,.window-title{
 .ide-tab.on { border-color:#5ec8ff; color:#e8eef4; }
 .ide-layout { display:grid; grid-template-columns:minmax(120px,28%) 1fr; gap:10px; }
 @media (max-width:700px){ .ide-layout{ grid-template-columns:1fr; } }
+
+
+/* === PHONE LAB — FULL WIDTH HANDSET === */
+.phone-lab-wrap{width:100%;max-width:100%;box-sizing:border-box}
+.phone-frame{
+  width:100%!important;
+  max-width:100%!important;
+  margin:0!important;
+  padding:20px 18px 24px!important;
+  border-radius:28px!important;
+  background:linear-gradient(165deg,#1c2630 0%,#0a1016 55%,#080c10 100%)!important;
+  border:3px solid #3d5163!important;
+  box-shadow:0 20px 60px #000c, inset 0 1px 0 #4a6070!important;
+  box-sizing:border-box!important;
+}
+.phone-screen{
+  width:100%!important;
+  box-sizing:border-box!important;
+  background:#05080c!important;
+  border-radius:20px!important;
+  padding:18px 16px 22px!important;
+  min-height:min(70vh,640px)!important;
+  border:1px solid #1a2833!important;
+  text-align:left!important;
+}
+.phone-status{font-size:11px;color:#7d92a3;letter-spacing:.08em;margin-bottom:10px;text-transform:uppercase}
+.phone-owner b{display:block;font-size:18px;color:#e8eef4;margin-bottom:2px}
+.phone-owner small{color:#8fa3b3;font-size:12px}
+.phone-num{font-size:13px;color:#9eb0c0;margin:8px 0 14px;font-family:var(--mono),monospace}
+.phone-section{margin-top:10px;max-height:min(42vh,380px);overflow:auto}
+.phone-msg{
+  background:#101820;border:1px solid #243440;border-radius:10px;
+  padding:10px 12px;margin:6px 0;font-size:13px;line-height:1.4
+}
+.phone-msg span{display:block;color:#7d9aaa;font-size:11px;margin-bottom:4px}
+.phone-msg p{margin:0;color:#d5e0ea}
+.phone-gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:10px;margin-top:8px}
+.phone-thumb{
+  aspect-ratio:1.2;min-height:80px;background:#152029;border:1px solid #2a3a48;
+  border-radius:10px;display:grid;place-items:center;font-size:11px;color:#8fa3b3;padding:8px;text-align:center
+}
+.phone-tabs{margin:12px 0}

@@ -1173,24 +1173,42 @@ async function animatePluginBoot(termId, pluginId) {
 
 async function animateWork(termId, pluginId) {
   const steps = (typeof PLUGIN_ANIM !== 'undefined' && PLUGIN_ANIM[pluginId]) || ['processing…', 'done'];
-  const stepMs = Math.min(520, (4200 + Math.random() * 800) / Math.max(1, steps.length));
-  const accent = ({
-    'net-link':'#5ec8ff','net-analyzer':'#5ec8ff','phone-access':'#7dffa6',
-    'mail-drop':'#c4a0ff','sms-bomber':'#ff9f6b','bank-peek':'#e2b657'
-  })[pluginId] || '#8fa3b3';
-  termAdd(termId, `┌─ ${pluginId} ─────────────`, 'blue');
+  const streams = {
+    'net-analyzer': () => [
+      `DEV ${String(1000+((Math.random()*8999)|0)).padStart(4,'0')}  rssi=-${40+((Math.random()*40)|0)}  mac=${[...Array(6)].map(()=>((Math.random()*256)|0).toString(16).padStart(2,'0')).join(':')}`,
+      `PHONE_ID candidate  PH-${['BAYS','MIDT','IRON','SOUT'][((Math.random()*4)|0)]}-${String((Math.random()*550)|0).padStart(4,'0')}`,
+      `pkt in=${((Math.random()*4000)|0)}  out=${((Math.random()*1200)|0)}  drop=${((Math.random()*12)|0)}`
+    ],
+    'net-link': () => [
+      `iface wlan0  ch=${1+((Math.random()*11)|0)}  bssid=${[...Array(6)].map(()=>((Math.random()*256)|0).toString(16).padStart(2,'0')).join(':')}`,
+      `auth SAE  retry=${(Math.random()*3)|0}  rtt=${((Math.random()*40)+2)|0}ms`
+    ],
+    'phone-access': () => [
+      `token ${[...Array(8)].map(()=>((Math.random()*16)|0).toString(16)).join('')}…`,
+      `fs mount /user  blocks=${((Math.random()*900)+100)|0}`,
+      `lockstate=${['secure','weak','open'][((Math.random()*3)|0)]}`
+    ],
+    'mail-drop': () => [`mime multipart  size=${((Math.random()*40)+4)|0}kb  crc=ok`],
+    'sms-bomber': () => [`queue +${((Math.random()*80)|0)}  rate=${((Math.random()*20)+5)|0}/s`],
+    'bank-peek': () => [`ledger hint  offset=0x${((Math.random()*0xffff)|0).toString(16)}`]
+  };
+  const gen = streams[pluginId] || (() => [`0x${((Math.random()*0xffffff)|0).toString(16).padStart(6,'0')}  n=${((Math.random()*9999)|0)}`]);
+  termAdd(termId, `┌─ WORK · ${pluginId}`, 'blue');
   for (let i = 0; i < steps.length; i++) {
     const pct = Math.round(((i + 1) / steps.length) * 100);
-    const bar = '█'.repeat(Math.round(pct / 5)) + '░'.repeat(20 - Math.round(pct / 5));
-    const hex = Math.abs((Date.now() * (i + 3)) % 0xffffff).toString(16).padStart(6, '0');
-    const n = (Math.random() * 9000 + 1000) | 0;
-    termAdd(termId, `│ [${bar}] ${pct}%`, '');
-    termAdd(termId, `│ ${steps[i]}`, 'muted');
-    termAdd(termId, `│ 0x${hex} · pkt=${n} · t=${(i * stepMs / 1000).toFixed(1)}s`, 'muted');
-    await sleep(stepMs);
+    const filled = Math.round(pct / 5);
+    const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);
+    termAdd(termId, `│ ${steps[i]}`, '');
+    for (const line of gen()) {
+      termAdd(termId, `│   » ${line}`, 'muted');
+      await sleep(55 + Math.random() * 50);
+    }
+    termAdd(termId, `│ [${bar}] ${pct}%`, 'blue');
+    await sleep(180 + Math.random() * 120);
   }
-  termAdd(termId, `└─ done`, 'green');
+  termAdd(termId, `└─ complete`, 'green');
 }
+
 
 
 async function enterPlugin(termId, pluginId) {
@@ -1563,7 +1581,7 @@ function renderPhoneLab(g) {
     const calls = typeof phoneCallLog === 'function' ? phoneCallLog(phone, seed) : [];
     const contacts = typeof phoneContacts === 'function' ? phoneContacts(phone, seed) : [];
     const blocked = pw.access?.[phone.id]?.blockedUntil > Date.now();
-    body = `<div class="phone-frame">
+    body = `<div class="phone-lab-wrap"><div class="phone-frame">
       <div class="phone-screen">
         <div class="phone-status">${esc(phone.model)} · ${esc(phone.os)} ${blocked?'· LOCKED':''}</div>
         <div class="phone-owner"><b>${esc(phone.ownerName)}</b><small>${esc(phone.ownerType)} · sec ${phone.security}</small></div>
@@ -1588,7 +1606,7 @@ function renderPhoneLab(g) {
           <button type="button" class="btn tiny" data-action="phone-lab-disconnect">Disconnect</button>
         </div>
       </div>
-    </div>`;
+    </div></div>`;
   }
   return `<div class="app-heading"><div><div class="eyebrow">PHONE LAB</div><h2>Телефон</h2><p>Исследование после phone-access · вместо phone-control</p></div><span class="badge">${discovered.length} ID</span></div>
   <div class="kv"><span>Сеть</span><b>${net ? esc(net.regionId)+' · '+esc(net.netKey||'') : 'не подключено (net-link)'}</b></div>

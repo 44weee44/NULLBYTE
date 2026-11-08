@@ -7,7 +7,7 @@ import {
   PLUGIN_SHELLS, PLUGIN_ANIM, runPluginShellCommand, pluginShellBootLines, resolveSiteRef, savePlayerNamedFile, findFileByName, markServerModified,
   isPluginLocked, isMissionVisible, xpThresholdForLevel, listRegionPhones
 } from './engine.js';
-import { findPhone, phoneMessages, phoneGallery, lockPhone } from './phones.js';
+import { findPhone, phoneMessages, phoneGallery, phoneCallLog, phoneContacts, lockPhone } from './phones.js';
 import { bankLogin, bankTransfer, getBankSession, searchNpcs, pluginDocs, touchNpc, NPC_POOL_SIZE } from './npc.js';
 import { extendedPluginDocs } from './operations.js';
 import { loadSavedGame, saveGame } from './storage.js';
@@ -1089,23 +1089,32 @@ async function animatePluginBoot(termId, pluginId) {
 }
 
 async function animateWork(termId, pluginId) {
-  const steps = PLUGIN_ANIM[pluginId] || ['processing…', 'done'];
-  const stepMs = (3800 + Math.random() * 1000) / steps.length;
-  termAdd(termId, `┌─ ${pluginId}`, 'blue');
+  const steps = (typeof PLUGIN_ANIM !== 'undefined' && PLUGIN_ANIM[pluginId]) || ['processing…', 'done'];
+  const stepMs = Math.min(520, (4200 + Math.random() * 800) / Math.max(1, steps.length));
+  const accent = ({
+    'net-link':'#5ec8ff','net-analyzer':'#5ec8ff','phone-access':'#7dffa6',
+    'mail-drop':'#c4a0ff','sms-bomber':'#ff9f6b','bank-peek':'#e2b657'
+  })[pluginId] || '#8fa3b3';
+  termAdd(termId, `┌─ ${pluginId} ─────────────`, 'blue');
   for (let i = 0; i < steps.length; i++) {
     const pct = Math.round(((i + 1) / steps.length) * 100);
-    const filled = Math.round(pct / 5);
-    termAdd(termId, `│ ${'█'.repeat(filled)}${'░'.repeat(20 - filled)} ${String(pct).padStart(3)}%  ${steps[i]}`, 'muted');
+    const bar = '█'.repeat(Math.round(pct / 5)) + '░'.repeat(20 - Math.round(pct / 5));
+    const hex = Math.abs((Date.now() * (i + 3)) % 0xffffff).toString(16).padStart(6, '0');
+    const n = (Math.random() * 9000 + 1000) | 0;
+    termAdd(termId, `│ [${bar}] ${pct}%`, '');
+    termAdd(termId, `│ ${steps[i]}`, 'muted');
+    termAdd(termId, `│ 0x${hex} · pkt=${n} · t=${(i * stepMs / 1000).toFixed(1)}s`, 'muted');
     await sleep(stepMs);
   }
-  termAdd(termId, '└─ complete', 'green');
-  await sleep(80);
+  termAdd(termId, `└─ done`, 'green');
 }
 
+
 async function enterPlugin(termId, pluginId) {
-  if (isPluginLocked(pluginId)) {
-    termAdd(termId, `Плагин «${pluginId}» на доработке. Недоступен.`, 'error');
-    termAdd(termId, 'Сайтовый и текущий mobile-контур закрыты до нового чек-листа.', 'muted');
+  if (isPluginLocked(pluginId) || pluginId === 'phone-control') {
+    termAdd(termId, `Плагин «${pluginId}» недоступен (на доработке / заменён).`, 'error');
+    if (pluginId === 'phone-control') termAdd(termId, 'Управление телефоном — приложение Phone Lab на рабочем столе.', 'muted');
+    else termAdd(termId, 'Запуск из консоли закрыт, пока модуль на доработке.', 'muted');
     return;
   }
 
@@ -1306,7 +1315,11 @@ async function runTerminalCommand(termId, raw) {
         if (result.exit) term.plugin = null;
         if (result.progressUpdated || result.exportFile) scheduleSave();
         if (result.exportFile) toast('Файл готов → N-Mail', 'success');
-        if (result.progressUpdated) refreshOpenApps(['browser', 'mail', 'blackwire', 'computer', 'files']);
+        if (result.progressUpdated) refreshOpenApps(['browser', 'mail', 'blackwire', 'computer', 'files', 'phone', 'intel']);
+        if (term.plugin === 'phone-access' && state._phoneTarget) {
+          openApp('phone');
+          termAdd(termId, '→ Phone Lab открыт для исследования.', 'green');
+        }
       }
     } finally {
       term.busy = false;
@@ -1447,35 +1460,54 @@ function renderFbi() {
 function renderPhoneLab(g) {
   const pw = g.phoneWorld || {};
   const net = pw.network;
-  const activeId = state._phoneTarget || Object.keys(pw.access||{}).find(k => pw.access[k]?.level) || null;
+  const activeId = state._phoneTarget || null;
   let phone = null;
-  try { if (activeId && typeof findPhone === 'function') phone = findPhone(activeId, g.meta?.seed||'nb'); } catch(e) {}
-  const discovered = Object.keys(pw.discovered||{});
-  const discList = discovered.slice(0, 24).map(id => `<button type="button" class="btn tiny ghost" data-action="phone-lab-open" data-id="${esc(id)}">${esc(id)}</button>`).join(' ') || '<span class="muted">Пока пусто — сделай net-analyzer</span>';
-  let body = '<div class="empty-state"><b>Нет активного телефона</b><p>Terminal: phone-access → open PHONE_ID или выбери discovered ниже.</p></div>';
+  try { if (activeId) phone = findPhone(activeId, g.meta?.seed || 'nb'); } catch (e) {}
+  const discovered = Object.keys(pw.discovered || {});
+  const discList = discovered.slice(0, 30).map(id =>
+    `<button type="button" class="btn tiny ${id===activeId?'primary':'ghost'}" data-action="phone-lab-open" data-id="${esc(id)}">${esc(id)}</button>`
+  ).join(' ') || '<span class="muted">Сначала: net-analyzer → save → phone-access open PHONE_ID</span>';
+
+  let body = `<div class="empty-state"><b>Нет активного телефона</b><p>1) net-link connect · 2) net-analyzer scan · 3) phone-access open PH-… · Phone Lab откроется сам</p></div>`;
   if (phone) {
-    const msgs = (typeof phoneMessages === 'function' ? phoneMessages(phone, g.meta?.seed||'nb') : []).slice(0,5);
-    const gal = (typeof phoneGallery === 'function' ? phoneGallery(phone, g.meta?.seed||'nb') : []);
+    const seed = g.meta?.seed || 'nb';
+    const msgs = phoneMessages(phone, seed);
+    const gal = phoneGallery(phone, seed);
+    const calls = typeof phoneCallLog === 'function' ? phoneCallLog(phone, seed) : [];
+    const contacts = typeof phoneContacts === 'function' ? phoneContacts(phone, seed) : [];
+    const blocked = pw.access?.[phone.id]?.blockedUntil > Date.now();
     body = `<div class="phone-frame">
       <div class="phone-screen">
-        <div class="phone-status">${esc(phone.model)} · ${esc(phone.os)}</div>
-        <div class="phone-owner"><b>${esc(phone.ownerName)}</b><small>${esc(phone.ownerType)} · ${esc(phone.id)}</small></div>
-        <div class="phone-num muted">${esc(phone.number)}</div>
-        <div class="phone-section"><b>Сообщения</b>${msgs.map(m=>`<div class="phone-msg"><span>${esc(m.from)}</span><p>${esc(m.text)}</p></div>`).join('')}</div>
-        <div class="phone-section"><b>Галерея</b><div class="phone-gal">${gal.map(x=>`<div class="phone-thumb">${esc(x.title)}</div>`).join('')}</div></div>
+        <div class="phone-status">${esc(phone.model)} · ${esc(phone.os)} ${blocked?'· LOCKED':''}</div>
+        <div class="phone-owner"><b>${esc(phone.ownerName)}</b><small>${esc(phone.ownerType)} · sec ${phone.security}</small></div>
+        <div class="phone-num">${esc(phone.id)} · ${esc(phone.number)}</div>
+        <div class="phone-tabs btn-row section-gap">
+          <button type="button" class="btn tiny ${state.phoneLabTab!=='calls'&&state.phoneLabTab!=='contacts'&&state.phoneLabTab!=='gallery'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="msgs">SMS</button>
+          <button type="button" class="btn tiny ${state.phoneLabTab==='calls'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="calls">Звонки</button>
+          <button type="button" class="btn tiny ${state.phoneLabTab==='contacts'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="contacts">Контакты</button>
+          <button type="button" class="btn tiny ${state.phoneLabTab==='gallery'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="gallery">Галерея</button>
+        </div>
+        <div class="phone-section">
+          ${state.phoneLabTab==='calls' ? calls.map(c=>`<div class="phone-msg"><span>${esc(c.dir)}</span><p>${esc(c.with)}</p></div>`).join('') :
+            state.phoneLabTab==='contacts' ? contacts.map(c=>`<div class="phone-msg"><span>${esc(c.name)}</span><p>${esc(c.number)}</p></div>`).join('') :
+            state.phoneLabTab==='gallery' ? `<div class="phone-gal">${gal.map(x=>`<div class="phone-thumb">${esc(x.title)}</div>`).join('')}</div>` :
+            msgs.map(m=>`<div class="phone-msg"><span>${esc(m.from)}</span><p>${esc(m.text)}</p></div>`).join('')}
+        </div>
         <div class="btn-row section-gap">
-          <button type="button" class="btn tiny" data-action="phone-lab-lock" data-id="${esc(phone.id)}">Lock 30м</button>
+          <button type="button" class="btn tiny" data-action="phone-lab-export" data-kind="msgs" data-id="${esc(phone.id)}">Сохранить SMS</button>
+          <button type="button" class="btn tiny" data-action="phone-lab-export" data-kind="gallery" data-id="${esc(phone.id)}">Сохранить галерею</button>
+          <button type="button" class="btn tiny danger" data-action="phone-lab-lock" data-id="${esc(phone.id)}">Lock 30м</button>
           <button type="button" class="btn tiny ghost" data-action="copy-text" data-text="${esc(phone.id)}">Copy ID</button>
         </div>
       </div>
     </div>`;
   }
-  return `<div class="app-heading"><div><div class="eyebrow">PHONE LAB</div><h2>Телефон</h2><p>Визуальное исследование · данные те же, что в phone-control</p></div><span class="badge">${discovered.length} ID</span></div>
-  <div class="kv"><span>Сеть</span><b>${net ? esc(net.regionId)+' · '+esc(net.netKey) : 'не подключено'}</b></div>
+  return `<div class="app-heading"><div><div class="eyebrow">PHONE LAB</div><h2>Телефон</h2><p>Исследование после phone-access · вместо phone-control</p></div><span class="badge">${discovered.length} ID</span></div>
+  <div class="kv"><span>Сеть</span><b>${net ? esc(net.regionId)+' · '+esc(net.netKey||'') : 'не подключено (net-link)'}</b></div>
   <div class="panel section-gap"><div class="panel-title"><span>DISCOVERED</span></div><div style="display:flex;flex-wrap:wrap;gap:6px">${discList}</div></div>
-  <div class="section-gap">${body}</div>
-  <p class="muted small">Сессия не сохраняется между перезапусками; discovered / файлы / lock — да.</p>`;
+  <div class="section-gap">${body}</div>`;
 }
+
 
 function renderIntel(g) {
   const intel = g.intel || {};
@@ -1560,42 +1592,31 @@ function renderIde(g) {
   }
   const tab = state.ide.tabs[state.ide.active];
   const file = tab ? files.find(f => f.id === tab.id || f.name === tab.name) : null;
-  const content = file ? String(file.content || '') : (state.editorText || '');
+  const content = file ? String(file.content || '') : '';
   const lines = content.split('\n');
   const lineNos = lines.map((_, i) => i + 1).join('\n');
-  const tabsHtml = state.ide.tabs.map((t, idx) => {
-    const dirty = state.ide.dirty[t.id] ? '•' : '';
-    return `<button type="button" class="ide-tab ${idx===state.ide.active?'on':''}" data-action="ide-tab" data-idx="${idx}">${esc(t.name)}${dirty}</button>`;
-  }).join('') || '<span class="muted small">Нет вкладок</span>';
-  const list = files.slice(0, 40).map(f => `<button type="button" class="list-row" data-action="ide-open" data-id="${esc(f.id)}"><div class="list-main"><strong>${esc(f.name)}</strong><small>${esc(f.type||'file')} · ${String(f.content||'').length} ch</small></div></button>`).join('') || '<div class="muted">Файлов нет</div>';
-  return `<div class="app-heading"><div><div class="eyebrow">VIRTUAL IDE</div><h2>NBS IDE / Editor</h2><p>Виртуальные файлы · вкладки · поиск · без доступа к диску устройства</p></div><span class="badge">IDE</span></div>
+  const tabsHtml = state.ide.tabs.map((t, idx) =>
+    `<button type="button" class="ide-tab ${idx===state.ide.active?'on':''}" data-action="ide-tab" data-idx="${idx}">${esc(t.name)}</button>`
+  ).join('') || '<span class="muted small">Нет вкладок</span>';
+  const list = files.slice(0, 50).map(f => `<button type="button" class="list-row" data-action="ide-open" data-id="${esc(f.id)}"><div class="list-main"><strong>${esc(f.name)}</strong><small>${esc(f.type||'file')} · ${String(f.content||'').length} ch</small></div></button>`).join('') || '<div class="muted">Файлов нет</div>';
+  return `<div class="app-heading"><div><div class="eyebrow">VIRTUAL IDE · READ ONLY</div><h2>NBS IDE / Viewer</h2><p>Просмотр · копирование · удаление. Редактирование временно отключено.</p></div><span class="badge">RO</span></div>
   <div class="ide-layout section-gap">
     <div class="panel ide-sidebar" style="max-height:min(520px,60vh);overflow:auto;padding:8px">${list}</div>
     <div class="ide-main">
-      <div class="ide-tabs btn-row" style="flex-wrap:wrap;gap:4px">${tabsHtml}
-        <button type="button" class="btn tiny ghost" data-action="ide-new">+ файл</button>
-      </div>
+      <div class="ide-tabs btn-row" style="flex-wrap:wrap;gap:4px">${tabsHtml}</div>
       <div class="ide-toolbar btn-row section-gap">
-        <button type="button" class="btn tiny" data-action="ide-save">Сохранить</button>
         <button type="button" class="btn tiny ghost" data-action="ide-copy">Копировать всё</button>
         <button type="button" class="btn tiny ghost" data-action="ide-find">Найти</button>
         <button type="button" class="btn tiny danger" data-action="ide-delete" ${file?'':'disabled'}>Удалить файл</button>
       </div>
       <div class="ide-find row section-gap" style="display:flex;gap:6px;flex-wrap:wrap">
-        <input class="field" id="ideFind" placeholder="Найти" value="${esc(state.ide.find||'')}" style="flex:1;min-width:120px">
-        <input class="field" id="ideReplace" placeholder="Заменить" value="${esc(state.ide.replace||'')}" style="flex:1;min-width:120px">
-        <button type="button" class="btn tiny" data-action="ide-replace-one">Заменить</button>
-        <button type="button" class="btn tiny ghost" data-action="ide-replace-all">Все</button>
+        <input class="field" id="ideFind" placeholder="Найти в файле" value="${esc(state.ide.find||'')}" style="flex:1;min-width:120px">
       </div>
       <div class="ide-editor-wrap" style="display:flex;border:1px solid #2a3a48;border-radius:8px;overflow:hidden;min-height:280px;background:#0a1016">
         <pre class="ide-gutter muted" style="margin:0;padding:10px 8px;text-align:right;user-select:none;font-size:11px;line-height:1.45;border-right:1px solid #1e2a33;min-width:36px">${lineNos || '1'}</pre>
-        <textarea id="ideBody" class="ide-body field" style="flex:1;border:none;border-radius:0;min-height:280px;font-size:11px;line-height:1.45;resize:vertical;background:#0a1016" spellcheck="false">${esc(content)}</textarea>
+        <pre id="ideBody" class="ide-body" style="flex:1;margin:0;padding:10px;font-size:11px;line-height:1.45;overflow:auto;max-height:min(420px,55vh);user-select:text;white-space:pre-wrap;color:#d5e0ea">${esc(content)||'(пусто)'}</pre>
       </div>
-      <div class="muted small section-gap">Символов: ${content.length} · ${file ? esc(file.name) : 'новый'} · ${state.ide.dirty[file?.id] ? 'есть изменения' : 'сохранено'}</div>
-      <div class="panel section-gap"><div class="panel-title"><span>NBS RUN (с 5 ур.)</span></div>
-        <div class="btn-row"><button type="button" class="btn tiny" data-action="nbs-run">Выполнить NBS</button></div>
-        <pre class="muted small" style="white-space:pre-wrap">${esc(state.nbsOutput||'')}</pre>
-      </div>
+      <div class="muted small section-gap">Символов: ${content.length} · ${file ? esc(file.name) : '—'} · только чтение</div>
     </div>
   </div>`;
 }
@@ -1700,7 +1721,8 @@ function handleAction(action,el) {
       }
       if(!isNaN(idx)) state.ide.active=idx; renderWindow('ide'); break;
     }
-    case 'ide-save':{
+    case 'ide-save':{ toast('Редактирование отключено — только просмотр','info'); break; }
+    case 'ide-save-disabled':{
       const body=$('ideBody'); if(!body||!state.ide?.tabs?.length) break;
       const t=state.ide.tabs[state.ide.active];
       let f=state.game.computer.files.find(x=>x.id===t.id);
@@ -1710,10 +1732,12 @@ function handleAction(action,el) {
     }
     case 'ide-copy':{
       const body=$('ideBody');
-      if(body&&navigator.clipboard?.writeText) navigator.clipboard.writeText(body.value).then(()=>toast('Скопировано','success'));
+      const text=body?(body.value!==undefined?body.value:body.textContent):'';
+      if(text&&navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(()=>toast('Скопировано','success'));
       break;
     }
-    case 'ide-new':{
+    case 'ide-new':{ toast('Создание из IDE отключено. Файлы появляются из плагинов.','info'); break; }
+    case 'ide-new-disabled':{
       if(!state.ide) state.ide={tabs:[],active:0,find:'',replace:'',dirty:{}};
       const name=`note_${Date.now().toString(36)}.txt`;
       const f={id:'file_ide_'+Date.now().toString(36),name,type:'text',content:'',path:'/ide/',createdAt:Date.now(),size:1};
@@ -1727,12 +1751,14 @@ function handleAction(action,el) {
       state.ide.tabs.splice(state.ide.active,1); state.ide.active=Math.max(0,state.ide.active-1);
       scheduleSave(); renderWindow('ide'); break;
     }
-    case 'ide-replace-one':{
+    case 'ide-replace-one':{ toast('Редактирование отключено','info'); break; }
+    case 'ide-replace-one-x':{
       const body=$('ideBody'); const find=$('ideFind')?.value||''; const rep=$('ideReplace')?.value||'';
       if(body&&find){ const i=body.value.indexOf(find); if(i>=0){ body.value=body.value.slice(0,i)+rep+body.value.slice(i+find.length); toast('Заменено','success'); } else toast('Не найдено','info'); }
       break;
     }
-    case 'ide-replace-all':{
+    case 'ide-replace-all':{ toast('Редактирование отключено','info'); break; }
+    case 'ide-replace-all-x':{
       const body=$('ideBody'); const find=$('ideFind')?.value||''; const rep=$('ideReplace')?.value||'';
       if(body&&find){ const c=(body.value.split(find).length-1); body.value=body.value.split(find).join(rep); toast('Замен: '+c,'success'); }
       break;
@@ -1755,6 +1781,26 @@ function handleAction(action,el) {
       state.game.phoneWorld.access[id]={level:'user',at:Date.now()};
       state.game.phoneWorld.discovered[id]=true;
       renderWindow('phone'); break;
+    }
+    case 'phone-lab-tab':{
+      state.phoneLabTab = el.dataset.tab || 'msgs';
+      renderWindow('phone'); break;
+    }
+    case 'phone-lab-export':{
+      const kind = el.dataset.kind || 'msgs';
+      const phone = findPhone(id, state.game.meta?.seed||'nb');
+      if(!phone){ toast('Нет телефона','error'); break; }
+      let content='', name='';
+      if(kind==='gallery'){
+        content = phoneGallery(phone, state.game.meta?.seed||'nb').map(x=>`${x.id} ${x.title} ${x.note}`).join('\n');
+        name = `${phone.id}-gallery.txt`;
+      } else {
+        content = phoneMessages(phone, state.game.meta?.seed||'nb').map(m=>`${m.from}: ${m.text}`).join('\n');
+        name = `${phone.id}-msgs.txt`;
+      }
+      const file = { id:'file_ph_'+Date.now().toString(36), name, type:'phone-data', content, path:'/phone/', createdAt:Date.now(), size:Math.max(1,Math.ceil(content.length/1024)) };
+      state.game.computer.files.unshift(file);
+      scheduleSave(); toast('Файл: '+name,'success'); break;
     }
     case 'phone-lab-lock':{
       if(typeof lockPhone==='function') lockPhone(state.game, id, 30);

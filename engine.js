@@ -33,7 +33,7 @@ export const PLUGINS = [
   { id:'net-link', name:'Net Link', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:40, cooldown:0, description:'Подключение терминала к региональной сети (15с).', effect:'Текущая сеть региона.', starter:true },
   { id:'net-analyzer', name:'Net Analyzer', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:80, cooldown:0, description:'Анализ региональной сети (~20с) и полный отчёт PHONE_ID.', effect:'Отчёт 550 устройств/регион.', starter:true },
   { id:'phone-access', name:'Phone Access', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:100, cooldown:0, description:'Доступ к телефону по PHONE_ID.', effect:'Сессия исследования телефона.', starter:true },
-  { id:'phone-control', name:'Phone Control', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:120, cooldown:0, description:'Звонки, SMS, журналы, галерея, блок 30 мин.', effect:'Управление виртуальным телефоном.', starter:true },
+  { id:'phone-control', name:'Phone Control', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:120, cooldown:0, description:'Заменено приложением Phone Lab. Не запускается из Terminal.', effect:'Используй Phone Lab.', starter:false },
   { id:'mail-drop', name:'Mail Drop', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:60, cooldown:0, description:'Вложение для NPC через N-Mail (альтернативный путь).', effect:'Шанс раскрытия PHONE_ID.', starter:true },
   { id:'sms-bomber', name:'SMS Bomber', category:'Mobile Operations', version:'1.0.0', price:40000, requiredLevel:1, minOs:1, ram:1, storage:40, cooldown:5000, description:'Игровая нагрузка SMS на виртуальный номер.', effect:'Симуляция спама.', starter:false },
   { id:'bank-peek', name:'Bank Peek', category:'Mobile Operations', version:'1.0.0', price:100000, requiredLevel:1, minOs:1, ram:1, storage:80, cooldown:0, description:'Доступ к виртуальным банковским пометкам телефона.', effect:'Игровые bank notes.', starter:false },
@@ -111,8 +111,9 @@ export const PLUGINS_LOCKED = new Set([
   'site-analyzer','artifact-decoder','node-radar','weakness-lab','sim-exploit',
   'data-exporter','site-editor','db-reader','identity-mask','bank-decryptor',
   'obfuscator','file-forge','server-index','target-extractor','archive-exporter',
-  // Legacy mobile names (removed from catalog)
-  'device-scout','signal-mapper','mobile-decoder','mobile-access','mobile-forensics','map-scanner','phone-call'
+  // Legacy mobile + control moved to Phone Lab app
+  'device-scout','signal-mapper','mobile-decoder','mobile-access','mobile-forensics','map-scanner','phone-call',
+  'phone-control'
 ]);
 
 
@@ -155,7 +156,7 @@ export function createInitialState(tgUser=null) {
     meta:{createdAt:now,updatedAt:now,seed:`nb-${now.toString(36)}`,migratedFrom:null},
     player:{nickname:'',telegramId:tgUser?.id ? String(tgUser.id) : '',level:1,xp:0,reputation:0,contractsCompleted:0,totalEarned:0},
     economy:{credits:BALANCE.creditsStart,transactions:[{id:'txn-starter',type:'income',amount:BALANCE.creditsStart,reason:'Стартовый грант оператора',at:now}]},
-    computer:{cpu:1,ram:1,gpu:1,storage:1,os:1,files:[],installedPlugins:['net-link','net-analyzer','phone-access','phone-control','mail-drop','site-analyzer','artifact-decoder','node-radar','weakness-lab','sim-exploit','data-exporter'],uptimeStartedAt:now},
+    computer:{cpu:1,ram:1,gpu:1,storage:1,os:1,files:[],installedPlugins:['net-link','net-analyzer','phone-access','mail-drop','site-analyzer','artifact-decoder','node-radar','weakness-lab','sim-exploit','data-exporter'],uptimeStartedAt:now},
     world:{sites:SITES.map(s=>({...s,state:'online',recoveryAt:0,defenseBoost:0,revision:1})),progress:{},npc:[
       {id:'npc-mira',name:'Mira Voss',role:'Клиент',device:'Pocket Mobile V2',address:'mira-pocket.pocketmobile.null',data:'Профиль виртуального телефона PM-22',location:'oldport',nextAt:now+20*60*1000},
       {id:'npc-eli',name:'Eli North',role:'Механик',device:'Garage Terminal',address:'eli-garage.neonmotors.null',data:'Сервисная карточка NM-88',location:'north',nextAt:now+35*60*1000},
@@ -508,6 +509,46 @@ export const PLUGIN_SHELLS = {
 
 
 export const PLUGIN_ANIM = {
+
+  'net-link': [
+    'opening radio iface…',
+    'probe SSID table…',
+    'auth handshake 1/3…',
+    'auth handshake 2/3…',
+    'lease OK · link up'
+  ],
+  'net-analyzer': [
+    'ARP sweep region…',
+    'enumerating handsets 0%…',
+    'enumerating handsets 35%…',
+    'enumerating handsets 72%…',
+    'fingerprint models…',
+    'compile PHONE_ID registry…',
+    'report ready'
+  ],
+  'phone-access': [
+    'resolve PHONE_ID…',
+    'negotiate session token…',
+    'bypass lock screen (sim)…',
+    'mount userland…',
+    'access GRANTED'
+  ],
+  'mail-drop': [
+    'craft payload envelope…',
+    'seal attachment…',
+    'ready for N-Mail'
+  ],
+  'sms-bomber': [
+    'queue virtual SMS…',
+    'flood schedule…',
+    'sim complete'
+  ],
+  'bank-peek': [
+    'read wallet notes…',
+    'parse ledger hints…',
+    'peek OK'
+  ],
+
   'site-analyzer': [
     'handshake with virtual resolver…',
     'pulling public surface map…',

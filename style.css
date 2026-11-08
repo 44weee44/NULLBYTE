@@ -262,7 +262,10 @@ h1,h2,h3,strong,.window-title{
 
 /* Plugin shell accents */
 .term-mode[data-plugin="net-link"], .term-mode[data-plugin="net-analyzer"] { color:#5ec8ff; }
-.term-mode[data-plugin="phone-access"], .term-mode[data-plugin="phone-control"] { color:#7dffa6; }
+.term-mode[data-plugin="phone-access"] { color:#7dffa6; }
+.term-mode[data-plugin="mail-drop"] { color:#c4a0ff; }
+.term-mode[data-plugin="sms-bomber"] { color:#ff9f6b; }
+.term-mode[data-plugin="bank-peek"] { color:#e2b657; }
 .term-mode[data-plugin="mail-drop"] { color:#c4a0ff; }
 .term-mode[data-plugin="site-analyzer"] { color:#5ec8ff; }
 .ide-tab { background:#121a22; border:1px solid #2a3a48; color:#c9d5e0; padding:4px 10px; border-radius:6px; font-size:11px; }

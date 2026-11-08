@@ -8,11 +8,11 @@ import { PHONE_REGIONS, PHONES_PER_REGION, createEmptyPhoneWorld, migratePhoneWo
 import { createEmptyEvents, migrateEvents, processWorldEvents, listActiveEvents } from './events.js';
 export const SAVE_VERSION = 1;
 export const PHONE_JOBS = [
-  {id:'phone-001',title:'Список контактов',client:'Mira Voss',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:180,xp:40,objective:'Подключись к сети региона, сохрани отчёт и выгрузи contacts одного PHONE_ID.',hint:'net-link → net-analyzer → phone-access → phone-control contacts',requiredPlugins:['net-link','net-analyzer','phone-access','phone-control']},
-  {id:'phone-002',title:'Снимок переписки',client:'Harbor Desk',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:220,xp:50,objective:'Сохрани msgs выбранного телефона в файл и сдай через N-Mail.',hint:'phone-control → save msgs <имя>',requiredPlugins:['phone-control']},
-  {id:'phone-003',title:'Звонок от имени',client:'Null Courier',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:320,xp:70,objective:'Открой телефон и выполни call от имени владельца.',hint:'phone-control call <имя>',requiredPlugins:['phone-access','phone-control']},
-  {id:'phone-004',title:'Галерея для заказа',client:'Green Mart',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:280,xp:60,objective:'Экспортируй gallery телефона в файл.',hint:'save gallery <имя>',requiredPlugins:['phone-control']},
-  {id:'phone-005',title:'Блокировка на полчаса',client:'Shadowline Ops',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:350,xp:80,objective:'Заблокируй целевой телефон на 30 минут (sim lock).',hint:'phone-control lock',requiredPlugins:['phone-control']},
+  {id:'phone-001',title:'Список контактов',client:'Mira Voss',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:180,xp:40,objective:'Подключись к сети региона, сохрани отчёт и выгрузи contacts одного PHONE_ID.',hint:'net-link → net-analyzer → phone-access → Phone Lab → Контакты',requiredPlugins:['net-link','net-analyzer','phone-access']},
+  {id:'phone-002',title:'Снимок переписки',client:'Harbor Desk',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:220,xp:50,objective:'Сохрани msgs выбранного телефона в файл и сдай через N-Mail.',hint:'Phone Lab → Сохранить SMS',requiredPlugins:['phone-access']},
+  {id:'phone-003',title:'Звонок от имени',client:'Null Courier',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:320,xp:70,objective:'Открой телефон и выполни call от имени владельца.',hint:'Phone Lab после phone-access',requiredPlugins:['phone-access']},
+  {id:'phone-004',title:'Галерея для заказа',client:'Green Mart',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:280,xp:60,objective:'Экспортируй gallery телефона в файл.',hint:'Phone Lab → Сохранить галерею',requiredPlugins:['phone-access']},
+  {id:'phone-005',title:'Блокировка на полчаса',client:'Shadowline Ops',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:350,xp:80,objective:'Заблокируй целевой телефон на 30 минут (sim lock).',hint:'Phone Lab → Lock 30м',requiredPlugins:['phone-access']},
 ];
 
 export const BALANCE = {
@@ -33,7 +33,6 @@ export const PLUGINS = [
   { id:'net-link', name:'Net Link', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:40, cooldown:0, description:'Подключение терминала к региональной сети (15с).', effect:'Текущая сеть региона.', starter:true },
   { id:'net-analyzer', name:'Net Analyzer', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:80, cooldown:0, description:'Анализ региональной сети (~20с) и полный отчёт PHONE_ID.', effect:'Отчёт 550 устройств/регион.', starter:true },
   { id:'phone-access', name:'Phone Access', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:100, cooldown:0, description:'Доступ к телефону по PHONE_ID.', effect:'Сессия исследования телефона.', starter:true },
-  { id:'phone-control', name:'Phone Control', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:120, cooldown:0, description:'Заменено приложением Phone Lab. Не запускается из Terminal.', effect:'Используй Phone Lab.', starter:false },
   { id:'mail-drop', name:'Mail Drop', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:60, cooldown:0, description:'Вложение для NPC через N-Mail (альтернативный путь).', effect:'Шанс раскрытия PHONE_ID.', starter:true },
   { id:'sms-bomber', name:'SMS Bomber', category:'Mobile Operations', version:'1.0.0', price:40000, requiredLevel:1, minOs:1, ram:1, storage:40, cooldown:5000, description:'Игровая нагрузка SMS на виртуальный номер.', effect:'Симуляция спама.', starter:false },
   { id:'bank-peek', name:'Bank Peek', category:'Mobile Operations', version:'1.0.0', price:100000, requiredLevel:1, minOs:1, ram:1, storage:80, cooldown:0, description:'Доступ к виртуальным банковским пометкам телефона.', effect:'Игровые bank notes.', starter:false },
@@ -440,10 +439,9 @@ export function getSiteProgress(state,siteId) {
 /* —— Terminal plugin sessions / one-time operation keys —— */
 export const PLUGIN_SHELLS = {
 
-  'net-link': { boot: 'Net Link v1', help: 'connect <region_id> — подкл. к сети (~15с) · status · list · help · exit', commands: ['connect','status','list','help','exit'] },
+  'net-link': { boot: 'Net Link v1', help: 'connect <region_id> · disconnect · status · list · help · exit', commands: ['connect','disconnect','status','list','help','exit'] },
   'net-analyzer': { boot: 'Net Analyzer v1', help: 'scan — анализ сети · save <имя> — полный отчёт · help · exit', commands: ['scan','analyze','save','help','exit'] },
-  'phone-access': { boot: 'Phone Access v1', help: 'open <PHONE_ID> · status · disconnect · help · exit', commands: ['open','status','disconnect','help','exit'] },
-  'phone-control': { boot: 'Phone Control v1', help: 'msgs | calls | contacts | gallery | save msgs|gallery <имя> | call <имя> | sms <текст> | lock | disconnect | help | exit', commands: ['msgs','messages','calls','contacts','gallery','save','call','sms','lock','disconnect','help','exit'] },
+  'phone-access': { boot: 'Phone Access v1', help: 'open <PHONE_ID> · status · disconnect · help · exit', commands: ['open','status','disconnect','close','help','exit'] },
   'mail-drop': { boot: 'Mail Drop v1', help: 'craft <имя_файла> · attach — через N-Mail · help · exit', commands: ['craft','help','exit'] },
   'sms-bomber': { boot: 'SMS Bomber v1', help: 'bomb <PHONE_ID> · help · exit', commands: ['bomb','help','exit'] },
   'bank-peek': { boot: 'Bank Peek v1', help: 'peek <PHONE_ID> · help · exit', commands: ['peek','help','exit'] },
@@ -1255,6 +1253,14 @@ if (pluginId === 'data-exporter' && (cmd === 'export' || cmd === 'pack')) {
         { text: `Key ${n.netKey} · SSID ${n.ssid}`, type: 'muted' }
       ]};
     }
+    if (cmd === 'disconnect') {
+      if (!state.phoneWorld?.network) return { ok: true, lines: [{ text: 'Сеть уже отключена.', type: 'muted' }] };
+      state.phoneWorld.network = null;
+      return { ok: true, lines: [
+        { text: 'Net Link — drop interface…', type: 'muted' },
+        { text: 'Disconnected from regional net.', type: 'green' }
+      ], progressUpdated: true };
+    }
     if (cmd === 'connect') {
       const rid = arg1 || parts[1];
       const r = connectNetwork(state, rid);
@@ -1295,20 +1301,28 @@ if (pluginId === 'data-exporter' && (cmd === 'export' || cmd === 'pack')) {
         { text: 'PHONE ACCESS', type: 'blue' },
         { text: `${r.phone.id} · ${r.phone.ownerName} · ${r.phone.ownerType}`, type: 'green' },
         { text: `${r.phone.model} · ${r.phone.number}`, type: 'muted' },
-        { text: 'Дальше: run phone-control', type: 'muted' }
+        { text: 'Дальше: Phone Lab на рабочем столе', type: 'muted' }
       ], progressUpdated: true };
     }
     if (cmd === 'status') {
       const id = state._phoneTarget;
       return { ok: true, lines: [{ text: id ? `Active: ${id}` : 'Нет активного PHONE_ID', type: id ? 'green' : 'muted' }] };
     }
-    if (cmd === 'disconnect') {
+    if (cmd === 'disconnect' || cmd === 'close') {
+      const was = state._phoneTarget;
       state._phoneTarget = null;
-      return { ok: true, lines: [{ text: 'Phone session ended.', type: 'muted' }] };
+      if (state.phoneWorld?.access && was) {
+        // keep discovered + locks; only drop active session view
+        delete state.phoneWorld.access[was];
+      }
+      return { ok: true, lines: [
+        { text: was ? `Disconnect ${was}` : 'No active phone.', type: was ? 'green' : 'muted' },
+        { text: 'Phone Lab session cleared.', type: 'muted' }
+      ], progressUpdated: true, closePhoneLab: true };
     }
   }
 
-  if (pluginId === 'phone-control') {
+  if (false && pluginId === 'phone-control') {
     const pid = state._phoneTarget || arg1;
     if (cmd === 'disconnect') {
       state._phoneTarget = null;

@@ -1055,38 +1055,121 @@ function termAdd(termId, text, type = '') {
 }
 
 function pluginBanner(pluginId) {
+  const skins = {
+    'net-link': {
+      color: 'blue',
+      lines: [
+        '  ╭──── NET LINK ────╮',
+        '  │  ≈≈ radio mesh  │',
+        '  │  ░░ iface up ░░ │',
+        '  ╰─────────────────╯'
+      ]
+    },
+    'net-analyzer': {
+      color: 'blue',
+      lines: [
+        '  ┌─ NET ANALYZER ─┐',
+        '  │ ▓▓▓ scan grid  │',
+        '  │ ··· PHONE_ID ·│',
+        '  └────────────────┘'
+      ]
+    },
+    'phone-access': {
+      color: 'green',
+      lines: [
+        '  ╔═ PHONE ACCESS ═╗',
+        '  ║  ▣ unlock sim  ║',
+        '  ║  → handset tty ║',
+        '  ╚════════════════╝'
+      ]
+    },
+    'mail-drop': {
+      color: 'blue',
+      lines: [
+        '  ◆ MAIL DROP ◆',
+        '  { payload.seal }',
+        '  → N-Mail attach'
+      ]
+    },
+    'sms-bomber': {
+      color: 'error',
+      lines: [
+        '  !! SMS BOMBER !!',
+        '  >>> flood queue',
+        '  *** sim only ***'
+      ]
+    },
+    'bank-peek': {
+      color: 'blue',
+      lines: [
+        '  〔 BANK PEEK 〕',
+        '  $ notes / ledger',
+        '  virtual only'
+      ]
+    }
+  };
+  const s = skins[pluginId];
+  if (s) return s.lines.map(t => ({ text: t, type: s.color }));
   const p = getPlugin(pluginId);
   const name = (p?.name || pluginId).toUpperCase();
-  const bar = '═'.repeat(Math.min(36, Math.max(24, name.length + 6)));
   return [
-    { text: `╔${bar}╗`, type: 'blue' },
-    { text: `║  ░▒▓ ${name} ▓▒░`.padEnd(bar.length + 1) + '║', type: 'blue' },
-    { text: `║  module://${pluginId}`.padEnd(bar.length + 1) + '║', type: 'muted' },
-    { text: `╚${bar}╝`, type: 'blue' }
+    { text: `╔══ ${name} ══╗`, type: 'blue' },
+    { text: `║ module://${pluginId}`, type: 'muted' },
+    { text: `╚══════════════╝`, type: 'blue' }
   ];
 }
+
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function animatePluginBoot(termId, pluginId) {
-  for (const f of [
+  const boots = {
+    'net-link': [
+      { text: '· radio cold start', type: 'muted' },
+      { text: '· load region table', type: 'muted' },
+      { text: '· mesh driver OK', type: 'green' }
+    ],
+    'net-analyzer': [
+      { text: '· alloc scan buffer', type: 'muted' },
+      { text: '· hash PHONE index', type: 'muted' },
+      { text: '· analyzer ready', type: 'green' }
+    ],
+    'phone-access': [
+      { text: '· session vault', type: 'muted' },
+      { text: '· handset protocol', type: 'muted' },
+      { text: '· access shell ready', type: 'green' }
+    ],
+    'mail-drop': [
+      { text: '· envelope kit', type: 'muted' },
+      { text: '· drop ready', type: 'green' }
+    ],
+    'sms-bomber': [
+      { text: '· arm virtual modem', type: 'muted' },
+      { text: '· bomber armed', type: 'green' }
+    ],
+    'bank-peek': [
+      { text: '· open notes layer', type: 'muted' },
+      { text: '· peek ready', type: 'green' }
+    ]
+  };
+  const seq = boots[pluginId] || [
     { text: '[··] init', type: 'muted' },
-    { text: '[=·] signature ok', type: 'muted' },
-    { text: '[==] sandbox tty', type: 'muted' },
     { text: '[==] ready', type: 'green' }
-  ]) {
+  ];
+  for (const f of seq) {
     termAdd(termId, f.text, f.type);
-    await sleep(70);
+    await sleep(90);
   }
   for (const line of pluginBanner(pluginId)) {
     termAdd(termId, line.text, line.type);
-    await sleep(20);
+    await sleep(35);
   }
   for (const line of pluginShellBootLines(pluginId)) {
     termAdd(termId, line.text, line.type);
-    await sleep(25);
+    await sleep(30);
   }
 }
+
 
 async function animateWork(termId, pluginId) {
   const steps = (typeof PLUGIN_ANIM !== 'undefined' && PLUGIN_ANIM[pluginId]) || ['processing…', 'done'];
@@ -1316,9 +1399,13 @@ async function runTerminalCommand(termId, raw) {
         if (result.progressUpdated || result.exportFile) scheduleSave();
         if (result.exportFile) toast('Файл готов → N-Mail', 'success');
         if (result.progressUpdated) refreshOpenApps(['browser', 'mail', 'blackwire', 'computer', 'files', 'phone', 'intel']);
-        if (term.plugin === 'phone-access' && state._phoneTarget) {
+        if (result.closePhoneLab) {
+          state._phoneTarget = null;
+          if (state.opened.has('phone')) renderWindow('phone');
+          termAdd(termId, '→ Phone Lab очищен.', 'muted');
+        } else if (term.plugin === 'phone-access' && state._phoneTarget) {
           openApp('phone');
-          termAdd(termId, '→ Phone Lab открыт для исследования.', 'green');
+          termAdd(termId, '→ Phone Lab открыт.', 'green');
         }
       }
     } finally {
@@ -1498,6 +1585,7 @@ function renderPhoneLab(g) {
           <button type="button" class="btn tiny" data-action="phone-lab-export" data-kind="gallery" data-id="${esc(phone.id)}">Сохранить галерею</button>
           <button type="button" class="btn tiny danger" data-action="phone-lab-lock" data-id="${esc(phone.id)}">Lock 30м</button>
           <button type="button" class="btn tiny ghost" data-action="copy-text" data-text="${esc(phone.id)}">Copy ID</button>
+          <button type="button" class="btn tiny" data-action="phone-lab-disconnect">Disconnect</button>
         </div>
       </div>
     </div>`;
@@ -1538,9 +1626,9 @@ function renderHelp() {
     ['Что исследовать', '1) Региональные сети и телефоны (PHONE_ID). 2) Виртуальные сайты .null (сейчас web-цепочка на доработке). 3) Серверы и Intel. 4) Контракты BlackWire. 5) Случайные события мира.'],
     ['Регионы и сеть', 'NullAtlas: 6 регионов (Бейшор-Хайтс, Мидтаун-Спайн, Айронрич, Саутгейт, Окридж, Шэдоулайн). Terminal: run net-link → list → connect <region_id>. Подключение только внутриигровое.'],
     ['Анализ сети', 'run net-analyzer → scan (~анализ) → save <имя>. Полный отчёт содержит все ~550 PHONE_ID региона. Не обрезается. Ищи нужный ID сам (поиск в Files / IDE).'],
-    ['Телефоны PHONE_ID', 'Идентификатор формата PH-XXXX-0000. open через phone-access. Затем phone-control: msgs, calls, contacts, gallery, save msgs|gallery <имя>, call, sms, lock (30 мин), disconnect. Сессии взлома не сохраняются — прогресс (файлы, discovered) сохраняется.'],
+    ['Телефоны PHONE_ID', 'Идентификатор формата PH-XXXX-0000. open через phone-access. После open открывается Phone Lab. SMS/звонки/галерея/lock/export — в приложении. disconnect в phone-access или кнопка Disconnect. Прогресс (файлы, discovered) сохраняется, сессия — нет.'],
     ['Альтернатива: Mail Drop', 'run mail-drop → craft → save файл → N-Mail вложение NPC. Движок считает шанс/задержку открытия. При успехе в почте приходит PHONE_ID.'],
-    ['Плагины mobile', 'Бесплатно: net-link, net-analyzer, phone-access, phone-control, mail-drop. Платно: sms-bomber 40000 CR, bank-peek 100000 CR. Старые mobile-модули удалены.'],
+    ['Плагины mobile', 'Бесплатно: net-link, net-analyzer, phone-access, mail-drop. Управление телефоном — Phone Lab. Платно: sms-bomber 40000 CR, bank-peek 100000 CR. Старые mobile-модули удалены.'],
     ['Сайты (WIP)', 'Web-плагины в NULForge помечены «В доработке». Логика сохранена, run закрыт до отдельного чек-листа.'],
     ['Terminal', 'help | plugins | run <id> | files | ls | cat | mission list | intel | map. В плагине: help, exit. Неизвестная команда — сразу ошибка без фейковой загрузки.'],
     ['Files и IDE', 'Files — список и просмотр. IDE — вкладки, правка, поиск, сохранение виртуальных файлов. Нет доступа к файловой системе устройства.'],
@@ -1801,6 +1889,12 @@ function handleAction(action,el) {
       const file = { id:'file_ph_'+Date.now().toString(36), name, type:'phone-data', content, path:'/phone/', createdAt:Date.now(), size:Math.max(1,Math.ceil(content.length/1024)) };
       state.game.computer.files.unshift(file);
       scheduleSave(); toast('Файл: '+name,'success'); break;
+    }
+    case 'phone-lab-disconnect':{
+      const was = state._phoneTarget;
+      state._phoneTarget = null;
+      if (was && state.game.phoneWorld?.access) delete state.game.phoneWorld.access[was];
+      toast('Телефон отключён','success'); renderWindow('phone'); break;
     }
     case 'phone-lab-lock':{
       if(typeof lockPhone==='function') lockPhone(state.game, id, 30);

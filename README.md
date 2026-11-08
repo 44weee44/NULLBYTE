@@ -89,7 +89,6 @@ DELIVER mail "job-001"
 - `storage.test.js` — проверки CloudStorage, чанков и восстановления.
 - `server.js` — локальный статический сервер без сторонних зависимостей.
 - `manifest.json` — web app manifest.
-- `nullbyte-mark.svg` — логотип NULLBYTE.
 - `SPECIFICATION.md` — полное техническое задание проекта.
 - `package.json` — команды запуска и тестов.
 

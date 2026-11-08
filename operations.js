@@ -235,13 +235,9 @@ export function extendedPluginDocs() {
     'phone-access': {
       title: 'Phone Access', role: 'Открыть виртуальный телефон по PHONE_ID.',
       steps: ['run phone-access', 'open PH-BAYS-0042', 'status'],
-      inputs: 'PHONE_ID из отчёта', outputs: 'active phone target', next: ['phone-control']
+      inputs: 'PHONE_ID из отчёта', outputs: 'active phone target', next: ['Phone Lab app']
     },
-    'phone-control': {
-      title: 'Phone Control', role: 'Сообщения, звонки, галерея, блокировка.',
-      steps: ['msgs', 'calls', 'contacts', 'gallery', 'save msgs out', 'lock', 'disconnect'],
-      inputs: 'active PHONE_ID', outputs: 'файлы / lock 30м', next: ['mail-drop']
-    },
+
     'mail-drop': {
       title: 'Mail Drop', role: 'Вложение для NPC; шанс открытия → PHONE_ID в почте.',
       steps: ['craft payload', 'save file', 'N-Mail attach + send'],

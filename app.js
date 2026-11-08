@@ -4,8 +4,10 @@ import {
   acceptMission, cancelMission, missionBoardTimer, rotateMissionBoard, getSite, getSiteProgress, operateSite, exportMissionResult, submitMission,
   processTimedEvents, bankStatus, bankRisk, attemptBankSimulation, saveEditorFile, validateNbs, runNbs,
   recordHistory, addBookmark, idempotencyKey,
-  PLUGIN_SHELLS, PLUGIN_ANIM, runPluginShellCommand, pluginShellBootLines, resolveSiteRef, savePlayerNamedFile, findFileByName, markServerModified
+  PLUGIN_SHELLS, PLUGIN_ANIM, runPluginShellCommand, pluginShellBootLines, resolveSiteRef, savePlayerNamedFile, findFileByName, markServerModified,
+  isPluginLocked, isMissionVisible, xpThresholdForLevel, listRegionPhones
 } from './engine.js';
+import { findPhone, phoneMessages, phoneGallery, lockPhone } from './phones.js';
 import { bankLogin, bankTransfer, getBankSession, searchNpcs, pluginDocs, touchNpc, NPC_POOL_SIZE } from './npc.js';
 import { extendedPluginDocs } from './operations.js';
 import { loadSavedGame, saveGame } from './storage.js';
@@ -23,6 +25,8 @@ const svg = {
   help:'<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.6 2.6 0 1 1 4.8 1.3c-1.1 1.4-2.3 1.6-2.3 3.2m0 3h.01"/>',
   ide:'<path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 16"/>',
   bank:'<path d="m3 9 9-6 9 6M5 10v9m5-9v9m4-9v9m5-9v9M3 21h18"/>',
+  phone:'<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M10 18h4"/>',
+  intel:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3m0 12v3M3 12h3m12 0h3"/>',
   computer:'<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/>'
 };
 const APPS = [
@@ -37,6 +41,8 @@ const APPS = [
   {id:'help',title:'Help / Docs',path:'docs://manual',ram:1,description:'Справка по игре'},
   {id:'ide',title:'NBS IDE',path:'ide://workspace',ram:2,description:'Редактор игровых скриптов'},
   {id:'files',title:'Files',path:'fs://home',ram:1,description:'Файловый менеджер'},
+  {id:'phone',title:'Phone Lab',path:'phone://lab',ram:2,description:'Визуальное исследование телефонов'},
+  {id:'intel',title:'Intel',path:'intel://feed',ram:1,description:'Разведка, события, discovered'},
   {id:'fbi',title:'FBI',path:'agency://fbi',ram:1,description:'Закрытый раздел'},
   {id:'profile',title:'Профиль',path:'user://operator',ram:1,description:'Оператор и прогресс'},
   {id:'computer',title:'My Computer',path:'system://hardware',ram:1,description:'Компьютер и файлы'}
@@ -50,7 +56,7 @@ function formatDate(ts) { return new Intl.DateTimeFormat('ru-RU',{day:'2-digit',
 function formatTime(ts) { return new Intl.DateTimeFormat('ru-RU',{hour:'2-digit',minute:'2-digit'}).format(new Date(ts)); }
 function humanLeft(ms) { const total=Math.max(0,Math.ceil(ms/1000)); const h=Math.floor(total/3600),m=Math.floor((total%3600)/60),s=total%60; return h?`${h}ч ${m}м`:`${m}м ${s}с`; }
 function currentRam() { return getRamUsage(state.game,[...state.opened.values()].map(w=>({ram:w.ram,minimized:w.minimized}))); }
-function currentLevelNeed() { const lvl=state.game.player.level; return lvl>=BALANCE.maxLevel?0:Math.max(0,BALANCE.xpToLevel[lvl]-state.game.player.xp); }
+function currentLevelNeed() { const lvl=state.game.player.level; if(lvl>=BALANCE.maxLevel) return 0; const need=(typeof xpThresholdForLevel==='function'?xpThresholdForLevel(lvl):BALANCE.xpToLevel[lvl])||0; return Math.max(0,need-state.game.player.xp); }
 function toast(message,type='info') { const el=document.createElement('div');el.className=`toast ${type==='error'?'error':type==='success'?'success':''}`;el.textContent=message;$('toastStack').append(el);setTimeout(()=>el.remove(),4300); }
 function scheduleSave() { clearTimeout(state.saveTimer);state.saveTimer=setTimeout(persist,250); }
 async function persist() {
@@ -458,6 +464,8 @@ function renderApp(id) {
     case 'mail':return renderMail(g);
     case 'bank':return renderBank(g);
     case 'files':return renderFiles(g);
+    case 'phone':return renderPhoneLab(g);
+    case 'intel':return renderIntel(g);
     case 'fbi':return renderFbi();
     case 'help':return renderHelp();
     case 'ide':return renderIde(g);
@@ -465,7 +473,7 @@ function renderApp(id) {
   }
 }
 function renderProfile(g) {
-  const p=g.player,need=currentLevelNeed(),limit=BALANCE.xpToLevel[p.level]||p.xp,base=BALANCE.xpToLevel[Math.max(0,p.level-1)]||0,progress=p.level>=BALANCE.maxLevel?100:Math.max(0,Math.min(100,(p.xp-base)/(limit-base||1)*100));
+  const p=g.player,need=currentLevelNeed(),limit=(typeof xpThresholdForLevel==='function'?xpThresholdForLevel(p.level):BALANCE.xpToLevel[p.level])||p.xp,base=(typeof xpThresholdForLevel==='function'?xpThresholdForLevel(Math.max(1,p.level-1)):BALANCE.xpToLevel[Math.max(0,p.level-1)])||0,progress=p.level>=BALANCE.maxLevel?100:Math.max(0,Math.min(100,(p.xp-base)/Math.max(1,limit-base)*100));
   const ram=HARDWARE.ram.find(x=>x.level===g.computer.ram),cpu=HARDWARE.cpu.find(x=>x.level===g.computer.cpu),storage=getHardwareUsage(g);
   return `<div class="app-heading"><div><div class="eyebrow">OPERATOR ACCOUNT</div><h2>Профиль</h2><p>Личная карточка и прогресс оператора.</p></div><span class="badge green">ACTIVE</span></div>
   <section class="profile-hero"><div class="profile-ident"><div class="avatar">${esc(p.nickname.slice(0,2).toUpperCase())}</div><div><h3>${esc(p.nickname)}</h3><small>TELEGRAM ID: ${esc(p.telegramId||'НЕ ДОСТУПЕН')}</small></div></div><div class="profile-rank"><b>LVL ${p.level}</b><small>OPERATOR</small></div></section>
@@ -536,14 +544,24 @@ function renderDarkShop(g) {
   <div class="notice warning section-gap">Тестовые цены и характеристики помечены как balance draft в конфигурации engine.js. Они предназначены для первичного тестирования баланса.</div>`;
 }
 function renderPluginCard(g,p) {
-  const installed=getInstalledPlugin(g,p.id),locked=g.player.level<p.requiredLevel,osLocked=g.computer.os<(p.minOs||1),usage=getHardwareUsage(g),space=usage.used+p.storage<=usage.total,bankLocked=bankStatus(g).locked;
-  const blocker=locked?`Уровень ${p.requiredLevel}`:osLocked?`NULLBYTE OS ${(p.minOs||1)}.0`:!space?'Недостаточно места':bankLocked?'Банк заблокирован':'Готов к установке';
-  return `<div class="list-row"><div class="list-main"><strong>${esc(p.name)} <span class="muted">v${esc(p.version)}</span></strong><small>${esc(p.category)} · ${esc(p.description)}<br>RAM ${p.ram} GB · ${p.storage} MB · уровень ${p.requiredLevel} · ОС ${(p.minOs||1)}.0+ · ${p.cooldown?`${p.cooldown/1000} сек cooldown`:'без cooldown'}</small><small class="text-blue">${esc(p.effect)}</small></div><div class="list-actions">${`<button class="btn tiny ghost" data-action="plugin-docs" data-id="${p.id}">ПОДРОБНЕЕ</button>`}${installed?'<span class="badge green">INSTALLED</span>':locked?`<span class="badge gray">LVL ${p.requiredLevel}</span>`:osLocked?`<span class="badge gray">OS ${(p.minOs||1)}.0</span>`:!space?'<span class="badge red">NO SPACE</span>':bankLocked?'<span class="badge red">BANK LOCK</span>':`<button class="btn tiny" data-action="install-plugin" data-id="${p.id}" title="${esc(blocker)}">${p.price?'УСТАНОВИТЬ · '+fmt(p.price):'ДОБАВИТЬ'}</button>`}</div></div>`;
+  const installed=getInstalledPlugin(g,p.id);
+  const wip=typeof isPluginLocked==='function'&&isPluginLocked(p.id);
+  const osLocked=g.computer.os<(p.minOs||1),usage=getHardwareUsage(g),space=usage.used+p.storage<=usage.total,bankLocked=bankStatus(g).locked;
+  const blocker=wip?'На доработке':osLocked?`NULLBYTE OS ${(p.minOs||1)}.0`:!space?'Недостаточно места':bankLocked?'Банк заблокирован':'Готов к установке';
+  const status = wip
+    ? '<span class="badge gray">В ДОРАБОТКЕ</span>'
+    : installed
+      ? '<span class="badge green">INSTALLED</span>'
+      : osLocked ? `<span class="badge gray">OS ${(p.minOs||1)}.0</span>`
+      : !space ? '<span class="badge red">NO SPACE</span>'
+      : bankLocked ? '<span class="badge red">BANK LOCK</span>'
+      : `<button class="btn tiny" data-action="install-plugin" data-id="${p.id}" title="${esc(blocker)}">${p.price?'УСТАНОВИТЬ · '+fmt(p.price):'ДОБАВИТЬ'}</button>`;
+  return `<div class="list-row"><div class="list-main"><strong>${esc(p.name)} <span class="muted">v${esc(p.version)}</span></strong><small>${esc(p.category)} · ${esc(p.description)}<br>RAM ${p.ram} GB · ${p.storage} MB · ОС ${(p.minOs||1)}.0+ · ${p.cooldown?`${p.cooldown/1000} сек cooldown`:'без cooldown'}${wip?' · <b>WIP</b>':''}</small><small class="text-blue">${wip?'Закрыто до нового чек-листа. Логика сохранена.':esc(p.effect)}</small></div><div class="list-actions"><button class="btn tiny ghost" data-action="plugin-docs" data-id="${p.id}">ПОДРОБНЕЕ</button>${status}</div></div>`;
 }
 function renderForge(g) {
   const categories=[...new Set(PLUGINS.map(p=>p.category))];
   return `<div class="app-heading"><div><div class="eyebrow">NULFORGE / PACKAGE REPOSITORY</div><h2>NULForge</h2><p>Официальный каталог игровых пакетов NULLBYTE.</p></div><span class="badge">${g.computer.installedPlugins.length} INSTALLED</span></div>
-  <div class="notice">Плагины созданы разработчиком. Игрок может устанавливать и удалять готовые пакеты, но не создавать и не публиковать плагины.</div>
+  <div class="notice">Плагины созданы разработчиком. Сейчас web/mobile пакеты помечены «В ДОРАБОТКЕ» — run недоступен. Гейт по уровню снят.</div>
   ${categories.map(cat=>`<div class="panel section-gap"><div class="panel-title"><span>${esc(cat.toUpperCase())}</span><small>${PLUGINS.filter(p=>p.category===cat).length} PACKAGES</small></div><div class="list">${PLUGINS.filter(p=>p.category===cat).map(p=>renderPluginCard(g,p)).join('')}</div></div>`).join('')}`;
 }
 
@@ -961,6 +979,7 @@ function renderMissionGuide(m, g) {
 function renderBlackWire(g) {
   const now = Date.now();
   const boardLeft = typeof missionBoardTimer === 'function' ? missionBoardTimer(g, now) : 0;
+  const boardNotice = '<div class="notice warning section-gap">Контракты по сайтам и mobile закрыты на доработку. Новая ветка — после чек-листа.</div>';
   const boardMin = Math.floor(boardLeft / 60000);
   const boardSec = Math.floor((boardLeft % 60000) / 1000);
   const boardIds = new Set(g.intel?.boardIds || []);
@@ -1084,6 +1103,12 @@ async function animateWork(termId, pluginId) {
 }
 
 async function enterPlugin(termId, pluginId) {
+  if (isPluginLocked(pluginId)) {
+    termAdd(termId, `Плагин «${pluginId}» на доработке. Недоступен.`, 'error');
+    termAdd(termId, 'Сайтовый и текущий mobile-контур закрыты до нового чек-листа.', 'muted');
+    return;
+  }
+
   const term = getTerm(termId);
   if (!term) return;
   const p = getPlugin(pluginId) || PLUGINS.find(x => x.id === pluginId || x.name.toLowerCase() === pluginId.toLowerCase());
@@ -1120,8 +1145,16 @@ async function runTerminalCommand(termId, raw) {
   termAdd(termId, `${terminalPrompt(term)} ${cmd}`, 'prompt');
   term.scrollPin = true;
 
-  // —— SERVER SHELL (when connected) ——
+  // —— SERVER SHELL (when connected) —— locked while web ops WIP ——
   if (state.game.ops?.serverSession && !term.plugin) {
+    termAdd(termId, 'Серверная сессия на доработке. exit server.', 'error');
+    if (cmd.toLowerCase().includes('exit')) {
+      const r = runPluginShellCommand(state.game, 'sim-exploit', 'exit server');
+      for (const line of (r.lines||[])) termAdd(termId, line.text, line.type||'');
+    }
+    return;
+  }
+  if (false && state.game.ops?.serverSession && !term.plugin) {
     const sess = state.game.ops.serverSession;
     const lower = cmd.toLowerCase();
     const parts = cmd.split(/\s+/);
@@ -1322,9 +1355,9 @@ async function runTerminalCommand(termId, raw) {
     termAdd(termId, files.length ? files.map(f => `${f.name} (${f.size} KB)`).join('\n') : 'Пусто.');
   } else if (lower.startsWith('cat ')) {
     const f = [...state.game.computer.files, ...state.game.editor.files].find(x => x.name === cmd.slice(4).trim());
-    termAdd(termId, f ? String(f.content).slice(0, 1800) : 'Нет файла.', f ? '' : 'error');
+    termAdd(termId, f ? String(f.content) : 'Нет файла.', f ? '' : 'error');
   } else if (lower === 'mission list') {
-    termAdd(termId, state.game.missions.items.filter(m => ['accepted','submitted','available'].includes(m.status)).map(m => `${m.id} | ${m.status} | ${m.title}`).join('\n') || 'Нет.');
+    termAdd(termId, state.game.missions.items.filter(m => ['accepted','submitted','available'].includes(m.status) && isMissionVisible(m)).map(m => `${m.id} | ${m.status} | ${m.title}`).join('\n') || 'Контракты на доработке (сайты/телефоны).');
   } else if (lower === 'map') termAdd(termId, LOCATIONS.map(l => `${l.name}`).join('\n'));
   else if (lower === 'intel') {
     const intel = state.game.intel;
@@ -1410,21 +1443,92 @@ function renderFbi() {
   </div>`;
 }
 
+
+function renderPhoneLab(g) {
+  const pw = g.phoneWorld || {};
+  const net = pw.network;
+  const activeId = state._phoneTarget || Object.keys(pw.access||{}).find(k => pw.access[k]?.level) || null;
+  let phone = null;
+  try { if (activeId && typeof findPhone === 'function') phone = findPhone(activeId, g.meta?.seed||'nb'); } catch(e) {}
+  const discovered = Object.keys(pw.discovered||{});
+  const discList = discovered.slice(0, 24).map(id => `<button type="button" class="btn tiny ghost" data-action="phone-lab-open" data-id="${esc(id)}">${esc(id)}</button>`).join(' ') || '<span class="muted">Пока пусто — сделай net-analyzer</span>';
+  let body = '<div class="empty-state"><b>Нет активного телефона</b><p>Terminal: phone-access → open PHONE_ID или выбери discovered ниже.</p></div>';
+  if (phone) {
+    const msgs = (typeof phoneMessages === 'function' ? phoneMessages(phone, g.meta?.seed||'nb') : []).slice(0,5);
+    const gal = (typeof phoneGallery === 'function' ? phoneGallery(phone, g.meta?.seed||'nb') : []);
+    body = `<div class="phone-frame">
+      <div class="phone-screen">
+        <div class="phone-status">${esc(phone.model)} · ${esc(phone.os)}</div>
+        <div class="phone-owner"><b>${esc(phone.ownerName)}</b><small>${esc(phone.ownerType)} · ${esc(phone.id)}</small></div>
+        <div class="phone-num muted">${esc(phone.number)}</div>
+        <div class="phone-section"><b>Сообщения</b>${msgs.map(m=>`<div class="phone-msg"><span>${esc(m.from)}</span><p>${esc(m.text)}</p></div>`).join('')}</div>
+        <div class="phone-section"><b>Галерея</b><div class="phone-gal">${gal.map(x=>`<div class="phone-thumb">${esc(x.title)}</div>`).join('')}</div></div>
+        <div class="btn-row section-gap">
+          <button type="button" class="btn tiny" data-action="phone-lab-lock" data-id="${esc(phone.id)}">Lock 30м</button>
+          <button type="button" class="btn tiny ghost" data-action="copy-text" data-text="${esc(phone.id)}">Copy ID</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  return `<div class="app-heading"><div><div class="eyebrow">PHONE LAB</div><h2>Телефон</h2><p>Визуальное исследование · данные те же, что в phone-control</p></div><span class="badge">${discovered.length} ID</span></div>
+  <div class="kv"><span>Сеть</span><b>${net ? esc(net.regionId)+' · '+esc(net.netKey) : 'не подключено'}</b></div>
+  <div class="panel section-gap"><div class="panel-title"><span>DISCOVERED</span></div><div style="display:flex;flex-wrap:wrap;gap:6px">${discList}</div></div>
+  <div class="section-gap">${body}</div>
+  <p class="muted small">Сессия не сохраняется между перезапусками; discovered / файлы / lock — да.</p>`;
+}
+
+function renderIntel(g) {
+  const intel = g.intel || {};
+  const doms = Object.values(intel.domains||{}).slice(0,12);
+  const ev = (g.events?.active||[]);
+  const ph = Object.keys(g.phoneWorld?.discovered||{});
+  return `<div class="app-heading"><div><div class="eyebrow">INTEL FEED</div><h2>Intel</h2><p>Разведка, discovered PHONE_ID, события мира</p></div><span class="badge">LIVE</span></div>
+  <div class="grid-3">
+    <div class="stat-box"><span>DOMAINS</span><strong>${doms.length}</strong></div>
+    <div class="stat-box"><span>PHONES</span><strong>${ph.length}</strong></div>
+    <div class="stat-box"><span>EVENTS</span><strong>${ev.length}</strong></div>
+  </div>
+  <div class="panel section-gap"><div class="panel-title"><span>СОБЫТИЯ</span></div>
+    ${ev.length?ev.map(e=>`<div class="list-row"><div class="list-main"><strong>${esc(e.title)}</strong><small>${esc(e.body)}</small></div></div>`).join(''):'<div class="muted">Нет активных</div>'}
+  </div>
+  <div class="panel section-gap"><div class="panel-title"><span>PHONE_ID</span></div>
+    <div class="muted small" style="word-break:break-all">${ph.slice(0,40).map(esc).join(', ')||'—'}</div>
+  </div>
+  <div class="panel section-gap"><div class="panel-title"><span>DOMAINS</span></div>
+    ${doms.map(d=>`<div class="list-row"><div class="list-main"><strong>${esc(d.domain||d.id)}</strong><small>${esc(d.kind||'')}</small></div></div>`).join('')||'<div class="muted">Пусто</div>'}
+  </div>`;
+}
+
 function renderHelp() {
-  const sections=[
-    ['Игровой цикл','Browser → домен. Terminal: run site-analyzer / цепочка плагинов. intel — база разведки. N-Mail — сдача. Авто/прочие устройства: LOCKED.'],,
-    ['Terminal','Только команды help, info, whoami, status, date, uptime, plugins, pkg list, plugin info NAME, ls, cat FILE, mission list и map. Команды ОС и произвольный код не исполняются.'],
-    ['Плагины','Установи базовые пакеты и докупай нужные в NULForge. Установка проверяет уровень, кредитный баланс, RAM и накопитель. Плагины нельзя создавать или публиковать.'],
-    ['Браузер и карта','Browser открывает только домены .null и сайты из личного мира. NullAtlas показывает вымышленный город и расписания NPC. Реальные адреса, GPS и внешние сайты не используются.'],
-    ['Симуляция операций','Анализ → декодирование → обнаружение виртуального узла → поиск слабости → симулируемый доступ → экспорт. Защита сайта может усилиться; позже цель восстановится. Все этапы — игровые проверки.'],
-    ['NBS / IDE','С уровня 5 доступны виртуальные файлы .nbs. Разрешены только декларации MISSION, TARGET, ANALYZE, DECODE, DISCOVER, VERIFY, SIMULATE, EXPORT и DELIVER. Нет shell, сети, SQL, eval или API.'],
-    ['Плагины','В NULForge у каждого инструмента есть документация. В Terminal: plugin info <id>. Phone Call: run phone-call → call / ask.'],
-    ['Банк и риски','Aster Bank хранит только игровые кредиты. Эндгейм-симуляция доступна с уровня 8 при наличии дорогих плагинов. Провал конфискует кредиты и блокирует банк на 24 часа реального времени.'],
-    ['Сохранение','Прогресс сохраняется автоматически. В Telegram используется CloudStorage с разбивкой больших данных на части; вне Telegram — локальное хранилище браузера. Очистка данных браузера может удалить локальный прогресс.']
+  const g = state.game;
+  const sections = [
+    ['Обзор NULLBYTE', 'Одиночная симуляция хакерской жизни в вымышленном городе Нулл-Сити. Все сети, телефоны, серверы, почта и банки — игровые. Нет доступа к реальным устройствам, SMS, сайтам или API.'],
+    ['Что исследовать', '1) Региональные сети и телефоны (PHONE_ID). 2) Виртуальные сайты .null (сейчас web-цепочка на доработке). 3) Серверы и Intel. 4) Контракты BlackWire. 5) Случайные события мира.'],
+    ['Регионы и сеть', 'NullAtlas: 6 регионов (Бейшор-Хайтс, Мидтаун-Спайн, Айронрич, Саутгейт, Окридж, Шэдоулайн). Terminal: run net-link → list → connect <region_id>. Подключение только внутриигровое.'],
+    ['Анализ сети', 'run net-analyzer → scan (~анализ) → save <имя>. Полный отчёт содержит все ~550 PHONE_ID региона. Не обрезается. Ищи нужный ID сам (поиск в Files / IDE).'],
+    ['Телефоны PHONE_ID', 'Идентификатор формата PH-XXXX-0000. open через phone-access. Затем phone-control: msgs, calls, contacts, gallery, save msgs|gallery <имя>, call, sms, lock (30 мин), disconnect. Сессии взлома не сохраняются — прогресс (файлы, discovered) сохраняется.'],
+    ['Альтернатива: Mail Drop', 'run mail-drop → craft → save файл → N-Mail вложение NPC. Движок считает шанс/задержку открытия. При успехе в почте приходит PHONE_ID.'],
+    ['Плагины mobile', 'Бесплатно: net-link, net-analyzer, phone-access, phone-control, mail-drop. Платно: sms-bomber 40000 CR, bank-peek 100000 CR. Старые mobile-модули удалены.'],
+    ['Сайты (WIP)', 'Web-плагины в NULForge помечены «В доработке». Логика сохранена, run закрыт до отдельного чек-листа.'],
+    ['Terminal', 'help | plugins | run <id> | files | ls | cat | mission list | intel | map. В плагине: help, exit. Неизвестная команда — сразу ошибка без фейковой загрузки.'],
+    ['Files и IDE', 'Files — список и просмотр. IDE — вкладки, правка, поиск, сохранение виртуальных файлов. Нет доступа к файловой системе устройства.'],
+    ['N-Mail / BlackWire', 'Почта для писем и сдачи. Контракты по сайтам временно скрыты; phone-ветка расширяется.'],
+    ['События', 'Движок сам создаёт редкие события (инфра / социал / security / rare). Они меняют доступность и иногда кладут артефакт в Files. Пропуск не ломает основной прогресс.'],
+    ['Уровни и экономика', 'Уровень растёт только от XP, потолка практически нет. Гейт плагинов по уровню снят. CR — только игровые.'],
+    ['Сохранение', 'Telegram CloudStorage (чанки) + local fallback. Ник вводится один раз. migrateSave не затирает ops/phoneWorld/events.'],
+    ['Частые ошибки', '«Плагин на доработке» — web/legacy. «Сначала connect» — нет сети. «PHONE_ID не найден» — проверь формат из отчёта. Файлы смотри в Files, не жди автоподсветки ID.']
   ];
-  return `<div class="app-heading"><div><div class="eyebrow">NULLBYTE KNOWLEDGE BASE</div><h2>Help / Docs</h2><p>Справка по механикам одиночной симуляции.</p></div><span class="badge green">RU DOCS</span></div>
-  <div class="notice warning">Термины «IP», «уязвимость», «эксплойт», «вирус» и «шифрование» здесь обозначают только игровые сущности. Игра не учит реальному проникновению в системы.</div>
-  ${sections.map((s,i)=>`<div class="panel section-gap"><div class="panel-title"><span>${String(i+1).padStart(2,'0')} / ${esc(s[0].toUpperCase())}</span></div><div class="muted small" style="line-height:1.75">${esc(s[1])}</div></div>`).join('')}`;
+  const plugs = (typeof PLUGINS !== 'undefined' ? PLUGINS : []).map(p => {
+    const lock = typeof isPluginLocked === 'function' && isPluginLocked(p.id);
+    return `<div class="list-row"><div class="list-main"><strong>${esc(p.name)}</strong><small>${esc(p.category)} · ${lock ? 'WIP' : 'OK'} · ${esc(p.description)}</small></div>
+      <button class="btn tiny ghost" data-action="plugin-docs" data-id="${p.id}">ПОДРОБНЕЕ</button></div>`;
+  }).join('');
+  const ev = (g?.events?.active || []).map(e => `<div class="list-row"><div class="list-main"><strong>${esc(e.title)}</strong><small>${esc(e.body)}</small></div></div>`).join('') || '<div class="muted small">Активных событий нет</div>';
+  return `<div class="app-heading"><div><div class="eyebrow">NULLBYTE KNOWLEDGE BASE</div><h2>Help / Docs</h2><p>Полное руководство: что исследовать, как брать ID, какие инструменты.</p></div><span class="badge green">RU</span></div>
+  <div class="notice warning">Все термины «взлом», «сеть», «SMS» — только симуляция.</div>
+  ${sections.map((s,i)=>`<div class="panel section-gap"><div class="panel-title"><span>${String(i+1).padStart(2,'0')} / ${esc(s[0].toUpperCase())}</span></div><div class="muted small" style="line-height:1.75">${esc(s[1])}</div></div>`).join('')}
+  <div class="panel section-gap"><div class="panel-title"><span>ПЛАГИНЫ</span></div><div class="list">${plugs}</div></div>
+  <div class="panel section-gap"><div class="panel-title"><span>СОБЫТИЯ СЕЙЧАС</span></div>${ev}</div>`;
 }
 
 function highlightNbs(source) {
@@ -1448,26 +1552,54 @@ function nbsTemplate() {
   return `# NULLBYTE Script — безопасная игровая декларация\nMISSION "${mission.id}"\nTARGET "${mission.target}"\nANALYZE target\nDECODE artifact "sealed-record"\nDISCOVER node\nVERIFY requirement "weakness-found"\nSIMULATE access\n${mission.target==='civic-records'?'READ virtual-records\n':''}EXPORT dataset "${mission.id}-result"\nDELIVER mail "${mission.id}"`;
 }
 function renderIde(g) {
-  const locked=g.player.level<5;
-  const fileForge=getInstalledPlugin(g,'file-forge');
-  const files=g.editor.files;
-  if(!state.editorText)state.editorText=nbsTemplate();
-  const activeName=`${state.editorName}.nbs`;
-  const tabs=`<button class="ide-tab active" type="button" data-action="ide-new">${esc(activeName)}</button>${files.map(f=>`<button class="ide-tab ${f.name===activeName?'active':''}" type="button" data-action="editor-open" data-id="${esc(f.id)}">${esc(f.name)}</button>`).join('')}`;
-  return `<div class="app-heading"><div><div class="eyebrow">NULLBYTE SCRIPT / EDITOR</div><h2>NBS IDE</h2><p>Ограниченный декларативный язык игровой симуляции.</p></div><span class="badge ${locked?'gray':'green'}">${locked?'LOCKED':'UNLOCKED'}</span></div>
-  ${locked?`<div class="notice warning">Создание и запуск собственных NBS-сценариев открывается на уровне 5. Осталось ${currentLevelNeed()} XP.</div>`:''}
-  ${!locked&&!fileForge?`<div class="notice warning section-gap">Для сохранения собственных файлов установи <b>File Forge</b> в NULForge. Проверка и запуск шаблонов уже доступны.</div>`:''}
-  <div class="panel section-gap"><div class="panel-title"><span>WORKSPACE / .NBS</span><small>NO GENERAL-PURPOSE CODE</small></div>
-  <div class="ide-tabs">${tabs}</div>
-  <label class="field-label" for="nbsFileName">ИМЯ ФАЙЛА</label><input class="field" id="nbsFileName" value="${esc(state.editorName)}" ${locked?'disabled':''}>
-  <label class="field-label" for="nbsEditor">СОДЕРЖИМОЕ</label>
-  <div class="ide-editor-wrap"><pre id="nbsHighlight" class="ide-highlight" aria-hidden="true">${highlightNbs(state.editorText)}</pre><textarea class="ide-editor" id="nbsEditor" spellcheck="false" autocapitalize="off" ${locked?'disabled':''}>${esc(state.editorText)}</textarea></div>
-  <div class="ide-tools section-gap"><div class="ide-search"><input class="field" id="nbsSearch" placeholder="Найти в сценарии…" aria-label="Поиск по сценарию"><button class="btn tiny ghost" data-action="ide-find">НАЙТИ</button></div>
-  <div class="btn-row"><button class="btn tiny ghost" data-action="ide-copy" ${locked?'disabled':''}>КОПИРОВАТЬ</button><button class="btn tiny ghost" data-action="ide-clear" ${locked?'disabled':''}>ОЧИСТИТЬ</button><button class="btn tiny ghost" data-action="nbs-template" ${locked?'disabled':''}>ШАБЛОН</button><button class="btn tiny ghost" data-action="nbs-validate">ПРОВЕРИТЬ</button><button class="btn tiny" data-action="nbs-save" ${locked||!fileForge?'disabled':''}>СОХРАНИТЬ</button><button class="btn tiny primary" data-action="nbs-run" ${locked?'disabled':''}>ЗАПУСТИТЬ</button></div></div>
-  <div class="ide-output section-gap" id="nbsOutput">${esc(state.nbsOutput)}</div></div>
-  <div class="panel section-gap"><div class="panel-title"><span>МОИ NBS-ФАЙЛЫ</span><small>${files.length} FILES</small></div>${files.length?`<div class="list">${files.map(f=>`<div class="list-row"><div class="list-main"><strong>${esc(f.name)}</strong><small>${f.size} KB · ${formatDate(f.updatedAt)}</small></div><div class="list-actions"><button class="btn tiny ghost" data-action="editor-open" data-id="${esc(f.id)}">ОТКРЫТЬ</button><button class="btn tiny danger" data-action="editor-delete" data-id="${esc(f.id)}">×</button></div></div>`).join('')}</div>`:'<div class="empty-state"><b>Пользовательских сценариев нет</b><p>Файлы сохраняются на виртуальный накопитель и занимают место.</p></div>'}</div>
-  <div class="notice section-gap">NBS принимает только зарегистрированные команды MISSION, TARGET, ANALYZE, DECODE, DISCOVER, VERIFY, READ, SIMULATE, EXPORT и DELIVER. Нет shell, SQL, сети, eval или доступа к файлам устройства.</div>`;
+  if (!state.ide) state.ide = { tabs: [], active: 0, find: '', replace: '', dirty: {} };
+  const files = [...(g.computer.files||[]), ...(g.editor.files||[])];
+  if (!state.ide.tabs.length && files[0]) {
+    state.ide.tabs = [{ id: files[0].id, name: files[0].name }];
+    state.ide.active = 0;
+  }
+  const tab = state.ide.tabs[state.ide.active];
+  const file = tab ? files.find(f => f.id === tab.id || f.name === tab.name) : null;
+  const content = file ? String(file.content || '') : (state.editorText || '');
+  const lines = content.split('\n');
+  const lineNos = lines.map((_, i) => i + 1).join('\n');
+  const tabsHtml = state.ide.tabs.map((t, idx) => {
+    const dirty = state.ide.dirty[t.id] ? '•' : '';
+    return `<button type="button" class="ide-tab ${idx===state.ide.active?'on':''}" data-action="ide-tab" data-idx="${idx}">${esc(t.name)}${dirty}</button>`;
+  }).join('') || '<span class="muted small">Нет вкладок</span>';
+  const list = files.slice(0, 40).map(f => `<button type="button" class="list-row" data-action="ide-open" data-id="${esc(f.id)}"><div class="list-main"><strong>${esc(f.name)}</strong><small>${esc(f.type||'file')} · ${String(f.content||'').length} ch</small></div></button>`).join('') || '<div class="muted">Файлов нет</div>';
+  return `<div class="app-heading"><div><div class="eyebrow">VIRTUAL IDE</div><h2>NBS IDE / Editor</h2><p>Виртуальные файлы · вкладки · поиск · без доступа к диску устройства</p></div><span class="badge">IDE</span></div>
+  <div class="ide-layout section-gap">
+    <div class="panel ide-sidebar" style="max-height:min(520px,60vh);overflow:auto;padding:8px">${list}</div>
+    <div class="ide-main">
+      <div class="ide-tabs btn-row" style="flex-wrap:wrap;gap:4px">${tabsHtml}
+        <button type="button" class="btn tiny ghost" data-action="ide-new">+ файл</button>
+      </div>
+      <div class="ide-toolbar btn-row section-gap">
+        <button type="button" class="btn tiny" data-action="ide-save">Сохранить</button>
+        <button type="button" class="btn tiny ghost" data-action="ide-copy">Копировать всё</button>
+        <button type="button" class="btn tiny ghost" data-action="ide-find">Найти</button>
+        <button type="button" class="btn tiny danger" data-action="ide-delete" ${file?'':'disabled'}>Удалить файл</button>
+      </div>
+      <div class="ide-find row section-gap" style="display:flex;gap:6px;flex-wrap:wrap">
+        <input class="field" id="ideFind" placeholder="Найти" value="${esc(state.ide.find||'')}" style="flex:1;min-width:120px">
+        <input class="field" id="ideReplace" placeholder="Заменить" value="${esc(state.ide.replace||'')}" style="flex:1;min-width:120px">
+        <button type="button" class="btn tiny" data-action="ide-replace-one">Заменить</button>
+        <button type="button" class="btn tiny ghost" data-action="ide-replace-all">Все</button>
+      </div>
+      <div class="ide-editor-wrap" style="display:flex;border:1px solid #2a3a48;border-radius:8px;overflow:hidden;min-height:280px;background:#0a1016">
+        <pre class="ide-gutter muted" style="margin:0;padding:10px 8px;text-align:right;user-select:none;font-size:11px;line-height:1.45;border-right:1px solid #1e2a33;min-width:36px">${lineNos || '1'}</pre>
+        <textarea id="ideBody" class="ide-body field" style="flex:1;border:none;border-radius:0;min-height:280px;font-size:11px;line-height:1.45;resize:vertical;background:#0a1016" spellcheck="false">${esc(content)}</textarea>
+      </div>
+      <div class="muted small section-gap">Символов: ${content.length} · ${file ? esc(file.name) : 'новый'} · ${state.ide.dirty[file?.id] ? 'есть изменения' : 'сохранено'}</div>
+      <div class="panel section-gap"><div class="panel-title"><span>NBS RUN (с 5 ур.)</span></div>
+        <div class="btn-row"><button type="button" class="btn tiny" data-action="nbs-run">Выполнить NBS</button></div>
+        <pre class="muted small" style="white-space:pre-wrap">${esc(state.nbsOutput||'')}</pre>
+      </div>
+    </div>
+  </div>`;
 }
+
 
 function actionResult(result) {
   if(!result)return;
@@ -1548,6 +1680,86 @@ function handleAction(action,el) {
       if(navigator.clipboard?.writeText) navigator.clipboard.writeText(t).then(()=>toast('Скопировано','success')).catch(()=>toast(t,'info'));
       else toast(t,'info');
       break;
+    }
+    case 'ide-open':{
+      const f=[...(state.game.computer.files||[]),...(state.game.editor.files||[])].find(x=>x.id===id);
+      if(!f) break;
+      if(!state.ide) state.ide={tabs:[],active:0,find:'',replace:'',dirty:{}};
+      let idx=state.ide.tabs.findIndex(t=>t.id===f.id);
+      if(idx<0){ state.ide.tabs.push({id:f.id,name:f.name}); idx=state.ide.tabs.length-1; }
+      state.ide.active=idx; renderWindow('ide'); break;
+    }
+    case 'ide-tab':{
+      const idx=parseInt(el.dataset.idx,10);
+      // flush textarea to dirty buffer
+      const body=$('ideBody');
+      if(body && state.ide?.tabs[state.ide.active]){
+        const t=state.ide.tabs[state.ide.active];
+        const f=state.game.computer.files.find(x=>x.id===t.id);
+        if(f && body.value!==f.content){ state.ide.dirty[t.id]=true; state._ideBuf=state._ideBuf||{}; state._ideBuf[t.id]=body.value; }
+      }
+      if(!isNaN(idx)) state.ide.active=idx; renderWindow('ide'); break;
+    }
+    case 'ide-save':{
+      const body=$('ideBody'); if(!body||!state.ide?.tabs?.length) break;
+      const t=state.ide.tabs[state.ide.active];
+      let f=state.game.computer.files.find(x=>x.id===t.id);
+      if(!f){ f={id:'file_ide_'+Date.now().toString(36),name:t.name||'note.txt',type:'text',path:'/ide/',createdAt:Date.now(),content:''}; state.game.computer.files.unshift(f); t.id=f.id; }
+      f.content=body.value; f.size=Math.max(1,Math.ceil(f.content.length/1024));
+      state.ide.dirty[t.id]=false; scheduleSave(); toast('Сохранено','success'); renderWindow('ide'); break;
+    }
+    case 'ide-copy':{
+      const body=$('ideBody');
+      if(body&&navigator.clipboard?.writeText) navigator.clipboard.writeText(body.value).then(()=>toast('Скопировано','success'));
+      break;
+    }
+    case 'ide-new':{
+      if(!state.ide) state.ide={tabs:[],active:0,find:'',replace:'',dirty:{}};
+      const name=`note_${Date.now().toString(36)}.txt`;
+      const f={id:'file_ide_'+Date.now().toString(36),name,type:'text',content:'',path:'/ide/',createdAt:Date.now(),size:1};
+      state.game.computer.files.unshift(f);
+      state.ide.tabs.push({id:f.id,name}); state.ide.active=state.ide.tabs.length-1;
+      scheduleSave(); renderWindow('ide'); break;
+    }
+    case 'ide-delete':{
+      const t=state.ide?.tabs?.[state.ide.active]; if(!t) break;
+      state.game.computer.files=state.game.computer.files.filter(x=>x.id!==t.id);
+      state.ide.tabs.splice(state.ide.active,1); state.ide.active=Math.max(0,state.ide.active-1);
+      scheduleSave(); renderWindow('ide'); break;
+    }
+    case 'ide-replace-one':{
+      const body=$('ideBody'); const find=$('ideFind')?.value||''; const rep=$('ideReplace')?.value||'';
+      if(body&&find){ const i=body.value.indexOf(find); if(i>=0){ body.value=body.value.slice(0,i)+rep+body.value.slice(i+find.length); toast('Заменено','success'); } else toast('Не найдено','info'); }
+      break;
+    }
+    case 'ide-replace-all':{
+      const body=$('ideBody'); const find=$('ideFind')?.value||''; const rep=$('ideReplace')?.value||'';
+      if(body&&find){ const c=(body.value.split(find).length-1); body.value=body.value.split(find).join(rep); toast('Замен: '+c,'success'); }
+      break;
+    }
+    case 'ide-find':{
+      const body=$('ideBody'); const find=$('ideFind')?.value||'';
+      if(body&&find){ const i=body.value.indexOf(find); toast(i>=0?('Позиция '+i):'Не найдено', i>=0?'success':'info'); }
+      break;
+    }
+    case 'nbs-run':{
+      const body=$('ideBody'); if(body) state.editorText=body.value;
+      const result=runNbs(state.game, state.editorText||'');
+      state.nbsOutput=(result.output||[]).join('\n')||result.reason||'';
+      toast(result.ok?'NBS OK':'NBS ошибка', result.ok?'success':'error');
+      renderWindow('ide'); scheduleSave(); break;
+    }
+    case 'phone-lab-open':{
+      state._phoneTarget = id;
+      if(!state.game.phoneWorld) state.game.phoneWorld={access:{},discovered:{}};
+      state.game.phoneWorld.access[id]={level:'user',at:Date.now()};
+      state.game.phoneWorld.discovered[id]=true;
+      renderWindow('phone'); break;
+    }
+    case 'phone-lab-lock':{
+      if(typeof lockPhone==='function') lockPhone(state.game, id, 30);
+      else if(state.game.phoneWorld){ state.game.phoneWorld.access[id]={...(state.game.phoneWorld.access[id]||{}), blockedUntil:Date.now()+30*60*1000}; }
+      toast('Lock 30м','success'); scheduleSave(); renderWindow('phone'); break;
     }
     case 'open-app':$('startMenu').hidden=true;$('startButton').setAttribute('aria-expanded','false');openApp(app);break;
     case 'close-window':closeWindow(el.closest('.app-window')?.dataset.window);break;
@@ -1784,6 +1996,21 @@ document.addEventListener('submit',event=>{
       id:'mail_'+Date.now().toString(36), direction:'out', from:state.game.player.nickname, to, subject, body,
       at:Date.now(), attachments:attach?[attach]:[], status:'sent'
     });
+    if(attach){
+      const f=(state.game.computer.files||[]).find(x=>x.id===attach);
+      if(f && (f.type==='mail-drop' || /drop|payload/i.test(f.name))){
+        if(!state.game.mail.pendingDrops) state.game.mail.pendingDrops=[];
+        const seed = Date.now() % 100000;
+        state.game.mail.pendingDrops.push({
+          fileId: f.id, npcName: to, openAt: Date.now() + (15000 + seed % 45000),
+          chance: 40 + (seed % 30), seed, opened: false,
+          phoneId: null, ownerName: null, number: null
+        });
+        // assign random phone from bayshore for reveal
+        const phList = (typeof listRegionPhones==='function') ? listRegionPhones('bayshore') : null;
+        if(phList){ const ph=phList[seed % 550]; const last=state.game.mail.pendingDrops.at(-1); last.phoneId=ph.id; last.ownerName=ph.ownerName; last.number=ph.number; }
+      }
+    }
     scheduleSave(); toast('Письмо отправлено (внутриигровое)','success'); renderWindow('mail');
     return;
   }

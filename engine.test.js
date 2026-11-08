@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   createInitialState, validNickname, migrateSave, purchasePlugin, buyHardware,
   acceptMission, operateSite, exportMissionResult, submitMission, processTimedEvents,
-  bankStatus, bankRisk, validateNbs, runNbs, getHardwareUsage, saveEditorFile, BALANCE
+  bankStatus, bankRisk, validateNbs, runNbs, getHardwareUsage, saveEditorFile, BALANCE, runPluginShellCommand
 } from './engine.js';
 
 test('nickname accepts only 2–12 Latin letters and digits',()=>{
@@ -277,4 +277,36 @@ test('NBS can execute a partial analysis without prematurely exporting or delive
   assert.equal(s.world.progress['volt-market'].analyzed,true);
   assert.equal(s.world.progress['volt-market'].exported,false);
   assert.equal(s.computer.files.length,0);
+});
+
+import { listRegionPhones, findPhone, PHONES_PER_REGION, makePhoneId } from './phones.js';
+import { processWorldEvents, createEmptyEvents } from './events.js';
+
+test('phone registry size and stable ids', () => {
+  const a = listRegionPhones('bayshore');
+  const b = listRegionPhones('bayshore');
+  assert.equal(a.length, PHONES_PER_REGION);
+  assert.equal(a[0].id, b[0].id);
+  assert.equal(a[0].id, makePhoneId('bayshore', 0));
+  assert.ok(findPhone(a[42].id));
+});
+
+test('network report is large and complete', () => {
+  const s = createInitialState();
+  s.player.nickname = 'T';
+  const c = runPluginShellCommand(s, 'net-link', 'connect bayshore');
+  assert.equal(c.ok, true);
+  const r = runPluginShellCommand(s, 'net-analyzer', 'scan');
+  assert.equal(r.ok, true);
+  assert.ok(r.pendingSave.content.length > 20000);
+  assert.ok(r.pendingSave.content.includes('PH-BAYS-0000'));
+  assert.ok(r.pendingSave.content.includes('PH-BAYS-0549'));
+});
+
+test('ops migration keeps regionAccess', () => {
+  const s = createInitialState();
+  s.ops.regionAccess = { bayshore: { key: 'NET-BAYSHORE', at: 1 } };
+  const raw = JSON.parse(JSON.stringify(s));
+  const m = migrateSave(raw);
+  assert.ok(m.state.ops.regionAccess?.bayshore);
 });

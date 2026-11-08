@@ -4,10 +4,20 @@ import { createEmptyNpcWorld, migrateNpcWorld, getNpc, touchNpc, bankLogin, getB
 // tickNpcCommerce imported via npc named exports below
 import { createEmptyOpsState, migrateOps, processPaymentLinkRestores, buildServerIndex, extractTarget, createArchive, signalMapRegion, grantRegionKey, hijackPaymentLink, recoveryMsForSecurity, REGIONS, MOBILE_PLUGIN_META, extendedPluginDocs } from './operations.js';
 import { npcReply, openingLine, moneyDialogue, dialogueStats, getTrust } from './dialogue.js';
+import { PHONE_REGIONS, PHONES_PER_REGION, createEmptyPhoneWorld, migratePhoneWorld, generatePhone, listRegionPhones, findPhone, buildNetworkReport, connectNetwork, analyzeNetwork, accessPhone, lockPhone, phoneMessages, phoneContacts, phoneGallery, phoneCallLog, makePhoneId } from './phones.js';
+import { createEmptyEvents, migrateEvents, processWorldEvents, listActiveEvents } from './events.js';
 export const SAVE_VERSION = 1;
+export const PHONE_JOBS = [
+  {id:'phone-001',title:'Список контактов',client:'Mira Voss',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:180,xp:40,objective:'Подключись к сети региона, сохрани отчёт и выгрузи contacts одного PHONE_ID.',hint:'net-link → net-analyzer → phone-access → phone-control contacts',requiredPlugins:['net-link','net-analyzer','phone-access','phone-control']},
+  {id:'phone-002',title:'Снимок переписки',client:'Harbor Desk',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:220,xp:50,objective:'Сохрани msgs выбранного телефона в файл и сдай через N-Mail.',hint:'phone-control → save msgs <имя>',requiredPlugins:['phone-control']},
+  {id:'phone-003',title:'Звонок от имени',client:'Null Courier',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:320,xp:70,objective:'Открой телефон и выполни call от имени владельца.',hint:'phone-control call <имя>',requiredPlugins:['phone-access','phone-control']},
+  {id:'phone-004',title:'Галерея для заказа',client:'Green Mart',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:280,xp:60,objective:'Экспортируй gallery телефона в файл.',hint:'save gallery <имя>',requiredPlugins:['phone-control']},
+  {id:'phone-005',title:'Блокировка на полчаса',client:'Shadowline Ops',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:350,xp:80,objective:'Заблокируй целевой телефон на 30 минут (sim lock).',hint:'phone-control lock',requiredPlugins:['phone-control']},
+];
+
 export const BALANCE = {
   creditsStart: 650,
-  maxLevel: 10,
+  maxLevel: 9999,
   xpToLevel: [0, 100, 260, 480, 760, 1100, 1500, 1960, 2480, 3060, 3700],
   verificationDelayMs: 5500,
   siteRecoveryBaseMs: 5 * 60 * 1000,
@@ -19,8 +29,14 @@ export const BALANCE = {
 };
 
 export const PLUGINS = [
-  ...MOBILE_PLUGIN_META.filter(p=>p.id!=='phone-call'),
-  { id:'phone-call', name:'Phone Call', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:2, minOs:1, ram:1, storage:80, cooldown:0, description:'Звонок с доступного виртуального телефона NPC.', effect:'Диалог и просьбы о переводе.', starter:true },
+  
+  { id:'net-link', name:'Net Link', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:40, cooldown:0, description:'Подключение терминала к региональной сети (15с).', effect:'Текущая сеть региона.', starter:true },
+  { id:'net-analyzer', name:'Net Analyzer', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:80, cooldown:0, description:'Анализ региональной сети (~20с) и полный отчёт PHONE_ID.', effect:'Отчёт 550 устройств/регион.', starter:true },
+  { id:'phone-access', name:'Phone Access', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:100, cooldown:0, description:'Доступ к телефону по PHONE_ID.', effect:'Сессия исследования телефона.', starter:true },
+  { id:'phone-control', name:'Phone Control', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:120, cooldown:0, description:'Звонки, SMS, журналы, галерея, блок 30 мин.', effect:'Управление виртуальным телефоном.', starter:true },
+  { id:'mail-drop', name:'Mail Drop', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:60, cooldown:0, description:'Вложение для NPC через N-Mail (альтернативный путь).', effect:'Шанс раскрытия PHONE_ID.', starter:true },
+  { id:'sms-bomber', name:'SMS Bomber', category:'Mobile Operations', version:'1.0.0', price:40000, requiredLevel:1, minOs:1, ram:1, storage:40, cooldown:5000, description:'Игровая нагрузка SMS на виртуальный номер.', effect:'Симуляция спама.', starter:false },
+  { id:'bank-peek', name:'Bank Peek', category:'Mobile Operations', version:'1.0.0', price:100000, requiredLevel:1, minOs:1, ram:1, storage:80, cooldown:0, description:'Доступ к виртуальным банковским пометкам телефона.', effect:'Игровые bank notes.', starter:false },
 
   { id:'site-analyzer', name:'Site Analyzer', category:'Анализ сайтов', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:120, cooldown:0, description:'WEB RECON: DNS, fingerprint, surface, артефакты разведки.', effect:'Карта домена и SIGNATURE для pipeline.', starter:true },
   { id:'artifact-decoder', name:'Artifact Decoder', category:'Расшифровка', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:180, cooldown:0, description:'Преобразует условный игровой артефакт в подсказку.', effect:'Открывает шаг декодирования.', starter:true },
@@ -28,13 +44,13 @@ export const PLUGINS = [
   { id:'weakness-lab', name:'Weakness Lab', category:'Поиск игровых слабостей', version:'1.2.0', price:0, requiredLevel:1, minOs:1, ram:2, storage:420, cooldown:7000, description:'Проверяет абстрактную модель защиты цели.', effect:'Открывает условную слабость.', starter:true },
   { id:'sim-exploit', name:'Sim Exploit', category:'Симуляция доступа', version:'2.0.0', price:0, requiredLevel:1, minOs:1, ram:2, storage:650, cooldown:12000, description:'Выполняет безопасную игровую проверку шанса доступа.', effect:'Завершает этап проникновения в симуляции.', starter:true },
   { id:'data-exporter', name:'Data Exporter', category:'Экспорт', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:220, cooldown:0, description:'Создаёт файл с результатом внутриигровой операции.', effect:'Позволяет экспортировать результат контракта.', starter:true },
-  { id:'site-editor', name:'Site Editor', category:'Изменение сайта', version:'1.0.0', price:620, requiredLevel:4, ram:2, storage:380, cooldown:9000, description:'Меняет текст или виртуальную запись тестовой цели.', effect:'Открывает игровое изменение содержимого.',minOs:2 },
+  { id:'site-editor', name:'Site Editor', category:'Изменение сайта', version:'1.0.0', price:620, requiredLevel:1, ram:2, storage:380, cooldown:9000, description:'Меняет текст или виртуальную запись тестовой цели.', effect:'Открывает игровое изменение содержимого.',minOs:2 },
   { id:'db-reader', name:'Virtual DB Reader', category:'Виртуальные данные', version:'1.0.0', price:1900, requiredLevel:6, ram:3, storage:900, cooldown:15000, description:'Читает только записи собственной вымышленной базы.', effect:'Открывает высокоуровневые игровые записи.',minOs:3 },
   { id:'identity-mask', name:'Identity Veil', category:'Игровая маскировка', version:'1.0.0', price:3800, requiredLevel:7, ram:2, storage:700, cooldown:0, description:'Снижает условную заметность персонажа в модели мира.', effect:'Уменьшает симулируемый банковский риск.',minOs:3 },
   { id:'bank-decryptor', name:'Vault Decoder', category:'Банк / эндгейм', version:'1.0.0', price:5200, requiredLevel:8, ram:3, storage:1200, cooldown:0, description:'Редкий декриптор для финальной банковской миссии.', effect:'Необходим для рискованной игровой цели.',minOs:4 },
   { id:'obfuscator', name:'Trace Obfuscator', category:'Банк / эндгейм', version:'1.0.0', price:4600, requiredLevel:8, ram:2, storage:1000, cooldown:0, description:'Снижает риск виртуальной трассировки.', effect:'Необходим для рискованной игровой цели.',minOs:4 },
-  { id:'file-forge', name:'File Forge', category:'Создание файлов', version:'1.0.0', price:520, requiredLevel:5, ram:1, storage:300, cooldown:0, description:'Подготавливает виртуальные файлы и NBS-документы.', effect:'Разблокирует продвинутую работу с файлами.',minOs:2 },
-  { id:'map-scanner', name:'Atlas Scanner', category:'Карта / цели', version:'1.0.0', price:350, requiredLevel:2, ram:1, storage:250, cooldown:0, description:'Уточняет POI и игровые маршруты на NullAtlas.', effect:'Показывает расширенные подсказки карты.',minOs:1 }
+  { id:'file-forge', name:'File Forge', category:'Создание файлов', version:'1.0.0', price:520, requiredLevel:1, ram:1, storage:300, cooldown:0, description:'Подготавливает виртуальные файлы и NBS-документы.', effect:'Разблокирует продвинутую работу с файлами.',minOs:2 },
+  { id:'map-scanner', name:'Atlas Scanner', category:'Карта / цели', version:'1.0.0', price:350, requiredLevel:1, ram:1, storage:250, cooldown:0, description:'Уточняет POI и игровые маршруты на NullAtlas.', effect:'Показывает расширенные подсказки карты.',minOs:1 }
 ];
 
 export const HARDWARE = {
@@ -87,6 +103,23 @@ export const LOCATIONS = [
   {id:'shadowline',name:'Шэдоулайн',city:'Нулл-Сити',region:'Подсеть',x:72,y:68,pois:['cobalt-forum','dark-drop','null-chan'],netKey:'NET-SHADOW',ssid:'Shadow-Node'}
 ];
 
+
+
+/** Plugins closed until checklist/prompt — visible but not runnable */
+export const PLUGINS_LOCKED = new Set([
+  // Web / sites — still under construction
+  'site-analyzer','artifact-decoder','node-radar','weakness-lab','sim-exploit',
+  'data-exporter','site-editor','db-reader','identity-mask','bank-decryptor',
+  'obfuscator','file-forge','server-index','target-extractor','archive-exporter',
+  // Legacy mobile names (removed from catalog)
+  'device-scout','signal-mapper','mobile-decoder','mobile-access','mobile-forensics','map-scanner','phone-call'
+]);
+
+
+export function isPluginLocked(id) {
+  return PLUGINS_LOCKED.has(id);
+}
+
 const STARTER_CONTRACT_TOOLS=['site-analyzer','artifact-decoder','node-radar','weakness-lab','sim-exploit','data-exporter'];
 const DB_CONTRACT_TOOLS=[...STARTER_CONTRACT_TOOLS,'db-reader'];
 const MISSION_TEMPLATES = [
@@ -122,7 +155,7 @@ export function createInitialState(tgUser=null) {
     meta:{createdAt:now,updatedAt:now,seed:`nb-${now.toString(36)}`,migratedFrom:null},
     player:{nickname:'',telegramId:tgUser?.id ? String(tgUser.id) : '',level:1,xp:0,reputation:0,contractsCompleted:0,totalEarned:0},
     economy:{credits:BALANCE.creditsStart,transactions:[{id:'txn-starter',type:'income',amount:BALANCE.creditsStart,reason:'Стартовый грант оператора',at:now}]},
-    computer:{cpu:1,ram:1,gpu:1,storage:1,os:1,files:[],installedPlugins:['site-analyzer','artifact-decoder','node-radar','weakness-lab','sim-exploit','data-exporter'],uptimeStartedAt:now},
+    computer:{cpu:1,ram:1,gpu:1,storage:1,os:1,files:[],installedPlugins:['net-link','net-analyzer','phone-access','phone-control','mail-drop','site-analyzer','artifact-decoder','node-radar','weakness-lab','sim-exploit','data-exporter'],uptimeStartedAt:now},
     world:{sites:SITES.map(s=>({...s,state:'online',recoveryAt:0,defenseBoost:0,revision:1})),progress:{},npc:[
       {id:'npc-mira',name:'Mira Voss',role:'Клиент',device:'Pocket Mobile V2',address:'mira-pocket.pocketmobile.null',data:'Профиль виртуального телефона PM-22',location:'oldport',nextAt:now+20*60*1000},
       {id:'npc-eli',name:'Eli North',role:'Механик',device:'Garage Terminal',address:'eli-garage.neonmotors.null',data:'Сервисная карточка NM-88',location:'north',nextAt:now+35*60*1000},
@@ -141,7 +174,18 @@ export function createInitialState(tgUser=null) {
   };
   state0.intel = seedIntelFromSites(state0.world.sites, createEmptyIntel());
   state0.npcWorld = createEmptyNpcWorld();
+  // ensure phone contracts on board
+  if (typeof PHONE_JOBS !== 'undefined') {
+    for (const j of PHONE_JOBS) {
+      if (!state0.missions.items.some(x => x.id === j.id)) {
+        state0.missions.items.push({ ...j, status: j.minLevel <= 1 ? 'available' : 'locked' });
+      }
+    }
+  }
+
   state0.ops = createEmptyOpsState();
+  state0.phoneWorld = createEmptyPhoneWorld();
+  state0.events = createEmptyEvents();
   unlockMissions(state0);
   rotateMissionBoard(state0, Date.now(), true);
   return state0;
@@ -179,7 +223,14 @@ export function migrateSave(raw,tgUser=null) {
   out.intel=migrateIntel(raw.intel, out.world?.sites||fresh.world.sites);
   out.npcWorld=migrateNpcWorld(raw.npcWorld);
   out.ops=migrateOps(raw.ops);
-  out.ops={keys:Array.isArray(raw.ops?.keys)?raw.ops.keys.filter(k=>k&&typeof k==='object').slice(-40).map(k=>({id:String(k.id||'').slice(0,64),stage:String(k.stage||''),siteId:String(k.siteId||''),token:String(k.token||'').slice(0,80),createdAt:finite(k.createdAt),used:Boolean(k.used)})):[ ]};
+  out.phoneWorld=migratePhoneWorld(raw.phoneWorld);
+  out.events=migrateEvents(raw.events);
+  // Preserve all ops fields; only normalize keys array
+  const rawKeys = Array.isArray(raw.ops?.keys) ? raw.ops.keys : (out.ops.keys || []);
+  out.ops.keys = rawKeys.filter(k=>k&&typeof k==='object').slice(-40).map(k=>({
+    id:String(k.id||'').slice(0,64), stage:String(k.stage||''), siteId:String(k.siteId||''),
+    token:String(k.token||'').slice(0,80), createdAt:finite(k.createdAt), used:Boolean(k.used)
+  }));
   for (const key of ['files','installedPlugins']) if (!Array.isArray(out.computer[key])) out.computer[key]=fresh.computer[key];
   for (const key of ['transactions']) if (!Array.isArray(out.economy[key])) out.economy[key]=fresh.economy[key];
   if (!out.world || typeof out.world !== 'object' || Array.isArray(out.world)) out.world=fresh.world;
@@ -200,9 +251,9 @@ export function migrateSave(raw,tgUser=null) {
   if (!Array.isArray(out.mail.messages)) out.mail.messages=fresh.mail.messages;
   out.mail.messages=out.mail.messages.filter(m=>m&&typeof m==='object').slice(0,100).map(m=>({id:(String(m.id||idempotencyKey('mail')).replace(/[^A-Za-z0-9_-]/g,'').slice(0,80)||idempotencyKey('mail')),direction:m.direction==='out'?'out':'in',from:String(m.from||'NULLBYTE').slice(0,60),to:String(m.to||'operator').slice(0,60),subject:String(m.subject||'Без темы').slice(0,120),body:String(m.body||'').slice(0,4000),at:finite(m.at)||Date.now(),attachments:Array.isArray(m.attachments)?m.attachments.filter(x=>typeof x==='string').slice(0,10):[],status:['unread','read','sent'].includes(m.status)?m.status:'read'}));
   if(!Array.isArray(out.computer.files)) out.computer.files=[];
-  out.computer.files=out.computer.files.filter(f=>f&&typeof f==='object'&&typeof f.name==='string'&&typeof f.content==='string').slice(0,300).map(f=>({...f,id:(String(f.id||idempotencyKey('file')).replace(/[^A-Za-z0-9_-]/g,'').slice(0,80)||idempotencyKey('file')),name:f.name.replace(/[^A-Za-z0-9_.-]/g,'').slice(0,64),content:f.content.slice(0,20000),size:clamp(f.size,1,50000)}));
+  out.computer.files=out.computer.files.filter(f=>f&&typeof f==='object'&&typeof f.name==='string'&&typeof f.content==='string').slice(0,300).map(f=>({...f,id:(String(f.id||idempotencyKey('file')).replace(/[^A-Za-z0-9_-]/g,'').slice(0,80)||idempotencyKey('file')),name:f.name.replace(/[^A-Za-z0-9_.-]/g,'').slice(0,64),content:String(f.content),size:Math.max(1,Math.ceil(String(f.content).length/1024))}));
   if(!Array.isArray(out.editor.files)) out.editor.files=[];
-  out.editor.files=out.editor.files.filter(f=>f&&typeof f==='object'&&typeof f.name==='string'&&typeof f.content==='string').slice(0,100).map(f=>({...f,id:(String(f.id||idempotencyKey('nbs')).replace(/[^A-Za-z0-9_-]/g,'').slice(0,80)||idempotencyKey('nbs')),name:f.name.replace(/[^A-Za-z0-9_.-]/g,'').slice(0,32),content:f.content.slice(0,12000),size:clamp(f.size,1,12000)}));
+  out.editor.files=out.editor.files.filter(f=>f&&typeof f==='object'&&typeof f.name==='string'&&typeof f.content==='string').slice(0,100).map(f=>({...f,id:(String(f.id||idempotencyKey('nbs')).replace(/[^A-Za-z0-9_-]/g,'').slice(0,80)||idempotencyKey('nbs')),name:f.name.replace(/[^A-Za-z0-9_.-]/g,'').slice(0,32),content:String(f.content),size:Math.max(1,Math.ceil(String(f.content).length/1024))}));
   out.computer.installedPlugins=out.computer.installedPlugins.filter(id=>PLUGINS.some(p=>p.id===id));
   for(const id of fresh.computer.installedPlugins) if(!out.computer.installedPlugins.includes(id)) out.computer.installedPlugins.push(id);
   for(const part of ['cpu','ram','gpu','storage','os']) out.computer[part]=Math.max(1,Math.min(HARDWARE[part].length,Math.floor(finite(out.computer[part])||1)));
@@ -387,6 +438,15 @@ export function getSiteProgress(state,siteId) {
 
 /* —— Terminal plugin sessions / one-time operation keys —— */
 export const PLUGIN_SHELLS = {
+
+  'net-link': { boot: 'Net Link v1', help: 'connect <region_id> — подкл. к сети (~15с) · status · list · help · exit', commands: ['connect','status','list','help','exit'] },
+  'net-analyzer': { boot: 'Net Analyzer v1', help: 'scan — анализ сети · save <имя> — полный отчёт · help · exit', commands: ['scan','analyze','save','help','exit'] },
+  'phone-access': { boot: 'Phone Access v1', help: 'open <PHONE_ID> · status · disconnect · help · exit', commands: ['open','status','disconnect','help','exit'] },
+  'phone-control': { boot: 'Phone Control v1', help: 'msgs | calls | contacts | gallery | save msgs|gallery <имя> | call <имя> | sms <текст> | lock | disconnect | help | exit', commands: ['msgs','messages','calls','contacts','gallery','save','call','sms','lock','disconnect','help','exit'] },
+  'mail-drop': { boot: 'Mail Drop v1', help: 'craft <имя_файла> · attach — через N-Mail · help · exit', commands: ['craft','help','exit'] },
+  'sms-bomber': { boot: 'SMS Bomber v1', help: 'bomb <PHONE_ID> · help · exit', commands: ['bomb','help','exit'] },
+  'bank-peek': { boot: 'Bank Peek v1', help: 'peek <PHONE_ID> · help · exit', commands: ['peek','help','exit'] },
+
 
   'device-scout': { boot:'Device Scout v1', help:'scout <ref> | help | exit', commands:['scout','scan','help','exit'] },
   'signal-mapper': { boot:'Signal Mapper v1', help:'map <region_id> | regions | help | exit', commands:['map','regions','help','exit'] },
@@ -710,6 +770,14 @@ export function processServerSessionKick(state, now=Date.now()) {
 
 
 export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = null) {
+  if (isPluginLocked(pluginId)) {
+    return { ok: false, lines: [
+      { text: 'NULLBYTE // UNDER CONSTRUCTION', type: 'blue' },
+      { text: `Плагин «${pluginId}» закрыт на доработку.`, type: 'error' },
+      { text: 'Сайтовый / текущий mobile-контур будет пересобран по новому чек-листу.', type: 'muted' },
+      { text: 'Логика не удалена — просто недоступна.', type: 'muted' }
+    ]};
+  }
   const shell = PLUGIN_SHELLS[pluginId];
   if (!shell) return { ok: false, lines: [{ text: 'Плагин не поддерживает интерактивный режим.', type: 'error' }] };
   if (!getInstalledPlugin(state, pluginId)) {
@@ -1129,6 +1197,151 @@ if (pluginId === 'data-exporter' && (cmd === 'export' || cmd === 'pack')) {
     return { ok: true, lines: [{ text: `Payment link diverted ~${r.minutes} min`, type: 'green' }, { text: 'Скрытый таймер. Сайт восстановится сам.', type: 'muted' }] };
   }
 
+
+  // —— MOBILE / PHONE PIPELINE ——
+  if (pluginId === 'net-link') {
+    if (cmd === 'list') {
+      return { ok: true, lines: [
+        { text: 'REGIONS', type: 'blue' },
+        ...PHONE_REGIONS.map(r => ({ text: `${r.id} · ${r.name} · ${r.netKey}`, type: '' }))
+      ]};
+    }
+    if (cmd === 'status') {
+      const n = state.phoneWorld?.network;
+      if (!n) return { ok: true, lines: [{ text: 'Не подключено. connect <region_id>', type: 'muted' }] };
+      return { ok: true, lines: [
+        { text: `Сеть: ${n.regionId}`, type: 'green' },
+        { text: `Key ${n.netKey} · SSID ${n.ssid}`, type: 'muted' }
+      ]};
+    }
+    if (cmd === 'connect') {
+      const rid = arg1 || parts[1];
+      const r = connectNetwork(state, rid);
+      if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+      return { ok: true, lines: [
+        { text: 'Net Link — handshake…', type: 'muted' },
+        { text: `Connected: ${r.region.name}`, type: 'green' },
+        { text: `${r.region.netKey} / ${r.region.ssid}`, type: '' },
+        { text: 'Дальше: run net-analyzer → scan', type: 'muted' }
+      ], progressUpdated: true };
+    }
+  }
+
+  if (pluginId === 'net-analyzer') {
+    if (cmd === 'scan' || cmd === 'analyze') {
+      const r = analyzeNetwork(state, state.meta?.seed || 'nb');
+      if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+      return {
+        ok: true,
+        lines: [
+          { text: 'Net Analyzer — probe…', type: 'blue' },
+          { text: `Region ${r.report.region.name}`, type: '' },
+          { text: `Devices: ${r.report.count}`, type: 'green' },
+          { text: 'Полный реестр готов. save <имя>', type: 'blue' }
+        ],
+        pendingSave: { kind: 'net-report', content: r.report.text, defaultName: `${r.report.region.id}-net`, type: 'network-report', encrypted: false },
+        progressUpdated: true
+      };
+    }
+  }
+
+  if (pluginId === 'phone-access') {
+    if (cmd === 'open') {
+      const r = accessPhone(state, arg1, state.meta?.seed || 'nb');
+      if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+      state._phoneTarget = r.phone.id;
+      return { ok: true, lines: [
+        { text: 'PHONE ACCESS', type: 'blue' },
+        { text: `${r.phone.id} · ${r.phone.ownerName} · ${r.phone.ownerType}`, type: 'green' },
+        { text: `${r.phone.model} · ${r.phone.number}`, type: 'muted' },
+        { text: 'Дальше: run phone-control', type: 'muted' }
+      ], progressUpdated: true };
+    }
+    if (cmd === 'status') {
+      const id = state._phoneTarget;
+      return { ok: true, lines: [{ text: id ? `Active: ${id}` : 'Нет активного PHONE_ID', type: id ? 'green' : 'muted' }] };
+    }
+    if (cmd === 'disconnect') {
+      state._phoneTarget = null;
+      return { ok: true, lines: [{ text: 'Phone session ended.', type: 'muted' }] };
+    }
+  }
+
+  if (pluginId === 'phone-control') {
+    const pid = state._phoneTarget || arg1;
+    if (cmd === 'disconnect') {
+      state._phoneTarget = null;
+      return { ok: true, lines: [{ text: 'Disconnected.', type: 'muted' }] };
+    }
+    if (!pid || !state.phoneWorld?.access?.[pid]) {
+      if (cmd !== 'help') return { ok: false, lines: [{ text: 'Сначала phone-access → open <PHONE_ID>', type: 'error' }] };
+    }
+    const phone = findPhone(pid, state.meta?.seed || 'nb');
+    if (!phone && cmd !== 'help') return { ok: false, lines: [{ text: 'PHONE_ID invalid', type: 'error' }] };
+    if (cmd === 'msgs' || cmd === 'messages') {
+      const msgs = phoneMessages(phone, state.meta?.seed || 'nb');
+      return { ok: true, lines: [{ text: `Messages · ${phone.id}`, type: 'blue' }, ...msgs.map(m => ({ text: `[${m.from}] ${m.text}`, type: '' }))] };
+    }
+    if (cmd === 'calls') {
+      const calls = phoneCallLog(phone, state.meta?.seed || 'nb');
+      return { ok: true, lines: [{ text: 'Call log', type: 'blue' }, ...calls.map(c => ({ text: `${c.dir} ${c.with}`, type: '' }))] };
+    }
+    if (cmd === 'contacts') {
+      const ct = phoneContacts(phone, state.meta?.seed || 'nb');
+      return { ok: true, lines: [{ text: 'Contacts', type: 'blue' }, ...ct.map(c => ({ text: `${c.name} · ${c.number}`, type: '' }))] };
+    }
+    if (cmd === 'gallery') {
+      const g = phoneGallery(phone, state.meta?.seed || 'nb');
+      return { ok: true, lines: [{ text: 'Gallery', type: 'blue' }, ...g.map(x => ({ text: `${x.id} · ${x.title}`, type: '' }))] };
+    }
+    if (cmd === 'save') {
+      const what = arg1; // msgs|gallery
+      const name = arg2 || parts[2];
+      if (!name) return { ok: false, lines: [{ text: 'save msgs|gallery <имя>', type: 'error' }] };
+      let content = '';
+      if (what === 'msgs' || what === 'messages') content = phoneMessages(phone, state.meta?.seed||'nb').map(m=>`${m.from}: ${m.text}`).join('\n');
+      else if (what === 'gallery') content = phoneGallery(phone, state.meta?.seed||'nb').map(x=>`${x.id} ${x.title} ${x.note}`).join('\n');
+      else return { ok: false, lines: [{ text: 'save msgs|gallery <имя>', type: 'error' }] };
+      return { ok: true, lines: [{ text: 'Готово к save в терминале: save уже через pending', type: 'muted' }],
+        pendingSave: { kind: 'phone-export', content, defaultName: name, type: 'phone-data', encrypted: false } };
+    }
+    if (cmd === 'lock') {
+      lockPhone(state, phone.id, 30);
+      return { ok: true, lines: [{ text: `Phone ${phone.id} locked 30 min (sim)`, type: 'green' }], progressUpdated: true };
+    }
+    if (cmd === 'call') {
+      return { ok: true, lines: [{ text: `Calling ${arg1||'contact'} as ${phone.ownerName}…`, type: 'muted' }, { text: 'Виртуальный звонок записан в журнал.', type: 'green' }] };
+    }
+    if (cmd === 'sms') {
+      const text = parts.slice(1).join(' ');
+      return { ok: true, lines: [{ text: `SMS as ${phone.ownerName}: ${text}`, type: 'green' }] };
+    }
+  }
+
+  if (pluginId === 'mail-drop' && cmd === 'craft') {
+    const name = arg1 || 'drop';
+    const content = 'NULLBYTE MAIL DROP PAYLOAD\n(sim attachment — open chance on send via N-Mail)';
+    return { ok: true, lines: [{ text: 'Craft attachment', type: 'blue' }, { text: 'save <имя> затем прикрепи в N-Mail', type: 'muted' }],
+      pendingSave: { kind: 'mail-drop', content, defaultName: name, type: 'mail-drop', encrypted: false } };
+  }
+
+  if (pluginId === 'sms-bomber' && cmd === 'bomb') {
+    if (!state.phoneWorld?.purchases?.smsBomber && !getInstalledPlugin(state,'sms-bomber')) {
+      return { ok: false, lines: [{ text: 'Требуется покупка SMS Bomber (40000 CR) в NULForge', type: 'error' }] };
+    }
+    return { ok: true, lines: [{ text: `Bomb ${arg1} — sim flood queued`, type: 'green' }] };
+  }
+
+  if (pluginId === 'bank-peek' && cmd === 'peek') {
+    if (!getInstalledPlugin(state,'bank-peek')) return { ok: false, lines: [{ text: 'Купи Bank Peek (100000 CR)', type: 'error' }] };
+    const phone = findPhone(arg1, state.meta?.seed||'nb');
+    if (!phone) return { ok: false, lines: [{ text: 'PHONE_ID?', type: 'error' }] };
+    return { ok: true, lines: [
+      { text: 'BANK PEEK (virtual)', type: 'blue' },
+      { text: `${phone.ownerName} · notes: balance-hint=${50+((phone.index*17)%5000)} CR`, type: 'green' }
+    ]};
+  }
+
 return { ok: false, lines: [{ text: `Неизвестная команда «${cmd}». Введи help.`, type: 'error' }] };
 }
 
@@ -1269,12 +1482,35 @@ function unlockMissions(state) {
     if (m.status === 'locked' && m.minLevel <= state.player.level) m.status = 'available';
   }
 }
+/** XP threshold for reaching level L (L>=1). Unbounded curve. */
+export function xpThresholdForLevel(level) {
+  const L = Math.max(1, Math.floor(level));
+  if (L < BALANCE.xpToLevel.length) return BALANCE.xpToLevel[L] || 0;
+  // beyond table: quadratic growth from last anchors
+  const last = BALANCE.xpToLevel[BALANCE.xpToLevel.length - 1] || 3700;
+  const prev = BALANCE.xpToLevel[BALANCE.xpToLevel.length - 2] || 3060;
+  const step0 = last - prev;
+  // level index past end
+  let xp = last;
+  for (let i = BALANCE.xpToLevel.length; i <= L; i++) {
+    const extra = step0 + Math.floor((i - BALANCE.xpToLevel.length + 1) * 180);
+    xp += extra;
+  }
+  return xp;
+}
+
 function updateLevel(state) {
-  let next=state.player.level;
-  while(next<BALANCE.maxLevel&&state.player.xp>=BALANCE.xpToLevel[next])next++;
-  if(next>state.player.level) {
-    const old=state.player.level;state.player.level=next;
-    state.mail.messages.unshift({id:idempotencyKey('mail'),direction:'in',from:'NULLBYTE System',to:state.player.nickname,subject:`Новый уровень: ${next}`,body:`Уровень оператора повышен: ${old} → ${next}. ${next>=5?'Доступно создание игровых NBS-файлов.':''}`,at:Date.now(),attachments:[],status:'unread'});
+  let next = state.player.level;
+  while (next < BALANCE.maxLevel && state.player.xp >= xpThresholdForLevel(next)) next++;
+  if (next > state.player.level) {
+    const old = state.player.level;
+    state.player.level = next;
+    state.mail.messages.unshift({
+      id: idempotencyKey('mail'), direction: 'in', from: 'NULLBYTE System', to: state.player.nickname,
+      subject: `Новый уровень: ${next}`,
+      body: `Уровень оператора повышен: ${old} → ${next}. Уровни не ограничены — только XP.`,
+      at: Date.now(), attachments: [], status: 'unread'
+    });
     unlockMissions(state);
   }
 }
@@ -1411,3 +1647,59 @@ export function allPluginDocs(){ return { ...pluginDocs(), ...extendedPluginDocs
 
 
 export { npcReply, openingLine, moneyDialogue, dialogueStats } from './dialogue.js';
+
+
+/** Site/web missions hidden while web ops under construction. Phone board later. */
+export function isMissionVisible(m) {
+  if (!m) return false;
+  const cat = String(m.category || '').toLowerCase();
+  const title = String(m.title || '').toLowerCase();
+  // Site/web still WIP
+  if (['site','server','database','network','info','recon','web','shop','auto'].includes(cat)) return false;
+  if (/сайт|сервер|форум|архив|volt|grid|cobalt|browser|web |nbs/i.test(title)) return false;
+  // Phone branch open
+  if (cat === 'phone' || /телефон|phone|sms|галере|контакт|звон/i.test(title)) return true;
+  return cat === 'phone';
+}
+
+export function listVisibleMissions(state) {
+  return (state.missions?.items || []).filter(isMissionVisible);
+}
+
+export { PHONE_REGIONS, findPhone, buildNetworkReport, listRegionPhones } from './phones.js';
+
+
+export function queueMailDropOpens(state, now = Date.now()) {
+  const notices = [];
+  if (!state.mail?.pendingDrops) state.mail.pendingDrops = [];
+  const left = [];
+  for (const d of state.mail.pendingDrops) {
+    if (d.openAt > now) { left.push(d); continue; }
+    if (d.opened) { left.push(d); continue; }
+    // roll once
+    const open = (Math.abs((d.seed || 1) % 100) < (d.chance || 45));
+    d.opened = true;
+    d.result = open ? 'opened' : 'ignored';
+    if (open) {
+      const phoneId = d.phoneId || `PH-BAYS-${String((d.seed || 0) % 550).padStart(4, '0')}`;
+      notices.push(`NPC открыл вложение → PHONE_ID ${phoneId} · ${d.ownerName || 'owner'}`);
+      state.mail.messages.unshift({
+        id: `mail_drop_${now}`,
+        direction: 'in',
+        from: d.npcName || 'NPC',
+        to: state.player.nickname,
+        subject: 'Вложение просмотрено',
+        body: `Устройство: ${phoneId}\nВладелец: ${d.ownerName || '—'}\nНомер: ${d.number || '—'}`,
+        at: now,
+        attachments: [],
+        status: 'unread'
+      });
+      if (state.phoneWorld) state.phoneWorld.discovered[phoneId] = true;
+    } else {
+      notices.push('NPC проигнорировал вложение.');
+    }
+    left.push(d);
+  }
+  state.mail.pendingDrops = left.slice(-30);
+  return notices;
+}

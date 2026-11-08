@@ -41,14 +41,12 @@ export function migrateOps(raw) {
 }
 
 export const REGIONS = [
-  { id: 'region_0', name: 'Площадь Маяк', netKey: 'NET-BEACON', ssid: 'NorthWifi-AP05' },
-  { id: 'region_1', name: 'Индустриальный Юг', netKey: 'NET-SOUTH', ssid: 'GridMesh-S' },
-  { id: 'region_2', name: 'Порт Кабель', netKey: 'NET-PORT', ssid: 'HarborLink' },
-  { id: 'region_3', name: 'Стеклянный Центр', netKey: 'NET-GLASS', ssid: 'Civic-AP' },
-  { id: 'region_4', name: 'Северные Склады', netKey: 'NET-WARE', ssid: 'Depot-Wi' },
-  { id: 'region_5', name: 'Жилой Вектор', netKey: 'NET-HAB', ssid: 'Vector-Res' },
-  { id: 'region_6', name: 'Технопарк Null', netKey: 'NET-TECH', ssid: 'NullLab' },
-  { id: 'region_7', name: 'Старый Канал', netKey: 'NET-CANAL', ssid: 'CanalAP' }
+  { id: 'bayshore', name: 'Бейшор-Хайтс', netKey: 'NET-BAYSHORE', ssid: 'Bayshore-Mesh' },
+  { id: 'midtown', name: 'Мидтаун-Спайн', netKey: 'NET-MIDTOWN', ssid: 'Spine-Public' },
+  { id: 'ironreach', name: 'Айронрич', netKey: 'NET-IRON', ssid: 'IronAP-03' },
+  { id: 'southgate', name: 'Саутгейт', netKey: 'NET-SOUTH', ssid: 'Southgate-Wi' },
+  { id: 'oakridge', name: 'Окридж', netKey: 'NET-OAK', ssid: 'Oakridge-Home' },
+  { id: 'shadowline', name: 'Шэдоулайн', netKey: 'NET-SHADOW', ssid: 'Shadow-Node' }
 ];
 
 export function getRegion(id) {
@@ -219,16 +217,45 @@ export const MOBILE_PLUGIN_META = [
   { id: 'archive-exporter', name: 'Archive Exporter', category: 'Web Operations', version: '1.0.0', price: 150, requiredLevel: 2, minOs: 1, ram: 1, storage: 60, cooldown: 0, description: 'Сборка .narc архива.', effect: '.narc', starter: false }
 ];
 
+
+
 export function extendedPluginDocs() {
   return {
-    'device-scout': { title: 'Device Scout', role: 'Поиск устройств по USER/NPC.', steps: ['run device-scout', 'scout <user|npc|phone>'], inputs: 'USER_ID / NPC / phone', outputs: 'DEVICE_ID', next: ['mobile-decoder', 'mobile-access'] },
-    'signal-mapper': { title: 'Signal Mapper', role: 'Узлы региональной сети.', steps: ['run signal-mapper', 'map <region_id>'], inputs: 'region_0…region_7', outputs: 'AP/net nodes', next: ['device-scout'] },
-    'mobile-decoder': { title: 'Mobile Decoder', role: 'Профиль устройства.', steps: ['decode <DEVICE_ID>'], inputs: 'DEVICE_ID', outputs: 'profile file', next: ['mobile-access'] },
-    'mobile-access': { title: 'Mobile Access', role: 'Сессия на телефоне.', steps: ['access <DEVICE_ID>'], inputs: 'DEVICE_ID', outputs: 'mobile session', next: ['mobile-forensics', 'phone-call'] },
-    'mobile-forensics': { title: 'Mobile Forensics', role: 'Contacts/Messages/Calls…', steps: ['forensics <DEVICE_ID>'], inputs: 'access session', outputs: 'forensics file', next: ['archive-exporter'] },
-    'server-index': { title: 'Server Index', role: 'Пользователи сервера после access.', steps: ['index <SERVER_ID>'], inputs: 'server access', outputs: '.nidx', next: ['target-extractor'] },
-    'target-extractor': { title: 'Target Extractor', role: 'Карточка цели из index.', steps: ['extract <USER_ID>'], inputs: 'USER_ID from index', outputs: '.ntgt', next: ['archive-exporter', 'map-scanner'] },
-    'archive-exporter': { title: 'Archive Exporter', role: 'Сборка .narc для N-Mail.', steps: ['pack', 'или pack <fileId>…'], inputs: 'ops files', outputs: '.narc', next: ['N-Mail'] },
-    'phone-call': { title: 'Phone Call', role: 'Звонок NPC с просьбами о переводе.', steps: ['call <npc>', 'ask <sum≤1000>'], inputs: 'NPC/phone after mobile access', outputs: 'credits / trust', next: [] }
+    'net-link': {
+      title: 'Net Link', role: 'Подключение терминала к региональной сети.',
+      steps: ['run net-link', 'list', 'connect bayshore', 'status'],
+      inputs: 'region_id (bayshore|midtown|ironreach|southgate|oakridge|shadowline)',
+      outputs: 'active network session', next: ['net-analyzer']
+    },
+    'net-analyzer': {
+      title: 'Net Analyzer', role: 'Полный реестр PHONE_ID региона (~550).',
+      steps: ['run net-analyzer', 'scan', 'save <имя>'],
+      inputs: 'подключённая сеть', outputs: 'network-report file', next: ['phone-access']
+    },
+    'phone-access': {
+      title: 'Phone Access', role: 'Открыть виртуальный телефон по PHONE_ID.',
+      steps: ['run phone-access', 'open PH-BAYS-0042', 'status'],
+      inputs: 'PHONE_ID из отчёта', outputs: 'active phone target', next: ['phone-control']
+    },
+    'phone-control': {
+      title: 'Phone Control', role: 'Сообщения, звонки, галерея, блокировка.',
+      steps: ['msgs', 'calls', 'contacts', 'gallery', 'save msgs out', 'lock', 'disconnect'],
+      inputs: 'active PHONE_ID', outputs: 'файлы / lock 30м', next: ['mail-drop']
+    },
+    'mail-drop': {
+      title: 'Mail Drop', role: 'Вложение для NPC; шанс открытия → PHONE_ID в почте.',
+      steps: ['craft payload', 'save file', 'N-Mail attach + send'],
+      inputs: '—', outputs: 'mail-drop file / pending open', next: []
+    },
+    'sms-bomber': {
+      title: 'SMS Bomber', role: 'Симуляция SMS-нагрузки (40 000 CR).',
+      steps: ['install', 'bomb <PHONE_ID>'], inputs: 'PHONE_ID', outputs: 'sim flood', next: []
+    },
+    'bank-peek': {
+      title: 'Bank Peek', role: 'Виртуальные bank notes телефона (100 000 CR).',
+      steps: ['install', 'peek <PHONE_ID>'], inputs: 'PHONE_ID', outputs: 'notes', next: []
+    },
+    'device-scout': { title: 'Device Scout', role: 'Устарел / заменён.', steps: [], inputs: '—', outputs: '—', next: [] },
+    'site-analyzer': { title: 'Site Analyzer', role: 'Web WIP — закрыт.', steps: ['на доработке'], inputs: '—', outputs: '—', next: [] }
   };
 }

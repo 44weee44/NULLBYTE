@@ -942,17 +942,25 @@ function renderMap(g) {
 function missionSteps(m, g) {
   if (!m) return [];
   if (m.category === 'phone' || String(m.id||'').startsWith('phone')) {
+    const reg = m.regionId || 'bayshore';
+    const who = m.ownerName || m.ownerHint || 'цель';
+    const num = m.phoneNumber || '—';
+    const taskMap = { contacts:'собрать контакты', msgs:'сохранить SMS/переписку', gallery:'экспорт галереи', lock:'блокировка 30 мин', access:'открыть сессию телефона' };
+    const task = taskMap[m.task] || (m.task || 'собрать данные');
     return [
-      '1. Terminal: run net-link → list → connect <region_id> (~6 сек)',
-      '2. run net-analyzer → scan (~7 сек) → save <отчёт>',
-      '3. Открой Files / IDE, найди нужный PHONE_ID в отчёте',
-      '4. run phone-access → open <PHONE_ID> (~4 сек) → Phone Lab',
-      '5. В Phone Lab собери данные (SMS / контакты / галерея) и сохрани файл',
-      '6. N-Mail: новое письмо → КОМУ = имя заказчика из контракта → вложение файл → отправить',
-      '7. Жди проверки; XP и CR начислятся после accept результата'
+      `Сеть региона: ${reg}`,
+      `Номер телефона: ${num}`,
+      `Владелец (ориентир): ${who}`,
+      `Что сделать: ${task}`,
+      `1. run net-link → connect ${reg}`,
+      `2. run net-analyzer → scan → save report`,
+      `3. В отчёте найди устройство с номером ${num}`,
+      `4. run phone-access → open <PHONE_ID из отчёта>`,
+      `5. Phone Lab: ${task}, при необходимости сохрани файл`,
+      `6. N-Mail → кому: ${m.client} → вложение → отправить`
     ];
   }
-  return [m.objective || 'Выполни цель контракта', m.hint || '', 'Сдай результат через N-Mail заказчику'].filter(Boolean);
+  return ['Только телефонные контракты активны.'];
 }
 
 
@@ -963,6 +971,7 @@ function renderMissionGuide(m, g) {
   const steps = missionSteps(m, g).map(s => `<li>${s}</li>`).join('');
   return `<div class="panel section-gap mission-guide">
     <div class="panel-title"><span>ПОЛНЫЙ ГАЙД · ${esc(m.id)}</span><button class="btn tiny ghost" data-action="mission-close-guide">ЗАКРЫТЬ</button></div>
+    ${(m.regionId||m.phoneNumber)?`<div class="notice section-gap"><b>Сеть:</b> ${esc(m.regionId||'—')} · <b>Номер:</b> ${esc(m.phoneNumber||'—')} · <b>Ориентир:</b> ${esc(m.ownerName||m.ownerHint||'—')}</div>`:''}
     <div class="kv"><span>Название</span><b>${esc(m.title)}</b></div>
     <div class="kv"><span>Клиент</span><b>${esc(m.client)}</b></div>
     <div class="kv"><span>Цель</span><b>${esc(site?.title || m.target)} · ${esc(site?.domain || '—')}</b></div>
@@ -1540,7 +1549,11 @@ async function runTerminalCommand(termId, raw) {
       termAdd(termId, 'Files opened.', 'green');
     }
   } else if (lower === 'plugins' || lower === 'pkg list') {
-    termAdd(termId, PLUGINS.map(p => `${state.game.computer.installedPlugins.includes(p.id)?'[on]':'[  ]'} ${p.id}${PLUGIN_SHELLS[p.id]?' [shell]':''}`).join('\n'));
+    termAdd(termId, PLUGINS.map(p => {
+      const locked = typeof isPluginLocked==='function' && isPluginLocked(p.id);
+      const on = !locked && state.game.computer.installedPlugins.includes(p.id);
+      return `${on?'[on]':'[  ]'} ${p.id}${locked?' (dev)':''}${(!locked && PLUGIN_SHELLS[p.id])?' [shell]':''}`;
+    }).join('\n'));
   } else if (lower.startsWith('plugin info ')) {
     const q = cmd.slice(12).trim().toLowerCase();
     const p = PLUGINS.find(x => x.id === q || x.name.toLowerCase() === q);
@@ -1608,7 +1621,7 @@ function renderMail(g) {
     <select class="field" name="attach" style="margin-bottom:6px"><option value="">— вложение —</option>${(g.computer.files||[]).slice(0,40).map(f=>`<option value="${esc(f.id)}">${esc(f.name)}</option>`).join('')}</select>
     <button class="btn primary" type="submit">ОТПРАВИТЬ ПИСЬМО</button>
   </form></div>
-<div class="grid-2 section-gap" style="align-items:start"><div class="list">${list||'<div class="empty-state"><b>Входящие пусты</b><p>Письма появятся после контрактов и системных событий.</p></div>'}</div><div class="panel">${selected?`<div class="eyebrow">${selected.direction==='in'?'INCOMING MESSAGE':'SENT MESSAGE'}</div><h3 style="margin:8px 0;color:#e1ebf1;font-size:13px">${esc(selected.subject)}</h3><div class="kv"><span>От</span><b>${esc(selected.from)}</b></div><div class="kv"><span>Дата</span><b>${formatDate(selected.at)} ${formatTime(selected.at)}</b></div><div class="divider"></div><div class="mail-body">${esc(selected.body)}</div>${selected.attachments?.length?selected.attachments.map(id=>{const f=g.computer.files.find(x=>x.id===id);return f?`<button class="attachment" data-action="file-open" data-id="${esc(f.id)}">▣ ${esc(f.name)} · ${f.size} KB</button>`:''}).join(''):''}<div class="btn-row section-gap"><button class="btn tiny ghost" data-action="mail-mark" data-id="${selected.id}">ОТМЕТИТЬ ПРОЧИТАННЫМ</button></div>`:'<div class="empty-state"><b>Выбери письмо</b><p>Содержимое появится здесь.</p></div>'}${state.selectedFileId?(()=>{const f=g.computer.files.find(x=>x.id===state.selectedFileId);return f?`<div class="panel section-gap"><div class="panel-title"><span>ПРОСМОТР ВЛОЖЕНИЯ</span><button class="btn tiny ghost" data-action="file-close">ЗАКРЫТЬ</button></div><strong>${esc(f.name)}</strong><pre class="file-preview">${esc(String(f.content||'').slice(0,2400))}${String(f.content||'').length>2400?'\n… файл сокращён для просмотра':''}</pre></div>`:''})():''}</div></div>
+<div class="grid-2 section-gap" style="align-items:start"><div class="list">${list||'<div class="empty-state"><b>Входящие пусты</b><p>Письма появятся после контрактов и системных событий.</p></div>'}</div><div class="panel">${selected?`<div class="eyebrow">${selected.direction==='in'?'INCOMING MESSAGE':'SENT MESSAGE'}</div><div class="btn-row" style="margin-bottom:8px"><button type="button" class="btn tiny danger" data-action="mail-delete" data-id="${esc(selected.id)}">УДАЛИТЬ</button></div><h3 style="margin:8px 0;color:#e1ebf1;font-size:13px">${esc(selected.subject)}</h3><div class="kv"><span>От</span><b>${esc(selected.from)}</b></div><div class="kv"><span>Дата</span><b>${formatDate(selected.at)} ${formatTime(selected.at)}</b></div><div class="divider"></div><div class="mail-body">${esc(selected.body)}</div>${selected.attachments?.length?selected.attachments.map(id=>{const f=g.computer.files.find(x=>x.id===id);return f?`<button class="attachment" data-action="file-open" data-id="${esc(f.id)}">▣ ${esc(f.name)} · ${f.size} KB</button>`:''}).join(''):''}<div class="btn-row section-gap"><button class="btn tiny ghost" data-action="mail-mark" data-id="${selected.id}">ОТМЕТИТЬ ПРОЧИТАННЫМ</button></div>`:'<div class="empty-state"><b>Выбери письмо</b><p>Содержимое появится здесь.</p></div>'}${state.selectedFileId?(()=>{const f=g.computer.files.find(x=>x.id===state.selectedFileId);return f?`<div class="panel section-gap"><div class="panel-title"><span>ПРОСМОТР ВЛОЖЕНИЯ</span><button class="btn tiny ghost" data-action="file-close">ЗАКРЫТЬ</button></div><strong>${esc(f.name)}</strong><pre class="file-preview">${esc(String(f.content||'').slice(0,2400))}${String(f.content||'').length>2400?'\n… файл сокращён для просмотра':''}</pre></div>`:''})():''}</div></div>
   <div class="notice section-gap">Почта работает только внутри вымышленной игры. Никакие реальные email-адреса или внешние сообщения не используются.</div>`;
 }
 
@@ -1650,10 +1663,7 @@ function renderPhoneLab(g) {
   const activeId = state._phoneTarget || null;
   let phone = null;
   try { if (activeId) phone = findPhone(activeId, g.meta?.seed || 'nb'); } catch (e) {}
-  const discovered = Object.keys(pw.discovered || {});
-  const discList = discovered.slice(0, 30).map(id =>
-    `<button type="button" class="btn tiny ${id===activeId?'primary':'ghost'}" data-action="phone-lab-open" data-id="${esc(id)}">${esc(id)}</button>`
-  ).join(' ') || '<span class="muted">Сначала: net-analyzer → save → phone-access open PHONE_ID</span>';
+  const discovered = [];
 
   let body = `<div class="empty-state"><b>Нет активного телефона</b><p>1) net-link connect · 2) net-analyzer scan · 3) phone-access open PH-… · Phone Lab откроется сам</p></div>`;
   if (phone) {
@@ -1690,9 +1700,8 @@ function renderPhoneLab(g) {
       </div>
     </div></div>`;
   }
-  return `<div class="app-heading"><div><div class="eyebrow">PHONE LAB</div><h2>Телефон</h2><p>Исследование после phone-access · вместо phone-control</p></div><span class="badge">${discovered.length} ID</span></div>
+  return `<div class="app-heading"><div><div class="eyebrow">PHONE LAB</div><h2>Телефон</h2><p>Только активная сессия phone-access · open PHONE_ID</p></div><span class="badge">${activeId?'SESSION':'IDLE'}</span></div>
   <div class="kv"><span>Сеть</span><b>${net ? esc(net.regionId)+' · '+esc(net.netKey||'') : 'не подключено (net-link)'}</b></div>
-  <div class="panel section-gap"><div class="panel-title"><span>DISCOVERED</span></div><div style="display:flex;flex-wrap:wrap;gap:6px">${discList}</div></div>
   <div class="section-gap">${body}</div>`;
 }
 
@@ -2171,6 +2180,11 @@ function handleAction(action,el) {
     }
     case 'file-open':state.selectedFileId=id;renderWindow('mail');break;
     case 'file-close':state.selectedFileId=null;renderWindow('mail');break;
+    case 'mail-delete':{
+      state.game.mail.messages = (state.game.mail.messages||[]).filter(x => x.id !== id);
+      if (state.selectedMail === id) state.selectedMail = null;
+      scheduleSave(); renderWindow('mail'); break;
+    }
     case 'mail-mark':{const m=state.game.mail.messages.find(x=>x.id===id);if(m)m.status='read';scheduleSave();renderWindow('mail');break;}
     case 'map-location':{
       const locId=el.dataset.location;

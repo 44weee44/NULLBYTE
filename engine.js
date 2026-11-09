@@ -8,11 +8,34 @@ import { PHONE_REGIONS, PHONES_PER_REGION, createEmptyPhoneWorld, migratePhoneWo
 import { createEmptyEvents, migrateEvents, processWorldEvents, listActiveEvents } from './events.js';
 export const SAVE_VERSION = 1;
 export const PHONE_JOBS = [
-  {id:'phone-001',title:'Список контактов',client:'Mira Voss',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:180,xp:40,objective:'Подключись к сети региона, сохрани отчёт и выгрузи contacts одного PHONE_ID.',hint:'net-link → net-analyzer → phone-access → Phone Lab → Контакты',requiredPlugins:['net-link','net-analyzer','phone-access']},
-  {id:'phone-002',title:'Снимок переписки',client:'Harbor Desk',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:220,xp:50,objective:'Сохрани msgs выбранного телефона в файл и сдай через N-Mail.',hint:'Phone Lab → Сохранить SMS',requiredPlugins:['phone-access']},
-  {id:'phone-003',title:'Звонок от имени',client:'Null Courier',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:320,xp:70,objective:'Открой телефон и выполни call от имени владельца.',hint:'Phone Lab после phone-access',requiredPlugins:['phone-access']},
-  {id:'phone-004',title:'Галерея для заказа',client:'Green Mart',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:280,xp:60,objective:'Экспортируй gallery телефона в файл.',hint:'Phone Lab → Сохранить галерею',requiredPlugins:['phone-access']},
-  {id:'phone-005',title:'Блокировка на полчаса',client:'Shadowline Ops',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:350,xp:80,objective:'Заблокируй целевой телефон на 30 минут (sim lock).',hint:'Phone Lab → Lock 30м',requiredPlugins:['phone-access']},
+  {id:'phone-001',title:'Список контактов',client:'Mira Voss',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:180,xp:40,
+    objective:'Подключись к сети региона цели, открой телефон и выгрузи contacts.',
+    hint:'net-link → connect <region> → net-analyzer → phone-access open → Phone Lab → Контакты → N-Mail заказчику',
+    regionId:'bayshore',ownerHint:'Alex Voss',task:'contacts',requiredPlugins:['net-link','net-analyzer','phone-access']},
+  {id:'phone-002',title:'Снимок переписки',client:'Harbor Desk',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:220,xp:50,
+    objective:'Сохрани SMS (msgs) целевого телефона в файл и сдай через N-Mail.',
+    hint:'Phone Lab → SMS → Сохранить SMS → письмо заказчику',
+    regionId:'midtown',ownerHint:'Eli North',task:'msgs',requiredPlugins:['phone-access']},
+  {id:'phone-003',title:'Звонок от имени',client:'Null Courier',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:320,xp:70,
+    objective:'Открой указанный телефон в Phone Lab (сессия access).',
+    hint:'open PHONE_ID из сети региона → Phone Lab',
+    regionId:'ironreach',ownerHint:'Kai Reed',task:'access',requiredPlugins:['phone-access']},
+  {id:'phone-004',title:'Галерея для заказа',client:'Green Mart',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:280,xp:60,
+    objective:'Экспортируй gallery телефона в файл.',
+    hint:'Phone Lab → Галерея → Сохранить галерею',
+    regionId:'southgate',ownerHint:'Nora Shaw',task:'gallery',requiredPlugins:['phone-access']},
+  {id:'phone-005',title:'Блокировка на полчаса',client:'Shadowline Ops',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:350,xp:80,
+    objective:'Заблокируй целевой телефон на 30 минут (Lock в Phone Lab).',
+    hint:'Phone Lab → Lock 30м',
+    regionId:'shadowline',ownerHint:'Dax Kane',task:'lock',requiredPlugins:['phone-access']},
+  {id:'phone-006',title:'Номер из Окриджа',client:'Oakridge Watch',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:200,xp:45,
+    objective:'Найди телефон в сети oakridge и сохрани contacts.',
+    hint:'connect oakridge → scan → open → contacts',
+    regionId:'oakridge',ownerHint:'Vera Cole',task:'contacts',requiredPlugins:['net-link','net-analyzer','phone-access']},
+  {id:'phone-007',title:'SMS из Мидтауна',client:'Spine Desk',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:210,xp:48,
+    objective:'Сними переписку телефона в midtown.',
+    hint:'connect midtown → open → сохранить SMS',
+    regionId:'midtown',ownerHint:'Sam Hayes',task:'msgs',requiredPlugins:['phone-access']},
 ];
 
 export const BALANCE = {
@@ -178,10 +201,14 @@ export function createInitialState(tgUser=null) {
   if (typeof PHONE_JOBS !== 'undefined') {
     for (const j of PHONE_JOBS) {
       if (!state0.missions.items.some(x => x.id === j.id)) {
-        state0.missions.items.push({ ...j, status: j.minLevel <= 1 ? 'available' : 'locked' });
+        const item = bindPhoneMissionTarget({ ...j, status: j.minLevel <= 1 ? 'available' : 'locked' }, 'nb');
+        state0.missions.items.push(item);
       }
     }
   }
+  // keep templates for tests/legacy; UI uses isMissionVisible (phone- only)
+  state0.missions.items.forEach(m => { if (String(m.id||'').startsWith('phone-')) bindPhoneMissionTarget(m, 'nb'); });
+
 
   state0.ops = createEmptyOpsState();
   state0.phoneWorld = createEmptyPhoneWorld();
@@ -224,6 +251,10 @@ export function migrateSave(raw,tgUser=null) {
   out.npcWorld=migrateNpcWorld(raw.npcWorld);
   out.ops=migrateOps(raw.ops);
   out.phoneWorld=migratePhoneWorld(raw.phoneWorld);
+  if (Array.isArray(out.missions?.items)) {
+    out.missions.items.forEach(m => { if (m && String(m.id||'').startsWith('phone-')) bindPhoneMissionTarget(m, 'nb'); });
+  }
+
   out.events=migrateEvents(raw.events);
   // Preserve all ops fields; only normalize keys array
   const rawKeys = Array.isArray(raw.ops?.keys) ? raw.ops.keys : (out.ops.keys || []);
@@ -359,6 +390,12 @@ export function uninstallPlugin(state,pluginId) {
   return {ok:true,message:'Плагин удалён. Пользовательские файлы сохранены.'};
 }
 export function acceptMission(state,missionId) {
+  // ensure phone target bound
+  const _pre = state.missions.items.find(x=>x.id===missionId);
+  if (_pre) bindPhoneMissionTarget(_pre, state.meta?.seed||'nb');
+  return acceptMission_inner(state,missionId);
+}
+function acceptMission_inner(state,missionId) {
   const m=state.missions.items.find(x=>x.id===missionId);
   if(!m||!(m.status==='available'||m.status==='locked')) return {ok:false,reason:'Контракт сейчас недоступен.'};
   if(state.player.level<m.minLevel) return {ok:false,reason:`Требуется уровень ${m.minLevel}.`};
@@ -1718,16 +1755,30 @@ export { npcReply, openingLine, moneyDialogue, dialogueStats } from './dialogue.
 
 
 /** Site/web missions hidden while web ops under construction. Phone board later. */
+
+/** Bind concrete phone identity to a phone mission (stable per mission id + seed). */
+export function bindPhoneMissionTarget(mission, seedRoot = 'nb') {
+  if (!mission || mission.category !== 'phone') return mission;
+  const regionId = mission.regionId || 'bayshore';
+  try {
+    const list = listRegionPhones(regionId, seedRoot);
+    // pick stable index from mission id hash
+    let h = 0; const s = String(mission.id || 'p');
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+    const phone = list[Math.abs(h) % list.length];
+    mission.phoneId = phone.id;
+    mission.ownerName = phone.ownerName;
+    mission.phoneNumber = phone.number;
+    mission.regionId = regionId;
+    mission.objective = `${mission.objective || ''} Сеть: ${regionId}, номер: ${phone.number}, ориентир: ${phone.ownerName}`.trim();
+  } catch (e) {}
+  return mission;
+}
+
 export function isMissionVisible(m) {
   if (!m) return false;
-  const cat = String(m.category || '').toLowerCase();
-  const title = String(m.title || '').toLowerCase();
-  // Site/web still WIP
-  if (['site','server','database','network','info','recon','web','shop','auto'].includes(cat)) return false;
-  if (/сайт|сервер|форум|архив|volt|grid|cobalt|browser|web |nbs/i.test(title)) return false;
-  // Phone branch open
-  if (cat === 'phone' || /телефон|phone|sms|галере|контакт|звон/i.test(title)) return true;
-  return cat === 'phone';
+  // only new phone-* contracts in this build
+  return String(m.id || '').startsWith('phone-');
 }
 
 export function listVisibleMissions(state) {

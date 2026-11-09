@@ -5,7 +5,7 @@ import {
   processTimedEvents, bankStatus, bankRisk, attemptBankSimulation, saveEditorFile, validateNbs, runNbs,
   recordHistory, addBookmark, idempotencyKey,
   PLUGIN_SHELLS, PLUGIN_ANIM, runPluginShellCommand, pluginShellBootLines, resolveSiteRef, savePlayerNamedFile, findFileByName, markServerModified,
-  isPluginLocked, isMissionVisible, xpThresholdForLevel, bindPhoneMissionTarget, ensureTrading, TRADING_TICKERS, tradingSparkline, listRegionPhones
+  isPluginLocked, isMissionVisible, xpThresholdForLevel, bindPhoneMissionTarget, ensureTrading, TRADING_TICKERS, tradingSparkline, listRegionPhones, scheduleMailDrop, processMailDrops
 } from './engine.js';
 import { findPhone, phoneMessages, phoneGallery, phoneCallLog, phoneContacts, lockPhone } from './phones.js';
 import { bankLogin, bankTransfer, getBankSession, searchNpcs, pluginDocs, touchNpc, NPC_POOL_SIZE } from './npc.js';
@@ -40,7 +40,6 @@ const APPS = [
   {id:'blackwire',title:'BlackWire',path:'board://contracts',ram:1,description:'Биржа контрактов NPC'},
   {id:'help',title:'Help / Docs',path:'docs://manual',ram:1,description:'Справка по игре'},
   {id:'ide',title:'NBS IDE',path:'ide://workspace',ram:2,description:'Редактор игровых скриптов'},
-  {id:'files',title:'Files',path:'fs://home',ram:1,description:'Файловый менеджер'},
   {id:'phone',title:'Phone Lab',path:'phone://lab',ram:2,description:'Визуальное исследование телефонов'},
   {id:'intel',title:'Intel',path:'intel://feed',ram:1,description:'Разведка, события, discovered'},
   {id:'fbi',title:'FBI',path:'agency://fbi',ram:1,description:'Закрытый раздел'},
@@ -496,13 +495,20 @@ function renderHardwareUpgrade(g,part,label) {
   return `<div class="list-row hardware-upgrade"><div class="list-main"><strong>${label}: ${esc(current.name)}</strong><small>СЕЙЧАС: ${esc(hardwareDetail(part,current))}</small>${next?`<small>СЛЕДУЮЩИЙ: ${esc(next.name)} · ${esc(hardwareDetail(part,next))} · ${fmt(next.price)} CR</small>`:'<small>Достигнут максимальный уровень.</small>'}</div><div class="list-actions">${next?bankLocked?'<span class="badge red">BANK LOCK</span>':`<button class="btn tiny" data-action="upgrade-hardware" data-part="${part}">УЛУЧШИТЬ</button>`:'<span class="badge green">MAX</span>'}</div></div>`;
 }
 function renderComputer(g) {
-  const usage=getHardwareUsage(g),ram=currentRam();
-  return `<div class="app-heading"><div><div class="eyebrow">SYSTEM MANAGER</div><h2>My Computer</h2><p>Комплектующие, ОС и виртуальные файлы.</p></div><span class="badge">NULLBYTE OS ${g.computer.os}.0</span></div>
-  <div class="grid-3"><div class="stat-box"><span>RAM TOTAL</span><strong>${HARDWARE.ram.find(x=>x.level===g.computer.ram).gb} GB</strong><small>сейчас ${ram.used} GB занято окнами</small></div><div class="stat-box"><span>DISK SPACE</span><strong>${fmt(usage.used/1024)} GB</strong><small>из ${usage.total/1024} GB</small></div><div class="stat-box"><span>PLUGINS</span><strong>${g.computer.installedPlugins.length}</strong><small>установлено</small></div></div>
-  <div class="panel section-gap"><div class="panel-title"><span>КОМПЛЕКТУЮЩИЕ</span><small>UPGRADE MODULE</small></div><div class="list">${renderHardwareUpgrade(g,'cpu','Процессор')}${renderHardwareUpgrade(g,'ram','Оперативная память')}${renderHardwareUpgrade(g,'gpu','Графика')}${renderHardwareUpgrade(g,'storage','Накопитель')}${renderHardwareUpgrade(g,'os','NULLBYTE OS')}</div></div>
-  <div class="panel section-gap"><div class="panel-title"><span>УСТАНОВЛЕННЫЕ ПЛАГИНЫ</span><button class="btn tiny ghost" data-action="open-app" data-app="forge">NULFORGE</button></div><div class="list">${g.computer.installedPlugins.map(id=>{const p=getPlugin(id);return p?`<div class="list-row"><div class="list-main"><strong>${esc(p.name)}</strong><small>${esc(p.category)} · RAM ${p.ram} GB · ${p.storage} MB</small></div>${p.starter?'<span class="badge gray">SYSTEM</span>':`<button class="btn tiny ghost" data-action="uninstall-plugin" data-id="${p.id}">УДАЛИТЬ</button>`}</div>`:''}).join('')}</div></div>
-  <div class="panel section-gap"><div class="panel-title"><span>ФАЙЛЫ НАКОПИТЕЛЯ</span><small>${g.computer.files.length+g.editor.files.length} ITEMS</small></div>${renderFiles(g)}</div>`;
+  const usage = getHardwareUsage(g);
+  const ram = getRamUsage(g);
+  const plugs = (g.computer.installedPlugins||[]).filter(id => !(typeof isPluginLocked==='function' && isPluginLocked(id)));
+  const list = plugs.map(id => {
+    const p = getPlugin(id);
+    return `<div class="list-row"><div class="list-main"><strong>${esc(p?.name||id)}</strong><small>${esc(p?.category||'plugin')} · v${esc(p?.version||'1')}</small></div><span class="badge green">ON</span></div>`;
+  }).join('') || '<div class="muted">Нет установленных плагинов</div>';
+  return `<div class="app-heading"><div><div class="eyebrow">MY COMPUTER</div><h2>Система</h2><p>Плагины и характеристики ПК</p></div><span class="badge">OS ${g.computer.os}</span></div>
+  <div class="kv"><span>OS</span><b>NULLBYTE OS ${g.computer.os}</b></div>
+  <div class="kv"><span>CPU / RAM / GPU / Storage</span><b>L${g.computer.cpu} · L${g.computer.ram} · L${g.computer.gpu} · L${g.computer.storage}</b></div>
+  <div class="kv"><span>RAM load</span><b>${ram.used}/${ram.total}</b></div>
+  <div class="panel section-gap"><div class="panel-title"><span>УСТАНОВЛЕННЫЕ ПЛАГИНЫ</span><small>${plugs.length}</small></div><div class="list">${list}</div></div>`;
 }
+
 function renderFiles(g) {
   const files = [...(g.computer.files||[]), ...(g.editor.files||[])];
   const usage = getHardwareUsage(g);
@@ -729,14 +735,24 @@ function renderSitePage(g, site, page, progress) {
       return `<div class="nt-card">
         <div class="nt-card-head"><strong>${esc(tk.name)}</strong><span class="${sp.up?'up':'down'}">${sp.last.toFixed(2)}</span></div>
         <svg class="nt-spark" viewBox="0 0 160 48" width="100%" height="48" preserveAspectRatio="none"><polyline fill="none" stroke="${stroke}" stroke-width="2" points="${sp.points}"/></svg>
-        <small class="muted">симуляция · ваш локальный ряд</small>
+        <small class="muted">локальный ряд</small>
       </div>`;
     }).join('');
     if (p === 'people') {
-      const people = (tr.people || []).map(pe => `<div class="nt-person"><div><b>${esc(pe.name)}</b><small>${esc(pe.tick)}</small></div><span>${Number(pe.stake).toLocaleString('ru-RU')} CR</span></div>`).join('');
+      const seed = g.meta?.seed||'nb';
+      let peopleHtml = '';
+      try {
+        const regs = ['bayshore','midtown','ironreach','southgate','oakridge','shadowline'];
+        const rows = [];
+        for (const rid of regs) {
+          const list = listRegionPhones(rid, seed).slice(0, 4);
+          for (const ph of list) rows.push({ name: ph.ownerName, tick: (TRADING_TICKERS[rows.length%3]||{}).id||'NULLBYTE', stake: 500+((ph.index*97)%4500), region: rid });
+        }
+        peopleHtml = rows.slice(0, 18).map(pe => `<div class="nt-person"><div><b>${esc(pe.name)}</b><small>${esc(pe.tick)} · ${esc(pe.region)}</small></div><span>${Number(pe.stake).toLocaleString('ru-RU')} CR</span></div>`).join('');
+      } catch(e) { peopleHtml = (tr.people||[]).map(pe=>`<div class="nt-person"><div><b>${esc(pe.name)}</b></div><span>${pe.stake}</span></div>`).join(''); }
+
       return `<div class="site-page site-trading"><header class="site-hero trading"><div class="site-brand">NULL<span>TRADING</span></div>${navT}</header>
-        <div class="site-body"><h2>Участники (симуляция)</h2><div class="nt-people">${people}</div>
-        <p class="site-note">Суммы вкладов виртуальные и различаются у каждого оператора.</p></div></div>`;
+        <div class="site-body"><h2>Люди</h2><div class="nt-people">${peopleHtml}</div></div></div>`;
     }
     if (p === 'profile') {
       return `<div class="site-page site-trading"><header class="site-hero trading"><div class="site-brand">NULL<span>TRADING</span></div>${navT}</header>
@@ -746,10 +762,9 @@ function renderSitePage(g, site, page, progress) {
     }
     return `<div class="site-page site-trading"><header class="site-hero trading"><div class="site-brand">NULL<span>TRADING</span></div>${navT}</header>
       <div class="site-body">
-        <h1>Биржа .null</h1>
-        <p class="muted">Котировки NULLBYTE · 44weee · tunnel. Движение цены у каждого игрока своё, в том числе офлайн.</p>
+        <h1>Биржа Trade</h1>
+        <p class="muted">NULLBYTE · 44weee · tunnel</p>
         <div class="nt-grid">${cards}</div>
-        <div class="notice section-gap">Вкладываться пока нельзя — функция в будущем. Графики уже рабочие.</div>
       </div></div>`;
   }
 
@@ -878,7 +893,7 @@ function renderSitePage(g, site, page, progress) {
 function renderBrowserStart(g) {
   const sites = g.world.sites;
   return `<div class="browser-start">
-    <div class="browser-start-hero"><h1>NULLBYTE NET</h1><p>Только домены .null · локальная симуляция</p></div>
+    <div class="browser-start-hero"><h1>NULLBYTE NET</h1><p>Домены .null</p></div>
     <form class="browser-start-search" id="browserForm"><input class="field" name="address" placeholder="адрес .null или название" autocomplete="off"><button class="btn primary" type="submit">Перейти</button></form>
     <div class="browser-start-grid">${sites.map(s=>`<button type="button" class="start-tile kind-${esc(s.kind)}" data-action="browser-tab" data-site="${s.id}"><strong>${esc(s.title)}</strong><small>${esc(s.domain)}</small></button>`).join('')}</div>
     <div class="browser-start-side">
@@ -942,35 +957,30 @@ function renderMap(g) {
   const selected = state.mapSelected || null;
   const locs = LOCATIONS || [];
   const events = g.events?.active || [];
-  // unavailable / locked event zones
-  const blocked = new Set();
-  for (const e of events) {
-    if (e.effect?.serverBusy || e.effect?.harden || e.type === 'infra') {
-      // mark a location-ish id if present
-      if (e.regionId) blocked.add(e.regionId);
-    }
-  }
-  // always show 1-2 "event locked" demo regions as red if event active
-  if (events.length) {
-    blocked.add(locs[Math.min(locs.length-1, events.length)]?.id);
-  }
-  // static unavailable placeholders for event areas
+  // event zones as pure shapes (no labels)
   const eventZones = [
-    { x: 16, y: 16, w: 18, h: 16 },
-    { x: 74, y: 18, w: 16, h: 14 },
-    { x: 48, y: 70, w: 20, h: 15 }
+    { x: 14, y: 14, w: 20, h: 18 },
+    { x: 70, y: 16, w: 18, h: 16 },
+    { x: 46, y: 68, w: 22, h: 18 }
   ];
+  if (!events.length) {
+    // still show subtle zones as locked sectors
+  }
   const points = locs.map(loc => {
-    return `<button type="button" class="map-point ${selected===loc.id?'on':''}" style="left:${loc.x||50}%;top:${loc.y||50}%" data-action="map-select" data-id="${esc(loc.id)}" title="${esc(loc.name)}"><span>${esc(loc.name)}</span></button>`;
+    const x = loc.x != null ? loc.x : 50;
+    const y = loc.y != null ? loc.y : 50;
+    return `<button type="button" class="map-point ${selected===loc.id?'on':''}" style="left:${x}%;top:${y}%" data-action="map-select" data-id="${esc(loc.id)}"><span>${esc(loc.name)}</span></button>`;
   }).join('');
-  const ez = eventZones.map(z =>
-    `<div class="map-event-zone" style="left:${z.x}%;top:${z.y}%;width:${z.w}%;height:${z.h}%"></div>`
-  ).join('');
-  const detail = selected ? (locs.find(l=>l.id===selected)||{}) : null;
-  return `<div class="app-heading"><div><div class="eyebrow">NULLATLAS</div><h2>Карта</h2><p>Регионы и зоны событий</p></div><span class="badge">${locs.length} LOC</span></div>
-  <div class="map-canvas section-gap">${points}${ez}</div>
-  <div class="panel section-gap">${detail?`<strong>${esc(detail.name||selected)}</strong><p class="muted small">${esc(detail.desc||'Район игрового города')}</p><p class="muted small">Сеть: net-link → connect (см. region id в Help)</p>`:'<span class="muted">Выбери точку на карте</span>'}</div>
-  <div class="muted small">Красные зоны — недоступные / ивент. Обычные точки — районы.</div>`;
+  const ez = eventZones.map(z => `<div class="map-event-zone" style="left:${z.x}%;top:${z.y}%;width:${z.w}%;height:${z.h}%"></div>`).join('');
+  const detail = selected ? (locs.find(l => l.id === selected) || {}) : null;
+  const regions = ['bayshore','midtown','ironreach','southgate','oakridge','shadowline'];
+  const net = g.phoneWorld?.network;
+  return `<div class="app-heading"><div><div class="eyebrow">NULLATLAS</div><h2>Карта</h2><p>Районы и сети</p></div><span class="badge">${locs.length}</span></div>
+  <div class="map-canvas section-gap">${ez}${points}</div>
+  <div class="panel section-gap">${detail ? `<strong>${esc(detail.name||selected)}</strong><p class="muted small">${esc(detail.desc||'')}</p>` : '<span class="muted">Выбери район</span>'}
+  <div class="kv"><span>Активная сеть</span><b>${net ? esc(net.regionId)+' · '+esc(net.netKey||'') : '—'}</b></div>
+  <div class="muted small section-gap">Сети: ${regions.map(esc).join(' · ')}</div>
+  <div class="muted small">Красные зоны — ивент / недоступно</div></div>`;
 }
 
 
@@ -989,8 +999,8 @@ function missionSteps(m, g) {
       `Что сделать: ${task}`,
       `1. run net-link → connect ${reg}`,
       `2. run net-analyzer → scan → save report`,
-      `3. В отчёте найди устройство с номером ${num}`,
-      `4. run phone-access → open <PHONE_ID из отчёта>`,
+      `3. В отчёте сети ${reg} найди строку с номером ${num} (имя ${who})`,
+      `4. run phone-access → open <PHONE_ID из этой строки отчёта>`,
       `5. Phone Lab: ${task}, при необходимости сохрани файл`,
       `6. N-Mail → кому: ${m.client} → вложение → отправить`
     ];
@@ -1035,7 +1045,10 @@ function renderBlackWire(g) {
   const boardIds = new Set(g.intel?.boardIds || []);
   const available = g.missions.items.filter(m => m.status === 'available' && (boardIds.size ? boardIds.has(m.id) : true));
   const active = g.missions.items.filter(m => m.status === 'accepted' || m.status === 'submitted');
-  const selected = state.selectedMissionId ? g.missions.items.find(x => x.id === state.selectedMissionId) : null;
+  let selected = state.selectedMissionId ? g.missions.items.find(x => x.id === state.selectedMissionId) : null;
+  if (selected && String(selected.id||'').startsWith('phone-')) {
+    try { selected._bound = false; bindPhoneMissionTarget(selected, g.meta?.seed||'nb'); } catch(e){}
+  }
   const card = m => {
     const site = getSite(g, m.target);
     return `<article class="contract-card ${state.selectedMissionId===m.id?'is-selected':''}">
@@ -1476,7 +1489,7 @@ async function runTerminalCommand(termId, raw) {
       if (!r.ok) { termAdd(termId, r.reason, 'error'); return; }
       term.pendingSave = null;
       termAdd(termId, `Saved: ${r.file.name}`, 'green');
-      termAdd(termId, 'Открой Files или: artifact-decoder → decode <имя>', 'muted');
+      termAdd(termId, 'Файл сохранён в системе.', 'muted');
       scheduleSave();
       refreshOpenApps(['files','computer']);
       return;
@@ -1563,8 +1576,7 @@ async function runTerminalCommand(termId, raw) {
   const parts = cmd.split(/\s+/);
   const one = (parts[0] || '').toLowerCase();
   if (lower === 'help') {
-    termAdd(termId, 'help | clear | plugins | run <plugin> | files | mission list', 'blue');
-    termAdd(termId, 'files — открыть файловый менеджер / list', 'muted');
+    termAdd(termId, 'help | clear | plugins | run <plugin> | mission list', 'blue');
     termAdd(termId, 'intel | ops | rm <file> — разведка / журнал / удаление файла', 'blue');
   } else if (lower === 'clear') {
     term.lines = [];
@@ -1656,7 +1668,7 @@ function renderMail(g) {
     <button class="btn primary" type="submit">ОТПРАВИТЬ ПИСЬМО</button>
   </form></div>
 <div class="grid-2 section-gap" style="align-items:start"><div class="list">${list||'<div class="empty-state"><b>Входящие пусты</b><p>Письма появятся после контрактов и системных событий.</p></div>'}</div><div class="panel">${selected?`<div class="eyebrow">${selected.direction==='in'?'INCOMING MESSAGE':'SENT MESSAGE'}</div><div class="btn-row" style="margin-bottom:8px"><button type="button" class="btn tiny danger" data-action="mail-delete" data-id="${esc(selected.id)}">УДАЛИТЬ</button></div><h3 style="margin:8px 0;color:#e1ebf1;font-size:13px">${esc(selected.subject)}</h3><div class="kv"><span>От</span><b>${esc(selected.from)}</b></div><div class="kv"><span>Дата</span><b>${formatDate(selected.at)} ${formatTime(selected.at)}</b></div><div class="divider"></div><div class="mail-body">${esc(selected.body)}</div>${selected.attachments?.length?selected.attachments.map(id=>{const f=g.computer.files.find(x=>x.id===id);return f?`<button class="attachment" data-action="file-open" data-id="${esc(f.id)}">▣ ${esc(f.name)} · ${f.size} KB</button>`:''}).join(''):''}<div class="btn-row section-gap"><button class="btn tiny ghost" data-action="mail-mark" data-id="${selected.id}">ОТМЕТИТЬ ПРОЧИТАННЫМ</button></div>`:'<div class="empty-state"><b>Выбери письмо</b><p>Содержимое появится здесь.</p></div>'}${state.selectedFileId?(()=>{const f=g.computer.files.find(x=>x.id===state.selectedFileId);return f?`<div class="panel section-gap"><div class="panel-title"><span>ПРОСМОТР ВЛОЖЕНИЯ</span><button class="btn tiny ghost" data-action="file-close">ЗАКРЫТЬ</button></div><strong>${esc(f.name)}</strong><pre class="file-preview">${esc(String(f.content||'').slice(0,2400))}${String(f.content||'').length>2400?'\n… файл сокращён для просмотра':''}</pre></div>`:''})():''}</div></div>
-  <div class="notice section-gap">Почта работает только внутри вымышленной игры. Никакие реальные email-адреса или внешние сообщения не используются.</div>`;
+  `;
 }
 
 function renderBank(g) {
@@ -1706,6 +1718,24 @@ function renderPhoneLab(g) {
   if (phone) {
     const seed = g.meta?.seed || 'nb';
     const msgs = phoneMessages(phone, seed);
+    // rare bank leak → register account so Aster Bank login works
+    try {
+      for (const m of msgs) {
+        if (m.kind === 'bank' && m.bankLogin && m.bankPassword) {
+          if (!g.npcWorld) g.npcWorld = { bankAccounts: {}, bankSessions: {} };
+          if (!g.npcWorld.bankAccounts) g.npcWorld.bankAccounts = {};
+          const aid = 'acc_' + m.bankLogin;
+          if (!g.npcWorld.bankAccounts[aid]) {
+            g.npcWorld.bankAccounts[aid] = {
+              id: aid, npcId: phone.npcId, login: m.bankLogin, password: m.bankPassword,
+              balance: m.bankAmount || 500, currency: 'CR', notify: [],
+              ownerName: phone.ownerName
+            };
+          }
+        }
+      }
+    } catch (e) {}
+
     const gal = phoneGallery(phone, seed);
     const calls = typeof phoneCallLog === 'function' ? phoneCallLog(phone, seed) : [];
     const contacts = typeof phoneContacts === 'function' ? phoneContacts(phone, seed) : [];
@@ -2315,20 +2345,28 @@ document.addEventListener('submit',event=>{
     });
     if(attach){
       const f=(state.game.computer.files||[]).find(x=>x.id===attach);
-      if(f && (f.type==='mail-drop' || /drop|payload/i.test(f.name))){
-        if(!state.game.mail.pendingDrops) state.game.mail.pendingDrops=[];
-        const seed = Date.now() % 100000;
-        state.game.mail.pendingDrops.push({
-          fileId: f.id, npcName: to, openAt: Date.now() + (15000 + seed % 45000),
-          chance: 40 + (seed % 30), seed, opened: false,
-          phoneId: null, ownerName: null, number: null
-        });
-        // assign random phone from bayshore for reveal
-        const phList = (typeof listRegionPhones==='function') ? listRegionPhones('bayshore') : null;
-        if(phList){ const ph=phList[seed % 550]; const last=state.game.mail.pendingDrops.at(-1); last.phoneId=ph.id; last.ownerName=ph.ownerName; last.number=ph.number; }
+      if(f && (f.type==='mail-drop' || /MAIL-DROP|mail-drop|drop/i.test(f.name+f.content))){
+        const res = scheduleMailDrop(state.game, to, f);
+        if(res.ok && res.phone){
+          state.game.mail.messages.unshift({
+            id:'mail_sys_'+Date.now().toString(36), direction:'in', from:'NULLBYTE MailDrop',
+            to:state.game.player.nickname,
+            subject:'Drop queued',
+            body:`Доставка ${res.drop.npcName}. Ожидание открытия: 5с–10м. PHONE будет доступен после открытия.`,
+            at:Date.now(), attachments:[], status:'unread'
+          });
+        } else if(res.ok && !res.phone){
+          state.game.mail.messages.unshift({
+            id:'mail_sys_'+Date.now().toString(36), direction:'in', from:'NULLBYTE MailDrop',
+            to:state.game.player.nickname,
+            subject:'Drop: NPC не найден',
+            body:`Имя «${to}» не найдено в реестре сетей. Укажи точное имя владельца из отчёта net-analyzer.`,
+            at:Date.now(), attachments:[], status:'unread'
+          });
+        }
       }
     }
-    scheduleSave(); toast('Письмо отправлено (внутриигровое)','success'); renderWindow('mail');
+    scheduleSave(); renderWindow('mail');
     return;
   }
   if(form.id==='browserForm'||form.classList?.contains('chrome-form')){

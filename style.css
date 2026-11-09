@@ -355,3 +355,26 @@ h1,h2,h3,strong,.window-title{
 .nt-people{display:flex;flex-direction:column;gap:8px}
 .nt-person{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:#0e161e;border:1px solid #2a3a48;border-radius:10px}
 .nt-person small{display:block;color:#7d92a3}
+
+.site-page.site-trading{background:#0b0e11;color:#d1d4dc}
+.site-hero.trading{background:#131722;border-bottom:1px solid #2a2e39;padding:12px 16px}
+.site-trading .site-brand{font:700 16px/1.2 system-ui;letter-spacing:.04em;color:#f0f3fa}
+.site-trading .site-brand span{color:#2962ff}
+.site-trading .site-nav{gap:4px}
+.site-trading .site-nav-link{background:transparent;border:none;color:#787b86;padding:8px 12px;border-radius:4px}
+.site-trading .site-nav-link.on{color:#f0f3fa;background:#2a2e39}
+.nt-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:16px}
+.nt-card{background:#131722;border:1px solid #2a2e39;border-radius:6px;padding:14px}
+.nt-card-head{display:flex;justify-content:space-between;font:600 13px system-ui}
+.nt-card-head .up{color:#089981}
+.nt-card-head .down{color:#f23645}
+.nt-spark{margin-top:8px;background:#0b0e11;border-radius:4px}
+.nt-people{display:flex;flex-direction:column;gap:6px}
+.nt-person{display:flex;justify-content:space-between;padding:12px 14px;background:#131722;border:1px solid #2a2e39;border-radius:6px}
+.map-canvas{position:relative;width:100%;min-height:360px;background:
+  radial-gradient(ellipse at 20% 30%,#1a2834 0%,transparent 50%),
+  radial-gradient(ellipse at 80% 70%,#15202a 0%,transparent 45%),
+  linear-gradient(180deg,#0a1218,#070b10);border:1px solid #2a3a48;border-radius:14px;overflow:hidden}
+.map-point{position:absolute;transform:translate(-50%,-50%);padding:7px 11px;border-radius:999px;border:1px solid #3d6a80;background:#152029ee;color:#d5e0ea;font-size:10px;cursor:pointer;box-shadow:0 4px 16px #0006}
+.map-point.on{border-color:#5ec8ff;box-shadow:0 0 16px #5ec8ff55}
+.map-event-zone{position:absolute;border:2px solid #e05555;background:rgba(160,30,30,.32);border-radius:12px;pointer-events:none;box-shadow:inset 0 0 24px #c0444488}

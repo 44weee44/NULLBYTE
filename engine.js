@@ -157,6 +157,7 @@ export const HARDWARE = {
 
 export const SITES = [
   {id:'aster-bank',domain:'asterbank.null',title:'Aster Union Bank',kind:'bank',security:5,region:'Северный сектор',district:'Квартал Финансов',description:'Вымышленный городской банк. Данные и счета существуют только в симуляции.',artifact:'SEALED-ACCT-17',data:'Виртуальная запись счёта: AC-017 / статус: проверен',siteText:'Сервис работает штатно.'},
+  {id:'nulltrading',domain:'nulltrading.null',title:'NullTrading',kind:'trading',security:2,region:'Мидтаун-Спайн',district:'Биржа',description:'Симуляция биржи: NULLBYTE, 44weee, tunnel. Графики локальные, без реальных денег.',artifact:'NT-TICK',data:'Котировки симулируются на клиенте.',siteText:'Рынок открыт (симуляция).'},
   {id:'volt-market',domain:'voltmarket.null',title:'Volt Market',kind:'shop',security:1,region:'Старый порт',district:'Торговая линия',description:'Каталог электроники и комплектующих.',artifact:'CATALOG-B7',data:'Заказ VM-204 подготовлен к выдаче',siteText:'Весенняя распродажа компонентов.'},
   {id:'neon-motors',domain:'neonmotors.null',title:'Neon Motors',kind:'auto',security:3,region:'Северный сектор',district:'Авеню Моторс',description:'Автосалон и сервис виртуальных автомобилей.',artifact:'VIN-SIM-88',data:'Виртуальная карточка автомобиля NM-88',siteText:'Новые модели уже в каталоге.'},
   {id:'gridworks',domain:'gridworks.null',title:'GridWorks',kind:'utility',security:3,region:'Промзона',district:'Энергорайон',description:'Электротехническая компания вымышленного мира.',artifact:'GRID-LOG-11',data:'Журнал контроллера GW-11',siteText:'Сеть виртуальных объектов стабильна.'},
@@ -185,7 +186,6 @@ export const SITES = [
   {id:'metro-pass',domain:'metropass.null',title:'Metro Pass',kind:'utility',security:2,region:'Саутгейт',district:'Транспорт',description:'Транспортные карты.',artifact:'PASS-55',data:'Карта 55',siteText:'Проезд виртуальный.'},
   {id:'signal-tower',domain:'signtower.null',title:'Signal Tower',kind:'wifi',security:2,region:'Шэдоулайн',district:'Вышка',description:'Релейная точка.',artifact:'RELAY-3',data:'Узел 3',siteText:'Только покрытие.'},
   {id:'ledger-club',domain:'ledgerclub.null',title:'Ledger Club',kind:'bank',security:4,region:'Мидтаун-Спайн',district:'Клуб',description:'Закрытый учётный клуб (не Aster).',artifact:'LEDGER-X',data:'Членство X',siteText:'Отдельный контур.'},
-  {id:'nulltrading',domain:'nulltrading.null',title:'NullTrading',kind:'trading',security:2,region:'Мидтаун-Спайн',district:'Биржа',description:'Симуляция биржи: NULLBYTE, 44weee, tunnel. Графики локальные, без реальных денег.',artifact:'NT-TICK',data:'Котировки симулируются на клиенте.',siteText:'Рынок открыт (симуляция).'}
 ];
 
 export const LOCATIONS = [
@@ -248,6 +248,7 @@ export function createInitialState(tgUser=null) {
   const state0 = {
     version:SAVE_VERSION,
     meta:{createdAt:now,updatedAt:now,seed:`nb-${now.toString(36)}`,migratedFrom:null},
+    meta:{seed:'nb',createdAt:Date.now(),updatedAt:Date.now()},
     player:{nickname:'',telegramId:tgUser?.id ? String(tgUser.id) : '',level:1,xp:0,reputation:0,contractsCompleted:0,totalEarned:0},
     economy:{credits:BALANCE.creditsStart,transactions:[{id:'txn-starter',type:'income',amount:BALANCE.creditsStart,reason:'Стартовый грант оператора',at:now}]},
     computer:{cpu:1,ram:1,gpu:1,storage:1,os:1,files:[],installedPlugins:['net-link','net-analyzer','phone-access','mail-drop'],uptimeStartedAt:now},
@@ -273,13 +274,13 @@ export function createInitialState(tgUser=null) {
   if (typeof PHONE_JOBS !== 'undefined') {
     for (const j of PHONE_JOBS) {
       if (!state0.missions.items.some(x => x.id === j.id)) {
-        const item = bindPhoneMissionTarget({ ...j, status: j.minLevel <= 1 ? 'available' : 'locked' }, 'nb');
+        const item = bindPhoneMissionTarget({ ...j, status: j.minLevel <= 1 ? 'available' : 'locked' }, phoneSeed(state0));
         state0.missions.items.push(item);
       }
     }
   }
   // keep templates for tests/legacy; UI uses isMissionVisible (phone- only)
-  state0.missions.items.forEach(m => { if (String(m.id||'').startsWith('phone-')) bindPhoneMissionTarget(m, 'nb'); });
+  state0.missions.items.forEach(m => { if (String(m.id||'').startsWith('phone-')) bindPhoneMissionTarget(m, phoneSeed(state0)); });
 
 
   state0.ops = createEmptyOpsState();
@@ -467,9 +468,11 @@ export function uninstallPlugin(state,pluginId) {
   return {ok:true,message:'Плагин удалён. Пользовательские файлы сохранены.'};
 }
 export function acceptMission(state,missionId) {
-  // ensure phone target bound
   const _pre = state.missions.items.find(x=>x.id===missionId);
-  if (_pre) bindPhoneMissionTarget(_pre, state.meta?.seed||'nb');
+  if (_pre && String(_pre.id||'').startsWith('phone-')) {
+    const v = validatePhoneMissionTarget(_pre, state);
+    if (!v.ok) return { ok: false, reason: 'Цель контракта не найдена в указанной сети. Контракт обновлён — открой детали снова.' };
+  }
   return acceptMission_inner(state,missionId);
 }
 function acceptMission_inner(state,missionId) {
@@ -1498,10 +1501,24 @@ if (pluginId === 'data-exporter' && (cmd === 'export' || cmd === 'pack')) {
 
   if (pluginId === 'mail-drop' && cmd === 'craft') {
     const name = arg1 || 'drop';
-    const content = 'NULLBYTE MAIL DROP PAYLOAD\n(sim attachment — open chance on send via N-Mail)';
-    return { ok: true, lines: [{ text: 'Craft attachment', type: 'blue' }, { text: 'save <имя> затем прикрепи в N-Mail', type: 'muted' }],
-      pendingSave: { kind: 'mail-drop', content, defaultName: name, type: 'mail-drop', encrypted: false } };
+    const token = 'MD-' + Math.abs((Date.now() * 7) % 1e9).toString(36).toUpperCase();
+    const content = [
+      'NULLBYTE MAIL-DROP',
+      'token=' + token,
+      'hint=attach_and_send_via_nmail',
+      'window=5s..10m after delivery'
+    ].join('\n');
+    return { ok: true, lines: [
+      { text: 'Mail-drop payload ready · ' + token, type: 'green' },
+      { text: 'save <имя> → N-Mail → кому: имя владельца телефона → вложение → отправить', type: 'muted' }
+    ], pendingSave: { kind: 'mail-drop', content, defaultName: name, type: 'mail-drop', encrypted: false, meta: { token } } };
   }
+  if (pluginId === 'mail-drop' && (cmd === 'status' || cmd === 'list')) {
+    const drops = state.phoneWorld?.pendingDrops || [];
+    if (!drops.length) return { ok: true, lines: [{ text: 'Нет активных drop-ожиданий', type: 'muted' }] };
+    return { ok: true, lines: drops.map(d => ({ text: `${d.npcName} · ${d.phoneId || '?'} · open@${new Date(d.openAt).toLocaleTimeString()} · ${d.status}`, type: '' })) };
+  }
+
 
   if (pluginId === 'sms-bomber' && cmd === 'bomb') {
     if (!state.phoneWorld?.purchases?.smsBomber && !getInstalledPlugin(state,'sms-bomber')) {
@@ -1617,6 +1634,7 @@ export function submitMission(state,missionId,eventId=idempotencyKey('deliver'))
 }
 export function processTimedEvents(state,now=Date.now()) {
   const notices=[];
+  notices.push(...processMailDrops(state, now));
   for(const site of state.world.sites) if(site.recoveryAt && site.recoveryAt<=now) {
     site.recoveryAt=0;site.defenseBoost=Math.max(0,site.defenseBoost-1);site.state='online';
     const base=SITES.find(item=>item.id===site.id);if(base)site.siteText=base.siteText;
@@ -1838,25 +1856,126 @@ export { npcReply, openingLine, moneyDialogue, dialogueStats } from './dialogue.
 /** Site/web missions hidden while web ops under construction. Phone board later. */
 
 /** Bind concrete phone identity to a phone mission (stable per mission id + seed). */
+/** Always the same seed as net-analyzer reports */
+export function scheduleMailDrop(state, npcName, file) {
+  if (!state.phoneWorld) state.phoneWorld = createEmptyPhoneWorld();
+  if (!Array.isArray(state.phoneWorld.pendingDrops)) state.phoneWorld.pendingDrops = [];
+  const seed = phoneSeed(state);
+  // resolve phone by owner name across regions
+  let phone = null;
+  for (const r of PHONE_REGIONS) {
+    const list = listRegionPhones(r.id, seed);
+    phone = list.find(p => p.ownerName.toLowerCase() === String(npcName||'').toLowerCase()) || null;
+    if (phone) break;
+  }
+  if (!phone) {
+    // fuzzy: last name match
+    for (const r of PHONE_REGIONS) {
+      const list = listRegionPhones(r.id, seed);
+      phone = list.find(p => p.ownerName.toLowerCase().includes(String(npcName||'').toLowerCase())) || null;
+      if (phone) break;
+    }
+  }
+  const delay = 5000 + Math.floor(Math.random() * (10 * 60 * 1000 - 5000)); // 5s..10m
+  const openAt = Date.now() + delay;
+  const drop = {
+    id: 'drop_' + Date.now().toString(36),
+    npcName: phone?.ownerName || npcName,
+    phoneId: phone?.id || null,
+    regionId: phone?.regionId || null,
+    fileId: file?.id,
+    fileName: file?.name,
+    createdAt: Date.now(),
+    openAt,
+    status: 'pending'
+  };
+  state.phoneWorld.pendingDrops.push(drop);
+  return { ok: true, drop, phone };
+}
+
+export function processMailDrops(state, now = Date.now()) {
+  if (!state.phoneWorld?.pendingDrops?.length) return [];
+  const notices = [];
+  const seed = phoneSeed(state);
+  for (const d of state.phoneWorld.pendingDrops) {
+    if (d.status !== 'pending') continue;
+    if (now < d.openAt) continue;
+    if (!d.phoneId) { d.status = 'failed'; d.reason = 'npc_not_found'; continue; }
+    // NPC opened the drop → grant access
+    accessPhone(state, d.phoneId, seed);
+    d.status = 'opened';
+    d.openedAt = now;
+    state._phoneTarget = d.phoneId;
+    state.mail.messages.unshift({
+      id: idempotencyKey('mail'), direction: 'in', from: d.npcName, to: state.player.nickname,
+      subject: 'Re: delivery',
+      body: `Открыл вложение. Сессия телефона ${d.phoneId} доступна в Phone Lab (временный доступ).`,
+      at: now, attachments: [], status: 'unread'
+    });
+    notices.push(`Mail-drop: ${d.npcName} открыл файл · доступ к ${d.phoneId}`);
+  }
+  // prune old
+  state.phoneWorld.pendingDrops = state.phoneWorld.pendingDrops.filter(d => d.status === 'pending' || (d.openedAt && now - d.openedAt < 3600000));
+  return notices;
+}
+
+export function phoneSeed(stateOrSeed = 'nb') {
+  if (stateOrSeed && typeof stateOrSeed === 'object') {
+    return String(stateOrSeed.meta?.seed || stateOrSeed.phoneWorld?.seed || 'nb');
+  }
+  return String(stateOrSeed || 'nb');
+}
+
 export function bindPhoneMissionTarget(mission, seedRoot = 'nb') {
   if (!mission || !(String(mission.id || '').startsWith('phone-'))) return mission;
-  if (mission._bound) return mission; // once
   const regionId = mission.regionId || 'bayshore';
+  const seed = phoneSeed(seedRoot);
   try {
-    const list = listRegionPhones(regionId, seedRoot);
-    let h = 0; const s = String(mission.id || 'p');
+    const list = listRegionPhones(regionId, seed);
+    if (!list.length) return mission;
+    let h = 0;
+    const s = String(mission.id || 'p');
     for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-    const phone = list[Math.abs(h) % list.length];
+    let phone = list[Math.abs(h) % list.length];
+    // if previously bound number not in this region/seed — rebind
+    if (mission.phoneNumber) {
+      const found = list.find(p => p.number === mission.phoneNumber || p.id === mission.phoneId);
+      if (found) phone = found;
+      else {
+        // force fresh pick
+        phone = list[Math.abs(h) % list.length];
+      }
+    }
     mission.phoneId = phone.id;
     mission.ownerName = phone.ownerName;
     mission.phoneNumber = phone.number;
     mission.regionId = regionId;
+    mission.ownerType = phone.ownerType;
     mission._bound = true;
-    // clean objective once (no stack)
-    const baseObj = String(mission.objective || '').split(' Сеть:')[0].trim();
+    mission._boundSeed = seed;
+    // strip any stacked suffix / never put PHONE_ID in player-facing objective
+    let baseObj = String(mission.objective || '').split(' Сеть:')[0].split(' Цель:')[0].trim();
     mission.objective = baseObj;
   } catch (e) {}
   return mission;
+}
+
+/** Returns true if mission target exists in stated region under phone seed */
+export function validatePhoneMissionTarget(mission, state) {
+  if (!mission || !String(mission.id || '').startsWith('phone-')) return { ok: true };
+  const seed = phoneSeed(state);
+  bindPhoneMissionTarget(mission, seed);
+  const list = listRegionPhones(mission.regionId || 'bayshore', seed);
+  const found = list.find(p => p.id === mission.phoneId && p.number === mission.phoneNumber && p.ownerName === mission.ownerName);
+  if (!found) {
+    // repair: rebind from region
+    mission._bound = false;
+    mission.phoneNumber = null;
+    bindPhoneMissionTarget(mission, seed);
+    const again = listRegionPhones(mission.regionId || 'bayshore', seed).find(p => p.id === mission.phoneId);
+    return { ok: !!again, mission, phone: again || null };
+  }
+  return { ok: true, mission, phone: found };
 }
 
 export function isMissionVisible(m) {

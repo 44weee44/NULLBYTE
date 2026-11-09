@@ -155,7 +155,7 @@ export function createInitialState(tgUser=null) {
     meta:{createdAt:now,updatedAt:now,seed:`nb-${now.toString(36)}`,migratedFrom:null},
     player:{nickname:'',telegramId:tgUser?.id ? String(tgUser.id) : '',level:1,xp:0,reputation:0,contractsCompleted:0,totalEarned:0},
     economy:{credits:BALANCE.creditsStart,transactions:[{id:'txn-starter',type:'income',amount:BALANCE.creditsStart,reason:'Стартовый грант оператора',at:now}]},
-    computer:{cpu:1,ram:1,gpu:1,storage:1,os:1,files:[],installedPlugins:['net-link','net-analyzer','phone-access','mail-drop','site-analyzer','artifact-decoder','node-radar','weakness-lab','sim-exploit','data-exporter'],uptimeStartedAt:now},
+    computer:{cpu:1,ram:1,gpu:1,storage:1,os:1,files:[],installedPlugins:['net-link','net-analyzer','phone-access','mail-drop'],uptimeStartedAt:now},
     world:{sites:SITES.map(s=>({...s,state:'online',recoveryAt:0,defenseBoost:0,revision:1})),progress:{},npc:[
       {id:'npc-mira',name:'Mira Voss',role:'Клиент',device:'Pocket Mobile V2',address:'mira-pocket.pocketmobile.null',data:'Профиль виртуального телефона PM-22',location:'oldport',nextAt:now+20*60*1000},
       {id:'npc-eli',name:'Eli North',role:'Механик',device:'Garage Terminal',address:'eli-garage.neonmotors.null',data:'Сервисная карточка NM-88',location:'north',nextAt:now+35*60*1000},
@@ -1256,10 +1256,14 @@ if (pluginId === 'data-exporter' && (cmd === 'export' || cmd === 'pack')) {
     if (cmd === 'disconnect') {
       if (!state.phoneWorld?.network) return { ok: true, lines: [{ text: 'Сеть уже отключена.', type: 'muted' }] };
       state.phoneWorld.network = null;
+      state._phoneTarget = null;
+      state.phoneWorld.access = {};
+      state.phoneWorld.discovered = {};
       return { ok: true, lines: [
         { text: 'Net Link — drop interface…', type: 'muted' },
-        { text: 'Disconnected from regional net.', type: 'green' }
-      ], progressUpdated: true };
+        { text: 'Disconnected from regional net.', type: 'green' },
+        { text: 'Phone sessions & discovered cleared.', type: 'muted' }
+      ], progressUpdated: true, closePhoneLab: true, clearPhone: true };
     }
     if (cmd === 'connect') {
       const rid = arg1 || parts[1];
@@ -1311,9 +1315,9 @@ if (pluginId === 'data-exporter' && (cmd === 'export' || cmd === 'pack')) {
     if (cmd === 'disconnect' || cmd === 'close') {
       const was = state._phoneTarget;
       state._phoneTarget = null;
-      if (state.phoneWorld?.access && was) {
-        // keep discovered + locks; only drop active session view
-        delete state.phoneWorld.access[was];
+      if (state.phoneWorld) {
+        if (was && state.phoneWorld.access) delete state.phoneWorld.access[was];
+        if (was && state.phoneWorld.discovered) delete state.phoneWorld.discovered[was];
       }
       return { ok: true, lines: [
         { text: was ? `Disconnect ${was}` : 'No active phone.', type: was ? 'green' : 'muted' },
@@ -1506,7 +1510,7 @@ export function processTimedEvents(state,now=Date.now()) {
     const lock=state.bank.lockStartedAt>0 && state.bank.lockStartedAt<=verifiedAt && state.bank.lockUntil>verifiedAt;
     m.status='completed';m.completedAt=now;m.rewardPaid=true;
     state.player.contractsCompleted++;
-    state.player.xp+=m.xp;
+    state.player.xp+=m.xp; updateLevel(state);
     state.player.reputation+=Math.max(1,Math.round(m.xp/20));
     state.player.totalEarned+=m.reward;
     if(lock) {
@@ -1554,6 +1558,15 @@ export function xpThresholdForLevel(level) {
   return xp;
 }
 
+export function grantXp(state, amount) {
+  const n = Math.max(0, Math.floor(Number(amount) || 0));
+  if (!n) return { leveled: false, gained: 0 };
+  state.player.xp = (state.player.xp || 0) + n;
+  const before = state.player.level;
+  updateLevel(state);
+  return { leveled: state.player.level > before, gained: n, level: state.player.level };
+}
+
 function updateLevel(state) {
   let next = state.player.level;
   while (next < BALANCE.maxLevel && state.player.xp >= xpThresholdForLevel(next)) next++;
@@ -1574,7 +1587,7 @@ function updateNpcSchedule(state,now) {
   for(const npc of state.world.npc){
     const previous=npc.location;
     while(npc.nextAt&&npc.nextAt<=now){const locs=['north','oldport','industrial','center'];const index=locs.indexOf(npc.location);npc.location=locs[(index+1+locs.length)%locs.length];npc.nextAt+=20*60*1000;}
-    if(previous!==npc.location){const place=LOCATIONS.find(x=>x.id===npc.location)?.name||npc.location;notices.push(`NPC: ${npc.name} сменил район → ${place}.`);}
+    if(previous!==npc.location){ /* silent: no toast/notice about district change */ }
   }
   return notices;
 }

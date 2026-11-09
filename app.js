@@ -57,7 +57,7 @@ function formatTime(ts) { return new Intl.DateTimeFormat('ru-RU',{hour:'2-digit'
 function humanLeft(ms) { const total=Math.max(0,Math.ceil(ms/1000)); const h=Math.floor(total/3600),m=Math.floor((total%3600)/60),s=total%60; return h?`${h}ч ${m}м`:`${m}м ${s}с`; }
 function currentRam() { return getRamUsage(state.game,[...state.opened.values()].map(w=>({ram:w.ram,minimized:w.minimized}))); }
 function currentLevelNeed() { const lvl=state.game.player.level; if(lvl>=BALANCE.maxLevel) return 0; const need=(typeof xpThresholdForLevel==='function'?xpThresholdForLevel(lvl):BALANCE.xpToLevel[lvl])||0; return Math.max(0,need-state.game.player.xp); }
-function toast(message,type='info') { const el=document.createElement('div');el.className=`toast ${type==='error'?'error':type==='success'?'success':''}`;el.textContent=message;$('toastStack').append(el);setTimeout(()=>el.remove(),4300); }
+function toast(message,type='info') { /* notifications off — no UI interrupt / keyboard steal */ return; }
 function scheduleSave() { clearTimeout(state.saveTimer);state.saveTimer=setTimeout(persist,250); }
 async function persist() {
   if(!state.game||state.saveBlocked)return;
@@ -536,13 +536,12 @@ function renderFiles(g) {
 
 
 function renderDarkShop(g) {
-  const usage=getHardwareUsage(g);
-  return `<div class="app-heading"><div><div class="eyebrow">DARK SHOP / HARDWARE</div><h2>DarkShop</h2><p>Игровые компоненты для виртуальной рабочей станции.</p></div><span class="badge amber">COMPONENTS</span></div>
-  <div class="notice">Комплектующие устанавливаются автоматически в совместимый слот. Файлы не удаляются при обновлении накопителя.</div>
-  <div class="panel section-gap"><div class="panel-title"><span>СВОБОДНОЕ МЕСТО</span><small>${fmt(usage.used/1024)} / ${usage.total/1024} GB</small></div><div class="progress"><i style="width:${Math.min(100,usage.used/usage.total*100)}%"></i></div></div>
-  <div class="panel section-gap"><div class="panel-title"><span>КОМПЛЕКТУЮЩИЕ</span><small>ПРОСМОТР / УЛУЧШЕНИЕ</small></div><div class="list">${['cpu','ram','gpu','storage','os'].map(part=>renderHardwareUpgrade(g,part,{cpu:'Процессор',ram:'Оперативная память',gpu:'Графика',storage:'Накопитель',os:'NULLBYTE OS'}[part])).join('')}</div></div>
-  <div class="notice warning section-gap">Тестовые цены и характеристики помечены как balance draft в конфигурации engine.js. Они предназначены для первичного тестирования баланса.</div>`;
+  return `<div class="app-heading"><div><div class="eyebrow">DARKSHOP</div><h2>DarkShop</h2><p>Магазин комплектующих</p></div><span class="badge gray">WIP</span></div>
+  <div class="notice warning section-gap">В разработке. Покупка комплектующих временно недоступна.</div>
+  <div class="empty-state"><b>COMING SOON</b><p>Апгрейды CPU / RAM / GPU / Storage появятся после доработки баланса.</p></div>`;
 }
+
+
 function renderPluginCard(g,p) {
   const installed=getInstalledPlugin(g,p.id);
   const wip=typeof isPluginLocked==='function'&&isPluginLocked(p.id);
@@ -906,49 +905,56 @@ function renderBrowser(g, winId) {
 function renderMap(g) {
   const selected = state.mapSelected || null;
   const locs = LOCATIONS || [];
-  const points = locs.map(loc => `<button type="button" class="map-point ${selected===loc.id?'on':''}" style="left:${loc.x}%;top:${loc.y}%" data-action="map-location" data-location="${loc.id}">${esc(loc.name)}</button>`).join('');
-  let detail = '<div class="empty-state"><b>Выбери регион</b><p>Снизу — сетевой ключ и сайты региона.</p></div>';
-  if (selected) {
-    const loc = locs.find(l => l.id === selected);
-    const netKey = loc?.netKey || ('NET-'+String(selected).toUpperCase());
-    const ssid = loc?.ssid || 'AP';
-    const siteList = (loc?.pois||[]).map(id => getSite(g,id)).filter(Boolean);
-    detail = `<div class="panel"><div class="panel-title"><span>${esc(loc?.name||selected)}</span><small>${esc(loc?.region||'')}</small></div>
-      <div class="kv"><span>Network key</span><b class="text-green">${esc(netKey)}</b></div>
-      <div class="kv"><span>SSID</span><b>${esc(ssid)}</b></div>
-      <div class="btn-row section-gap"><button type="button" class="btn tiny" data-action="copy-text" data-text="${esc(netKey)}">КОПИРОВАТЬ КЛЮЧ</button></div>
-      <div class="panel-title section-gap"><span>САЙТЫ РЕГИОНА</span><small>${siteList.length}</small></div>
-      ${siteList.map(s=>`<div class="list-row"><div class="list-main"><strong>${esc(s.title)}</strong><small>${esc(s.domain)} · ${esc(s.kind)}</small></div>
-        <button type="button" class="btn tiny ghost" data-action="browser-tab" data-site="${s.id}">Открыть</button></div>`).join('')||'<div class="muted">Нет точек</div>'}
-      <p class="muted small section-gap">Signal Mapper: map region или ключ ${esc(netKey)}</p>
-    </div>`;
+  const events = g.events?.active || [];
+  // unavailable / locked event zones
+  const blocked = new Set();
+  for (const e of events) {
+    if (e.effect?.serverBusy || e.effect?.harden || e.type === 'infra') {
+      // mark a location-ish id if present
+      if (e.regionId) blocked.add(e.regionId);
+    }
   }
-  return `<div class="app-heading"><div><div class="eyebrow">NULL CITY MAP</div><h2>Карта</h2><p>6 регионов · сетевые ключи · локальные сайты</p></div><span class="badge">MAP</span></div>
-  <div class="map-canvas section-gap">${points}</div>
-  <div class="section-gap">${detail}</div>`;
+  // always show 1-2 "event locked" demo regions as red if event active
+  if (events.length) {
+    blocked.add(locs[Math.min(locs.length-1, events.length)]?.id);
+  }
+  // static unavailable placeholders for event areas
+  const eventZones = [
+    { id: 'evt_zone_a', name: 'Зона ивента A', x: 18, y: 18, blocked: true },
+    { id: 'evt_zone_b', name: 'Зона ивента B', x: 82, y: 22, blocked: true },
+    { id: 'evt_zone_c', name: 'Закрытый сектор', x: 55, y: 78, blocked: true }
+  ];
+  const points = locs.map(loc => {
+    const hard = blocked.has(loc.id);
+    return `<button type="button" class="map-point ${selected===loc.id?'on':''} ${hard?'map-blocked':''}" style="left:${loc.x||50}%;top:${loc.y||50}%" data-action="map-select" data-id="${esc(loc.id)}" title="${esc(loc.name)}"><span>${esc(loc.name)}</span></button>`;
+  }).join('');
+  const ez = eventZones.map(z =>
+    `<div class="map-point map-blocked map-event-zone" style="left:${z.x}%;top:${z.y}%" title="${esc(z.name)}"><span>${esc(z.name)}</span></div>`
+  ).join('');
+  const detail = selected ? (locs.find(l=>l.id===selected)||{}) : null;
+  return `<div class="app-heading"><div><div class="eyebrow">NULLATLAS</div><h2>Карта</h2><p>Регионы и зоны событий</p></div><span class="badge">${locs.length} LOC</span></div>
+  <div class="map-canvas section-gap">${points}${ez}</div>
+  <div class="panel section-gap">${detail?`<strong>${esc(detail.name||selected)}</strong><p class="muted small">${esc(detail.desc||'Район игрового города')}</p><p class="muted small">Сеть: net-link → connect (см. region id в Help)</p>`:'<span class="muted">Выбери точку на карте</span>'}</div>
+  <div class="muted small">Красные зоны — недоступные / ивент. Обычные точки — районы.</div>`;
 }
 
 
 function missionSteps(m, g) {
-  const site = getSite(g, m.target);
-  const needDb = site?.kind === 'database';
-  const steps = [
-    'Открой BlackWire и прими контракт (если ещё не принят).',
-    `Открой Browser → цель <b>${esc(site?.domain || m.target)}</b>.`,
-    'Работай через Terminal и установленные плагины:',
-    '&nbsp;&nbsp;run site-analyzer → analyze &lt;domain&gt; → копируй SIGNATURE',
-    '&nbsp;&nbsp;run artifact-decoder → decode &lt;SIGNATURE&gt; → ARTIFACT_ID',
-    '&nbsp;&nbsp;run node-radar → discover &lt;ARTIFACT_ID&gt; → HOST_HANDLE',
-    '&nbsp;&nbsp;run weakness-lab → probe &lt;HOST_HANDLE&gt; → VECTOR_ID',
-    '&nbsp;&nbsp;run sim-exploit → simulate &lt;VECTOR_ID&gt; → SESSION_TOKEN',
-  ];
-  if (needDb) steps.push('&nbsp;&nbsp;6) Чтение виртуальной БД (нужен Virtual DB Reader)');
-  steps.push(`${needDb ? '7' : '6'}) run data-exporter → export &lt;SESSION_TOKEN&gt;`);
-  steps.push('Собери результат через data-exporter в Terminal.');
-  steps.push('Передай файл заказчику через N-Mail, когда он появится в очереди.');
-  steps.push('Подожди проверку (~5–6 сек) — кредиты и XP начислятся автоматически.');
-  return steps;
+  if (!m) return [];
+  if (m.category === 'phone' || String(m.id||'').startsWith('phone')) {
+    return [
+      '1. Terminal: run net-link → list → connect <region_id> (~6 сек)',
+      '2. run net-analyzer → scan (~7 сек) → save <отчёт>',
+      '3. Открой Files / IDE, найди нужный PHONE_ID в отчёте',
+      '4. run phone-access → open <PHONE_ID> (~4 сек) → Phone Lab',
+      '5. В Phone Lab собери данные (SMS / контакты / галерея) и сохрани файл',
+      '6. N-Mail: новое письмо → КОМУ = имя заказчика из контракта → вложение файл → отправить',
+      '7. Жди проверки; XP и CR начислятся после accept результата'
+    ];
+  }
+  return [m.objective || 'Выполни цель контракта', m.hint || '', 'Сдай результат через N-Mail заказчику'].filter(Boolean);
 }
+
 
 function renderMissionGuide(m, g) {
   const site = getSite(g, m.target);
@@ -1171,43 +1177,100 @@ async function animatePluginBoot(termId, pluginId) {
 }
 
 
+async function animateWorkTimed(termId, pluginId, totalMs) {
+  const start = performance.now();
+  const regions = ['BAYS','MIDT','IRON','SOUT','OAKR','SHAD'];
+  const randMac = () => [...Array(6)].map(() => ((Math.random()*256)|0).toString(16).padStart(2,'0')).join(':');
+  const randPhone = () => `PH-${regions[(Math.random()*regions.length)|0]}-${String((Math.random()*550)|0).padStart(4,'0')}`;
+  const titles = {
+    'net-link': 'NET LINK · connecting',
+    'net-analyzer': 'NET ANALYZER · deep sweep',
+    'phone-access': 'PHONE ACCESS · vuln probe'
+  };
+  termAdd(termId, `┌─ ${titles[pluginId]||pluginId}`, 'blue');
+  let step = 0;
+  while (performance.now() - start < totalMs) {
+    step++;
+    const elapsed = performance.now() - start;
+    const pct = Math.min(99, Math.round((elapsed / totalMs) * 100));
+    const bar = '█'.repeat(Math.round(pct/5)) + '░'.repeat(20 - Math.round(pct/5));
+    if (pluginId === 'net-analyzer') {
+      termAdd(termId, `│ ${randPhone()}  rssi=-${40+((Math.random()*45)|0)}  ${randMac()}`, 'muted');
+      if (step % 3 === 0) termAdd(termId, `│ [${bar}] ${pct}%  devices≈${Math.min(550, step*12)}`, 'blue');
+    } else if (pluginId === 'net-link') {
+      termAdd(termId, `│ handshake ${step}  bssid=${randMac()}  rtt=${((Math.random()*40)+2)|0}ms`, 'muted');
+      if (step % 2 === 0) termAdd(termId, `│ [${bar}] ${pct}%`, 'blue');
+    } else if (pluginId === 'phone-access') {
+      termAdd(termId, `│ probe 0x${((Math.random()*0xffffff)|0).toString(16)}  surface=${['lock','svc','fs','ipc'][step%4]}`, 'muted');
+      if (step % 2 === 0) termAdd(termId, `│ vuln search… [${bar}] ${pct}%`, 'blue');
+    } else {
+      termAdd(termId, `│ ${pct}%`, 'muted');
+    }
+    await sleep(Math.max(80, totalMs / 28));
+  }
+  termAdd(termId, `│ [${'█'.repeat(20)}] 100%`, 'green');
+  termAdd(termId, `└─ done`, 'green');
+}
+
 async function animateWork(termId, pluginId) {
   const steps = (typeof PLUGIN_ANIM !== 'undefined' && PLUGIN_ANIM[pluginId]) || ['processing…', 'done'];
-  const streams = {
-    'net-analyzer': () => [
-      `DEV ${String(1000+((Math.random()*8999)|0)).padStart(4,'0')}  rssi=-${40+((Math.random()*40)|0)}  mac=${[...Array(6)].map(()=>((Math.random()*256)|0).toString(16).padStart(2,'0')).join(':')}`,
-      `PHONE_ID candidate  PH-${['BAYS','MIDT','IRON','SOUT'][((Math.random()*4)|0)]}-${String((Math.random()*550)|0).padStart(4,'0')}`,
-      `pkt in=${((Math.random()*4000)|0)}  out=${((Math.random()*1200)|0)}  drop=${((Math.random()*12)|0)}`
-    ],
-    'net-link': () => [
-      `iface wlan0  ch=${1+((Math.random()*11)|0)}  bssid=${[...Array(6)].map(()=>((Math.random()*256)|0).toString(16).padStart(2,'0')).join(':')}`,
-      `auth SAE  retry=${(Math.random()*3)|0}  rtt=${((Math.random()*40)+2)|0}ms`
-    ],
-    'phone-access': () => [
-      `token ${[...Array(8)].map(()=>((Math.random()*16)|0).toString(16)).join('')}…`,
-      `fs mount /user  blocks=${((Math.random()*900)+100)|0}`,
-      `lockstate=${['secure','weak','open'][((Math.random()*3)|0)]}`
-    ],
-    'mail-drop': () => [`mime multipart  size=${((Math.random()*40)+4)|0}kb  crc=ok`],
-    'sms-bomber': () => [`queue +${((Math.random()*80)|0)}  rate=${((Math.random()*20)+5)|0}/s`],
-    'bank-peek': () => [`ledger hint  offset=0x${((Math.random()*0xffff)|0).toString(16)}`]
-  };
-  const gen = streams[pluginId] || (() => [`0x${((Math.random()*0xffffff)|0).toString(16).padStart(6,'0')}  n=${((Math.random()*9999)|0)}`]);
+  const regions = ['BAYS','MIDT','IRON','SOUT','OAKR','SHAD'];
+  const randMac = () => [...Array(6)].map(() => ((Math.random()*256)|0).toString(16).padStart(2,'0')).join(':');
+  const randPhone = () => `PH-${regions[(Math.random()*regions.length)|0]}-${String((Math.random()*550)|0).padStart(4,'0')}`;
+
+  if (pluginId === 'net-analyzer') {
+    termAdd(termId, '┌─ NET ANALYZER · deep sweep', 'blue');
+    termAdd(termId, '│ channel hop · RSSI map · registry build', 'muted');
+    const phases = [
+      'ARP / neighbor table',
+      'DHCP lease scrape',
+      'handset fingerprint',
+      'PHONE_ID index',
+      'dedupe + sort',
+      'report buffer'
+    ];
+    for (let p = 0; p < phases.length; p++) {
+      termAdd(termId, `│ ▸ phase ${p+1}/${phases.length}: ${phases[p]}`, 'blue');
+      const burst = 5 + ((Math.random()*4)|0);
+      for (let k = 0; k < burst; k++) {
+        const line = [
+          `  ${randPhone()}  rssi=-${40+((Math.random()*45)|0)}  ${randMac()}`,
+          `  pkt in=${((Math.random()*5000)|0)} out=${((Math.random()*2000)|0)}  ttl=${30+((Math.random()*90)|0)}`,
+          `  model=${['N-Phone 7','Pulse X','GridHand','OakLite'][((Math.random()*4)|0)]}  os=vOS`,
+          `  hash=${((Math.random()*0xfffffff)|0).toString(16)}  slot=${((Math.random()*550)|0)}`
+        ][(Math.random()*4)|0];
+        termAdd(termId, `│ ${line}`, 'muted');
+        await sleep(40 + Math.random() * 35);
+      }
+      const pct = Math.round(((p + 1) / phases.length) * 100);
+      const bar = '█'.repeat(Math.round(pct/5)) + '░'.repeat(20 - Math.round(pct/5));
+      termAdd(termId, `│ [${bar}] ${pct}%`, 'green');
+      await sleep(90);
+    }
+    termAdd(termId, '└─ registry ready · use: save <name>', 'green');
+    return;
+  }
+
   termAdd(termId, `┌─ WORK · ${pluginId}`, 'blue');
   for (let i = 0; i < steps.length; i++) {
     const pct = Math.round(((i + 1) / steps.length) * 100);
-    const filled = Math.round(pct / 5);
-    const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);
+    const bar = '█'.repeat(Math.round(pct / 5)) + '░'.repeat(20 - Math.round(pct / 5));
     termAdd(termId, `│ ${steps[i]}`, '');
-    for (const line of gen()) {
-      termAdd(termId, `│   » ${line}`, 'muted');
-      await sleep(55 + Math.random() * 50);
+    if (pluginId === 'net-link') {
+      termAdd(termId, `│   » iface wlan0  ch=${1+((Math.random()*11)|0)}  bssid=${randMac()}`, 'muted');
+      termAdd(termId, `│   » auth SAE  rtt=${((Math.random()*40)+2)|0}ms`, 'muted');
+    } else if (pluginId === 'phone-access') {
+      termAdd(termId, `│   » token ${[...Array(8)].map(()=>((Math.random()*16)|0).toString(16)).join('')}…`, 'muted');
+      termAdd(termId, `│   » fs mount /user  blocks=${((Math.random()*900)+100)|0}`, 'muted');
+    } else {
+      termAdd(termId, `│   » 0x${((Math.random()*0xffffff)|0).toString(16).padStart(6,'0')}  n=${((Math.random()*9999)|0)}`, 'muted');
     }
     termAdd(termId, `│ [${bar}] ${pct}%`, 'blue');
-    await sleep(180 + Math.random() * 120);
+    await sleep(200 + Math.random() * 100);
   }
   termAdd(termId, `└─ complete`, 'green');
 }
+
 
 
 
@@ -1392,11 +1455,28 @@ async function runTerminalCommand(termId, raw) {
       if (allowed.length && !allowed.includes(cmd0) && cmd0 !== 'save' && !(cmd0==='exit' && cmd.toLowerCase().includes('server'))) {
         termAdd(termId, `Нет такой команды: ${cmd0}. Введи help`, 'error');
       } else {
-        const heavy = (term.plugin === 'site-analyzer' || term.plugin === 'server-index') && /^(analyze|scan|index|dump)\b/i.test(cmd);
-        if (heavy) {
-          for (const step of ['connecting…','fingerprint…','payload map…','cipher pack…']) {
-            termAdd(termId, step, 'muted');
-            await sleep(400);
+        const cmd0h = (cmd.split(/\s+/)[0]||'').toLowerCase();
+        const heavyMap = {
+          'net-link': { cmds:['connect'], ms: 6000 },
+          'net-analyzer': { cmds:['scan','analyze'], ms: 7000 },
+          'phone-access': { cmds:['open'], ms: 4000 }
+        };
+        const hm = heavyMap[term.plugin];
+        if (hm && hm.cmds.includes(cmd0h)) {
+          // validate before long anim
+          if (term.plugin === 'net-analyzer' && !state.game.phoneWorld?.network) {
+            termAdd(termId, 'Сначала net-link → connect <region>', 'error');
+          } else if (term.plugin === 'net-link' && cmd0h === 'connect') {
+            const rid = (cmd.split(/\s+/)[1]||'').toLowerCase();
+            const okRegion = ['bayshore','midtown','ironreach','southgate','oakridge','shadowline'].includes(rid);
+            if (!okRegion) termAdd(termId, 'Неизвестный region_id. list', 'error');
+            else await animateWorkTimed(termId, term.plugin, hm.ms);
+          } else if (term.plugin === 'phone-access' && cmd0h === 'open') {
+            const pid = (cmd.split(/\s+/)[1]||'');
+            if (!/^PH-[A-Z0-9]{4}-\d{4}$/i.test(pid)) termAdd(termId, 'Формат: open PH-XXXX-0000', 'error');
+            else await animateWorkTimed(termId, term.plugin, hm.ms);
+          } else {
+            await animateWorkTimed(termId, term.plugin, hm.ms);
           }
         }
         const result = runPluginShellCommand(state.game, term.plugin, cmd);
@@ -1417,14 +1497,16 @@ async function runTerminalCommand(termId, raw) {
         if (result.progressUpdated || result.exportFile) scheduleSave();
         if (result.exportFile) toast('Файл готов → N-Mail', 'success');
         if (result.progressUpdated) refreshOpenApps(['browser', 'mail', 'blackwire', 'computer', 'files', 'phone', 'intel']);
-        if (result.closePhoneLab) {
+        if (result.closePhoneLab || result.clearPhone) {
           state._phoneTarget = null;
           if (state.opened.has('phone')) renderWindow('phone');
-          termAdd(termId, '→ Phone Lab очищен.', 'muted');
+          termAdd(termId, '→ Phone Lab: нет активной сессии.', 'muted');
         } else if (term.plugin === 'phone-access' && state._phoneTarget) {
           openApp('phone');
+          if (state.opened.has('phone')) renderWindow('phone');
           termAdd(termId, '→ Phone Lab открыт.', 'green');
         }
+        if (result.progressUpdated && state.opened.has('phone')) renderWindow('phone');
       }
     } finally {
       term.busy = false;
@@ -1603,7 +1685,7 @@ function renderPhoneLab(g) {
           <button type="button" class="btn tiny" data-action="phone-lab-export" data-kind="gallery" data-id="${esc(phone.id)}">Сохранить галерею</button>
           <button type="button" class="btn tiny danger" data-action="phone-lab-lock" data-id="${esc(phone.id)}">Lock 30м</button>
           <button type="button" class="btn tiny ghost" data-action="copy-text" data-text="${esc(phone.id)}">Copy ID</button>
-          <button type="button" class="btn tiny" data-action="phone-lab-disconnect">Disconnect</button>
+
         </div>
       </div>
     </div></div>`;
@@ -1644,7 +1726,7 @@ function renderHelp() {
     ['Что исследовать', '1) Региональные сети и телефоны (PHONE_ID). 2) Виртуальные сайты .null (сейчас web-цепочка на доработке). 3) Серверы и Intel. 4) Контракты BlackWire. 5) Случайные события мира.'],
     ['Регионы и сеть', 'NullAtlas: 6 регионов (Бейшор-Хайтс, Мидтаун-Спайн, Айронрич, Саутгейт, Окридж, Шэдоулайн). Terminal: run net-link → list → connect <region_id>. Подключение только внутриигровое.'],
     ['Анализ сети', 'run net-analyzer → scan (~анализ) → save <имя>. Полный отчёт содержит все ~550 PHONE_ID региона. Не обрезается. Ищи нужный ID сам (поиск в Files / IDE).'],
-    ['Телефоны PHONE_ID', 'Идентификатор формата PH-XXXX-0000. open через phone-access. После open открывается Phone Lab. SMS/звонки/галерея/lock/export — в приложении. disconnect в phone-access или кнопка Disconnect. Прогресс (файлы, discovered) сохраняется, сессия — нет.'],
+    ['Телефоны PHONE_ID', 'Идентификатор формата PH-XXXX-0000. open через phone-access. После open открывается Phone Lab. SMS/звонки/галерея/lock/export — в приложении. disconnect только командой: phone-access → disconnect (или net-link → disconnect). Прогресс (файлы, discovered) сохраняется, сессия — нет.'],
     ['Альтернатива: Mail Drop', 'run mail-drop → craft → save файл → N-Mail вложение NPC. Движок считает шанс/задержку открытия. При успехе в почте приходит PHONE_ID.'],
     ['Плагины mobile', 'Бесплатно: net-link, net-analyzer, phone-access, mail-drop. Управление телефоном — Phone Lab. Платно: sms-bomber 40000 CR, bank-peek 100000 CR. Старые mobile-модули удалены.'],
     ['Сайты (WIP)', 'Web-плагины в NULForge помечены «В доработке». Логика сохранена, run закрыт до отдельного чек-листа.'],
@@ -1794,12 +1876,18 @@ function handleAction(action,el) {
     case 'plugin-docs':{
       const docs={...pluginDocs(),...extendedPluginDocs()}[id]||{...pluginDocs(),...extendedPluginDocs()}[el.dataset.plugin];
       const p=docs||{title:id,role:'Нет описания',steps:[],inputs:'—',outputs:'—',next:[]};
+      const plug = getPlugin(id) || PLUGINS.find(x=>x.id===id);
       showModal({title:p.title||'Плагин',eyebrow:'ПОДРОБНЕЕ О ПЛАГИНЕ',body:`
+        <p><b>ID:</b> <code>${esc(id)}</code> · <b>Версия:</b> ${esc(plug?.version||'—')} · <b>Категория:</b> ${esc(plug?.category||'—')}</p>
         <p><b>Назначение:</b> ${esc(p.role)}</p>
+        <p><b>Что делает / не делает:</b> ${esc(plug?.description||p.role)} ${esc(p.limits||'')}</p>
+        <p><b>Цена:</b> ${plug?.price?fmt(plug.price)+' CR':'бесплатно'} · <b>RAM:</b> ${plug?.ram||'—'} · <b>Storage:</b> ${plug?.storage||'—'} MB</p>
         <p><b>Вход:</b> ${esc(p.inputs)}</p>
         <p><b>Выход:</b> ${esc(p.outputs)}</p>
         <p><b>Шаги:</b></p><ol style="margin:6px 0 0 18px">${(p.steps||[]).map(s=>`<li>${esc(s)}</li>`).join('')}</ol>
-        <p><b>Далее:</b> ${(p.next||[]).map(esc).join(', ')||'—'}</p>`,confirm:'ЗАКРЫТЬ',cancel:'',onConfirm:()=>{}});
+        <p><b>Далее:</b> ${(p.next||[]).map(esc).join(', ')||'—'}</p>
+        <p class="muted small"><b>Ограничения:</b> ${esc(p.limits||'—')}</p>
+        ${typeof isPluginLocked==='function'&&isPluginLocked(id)?'<p class="notice warning">Статус: НА ДОРАБОТКЕ — запуск и установка закрыты.</p>':''}`,confirm:'ЗАКРЫТЬ',cancel:'',onConfirm:()=>{}});
       break;
     }
     case 'copy-text':{
@@ -1871,7 +1959,30 @@ function handleAction(action,el) {
     }
     case 'ide-find':{
       const body=$('ideBody'); const find=$('ideFind')?.value||'';
-      if(body&&find){ const i=body.value.indexOf(find); toast(i>=0?('Позиция '+i):'Не найдено', i>=0?'success':'info'); }
+      if(!body||!find) break;
+      const text = body.value !== undefined ? body.value : (body.textContent||'');
+      const idx = text.indexOf(find);
+      if(idx < 0){ alert('Не найдено: '+find); break; }
+      // highlight via selection in pre
+      try {
+        const range = document.createRange();
+        const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+        let count = 0, node;
+        while (node = walker.nextNode()) {
+          const next = count + node.textContent.length;
+          if (idx >= count && idx < next) {
+            const local = idx - count;
+            range.setStart(node, local);
+            range.setEnd(node, Math.min(local + find.length, node.textContent.length));
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            body.scrollTop = Math.max(0, (body.scrollHeight * idx / Math.max(1,text.length)) - 40);
+            break;
+          }
+          count = next;
+        }
+      } catch (e) {}
       break;
     }
     case 'nbs-run':{
@@ -1908,12 +2019,7 @@ function handleAction(action,el) {
       state.game.computer.files.unshift(file);
       scheduleSave(); toast('Файл: '+name,'success'); break;
     }
-    case 'phone-lab-disconnect':{
-      const was = state._phoneTarget;
-      state._phoneTarget = null;
-      if (was && state.game.phoneWorld?.access) delete state.game.phoneWorld.access[was];
-      toast('Телефон отключён','success'); renderWindow('phone'); break;
-    }
+    
     case 'phone-lab-lock':{
       if(typeof lockPhone==='function') lockPhone(state.game, id, 30);
       else if(state.game.phoneWorld){ state.game.phoneWorld.access[id]={...(state.game.phoneWorld.access[id]||{}), blockedUntil:Date.now()+30*60*1000}; }

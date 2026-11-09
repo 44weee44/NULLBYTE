@@ -314,3 +314,17 @@ h1,h2,h3,strong,.window-title{
   border-radius:10px;display:grid;place-items:center;font-size:11px;color:#8fa3b3;padding:8px;text-align:center
 }
 .phone-tabs{margin:12px 0}
+
+.ide-body, .ide-body * { user-select: text !important; -webkit-user-select: text !important; }
+.phone-lab-wrap, .phone-screen { user-select: text; }
+
+.map-canvas{position:relative;width:100%;min-height:320px;background:radial-gradient(ellipse at 30% 20%,#1a2834,#0a1016 70%);border:1px solid #2a3a48;border-radius:12px;overflow:hidden}
+.map-point{position:absolute;transform:translate(-50%,-50%);padding:6px 10px;border-radius:8px;border:1px solid #3d6a80;background:#152029cc;color:#c9d5e0;font-size:10px;cursor:pointer;max-width:120px}
+.map-point.on{border-color:#5ec8ff;box-shadow:0 0 12px #5ec8ff55}
+.map-point.map-blocked,.map-event-zone{
+  border:2px solid #c44!important;
+  background:rgba(120,20,20,.55)!important;
+  color:#f0c0c0!important;
+  box-shadow:0 0 14px #c4444 inset,0 0 10px #8006;
+  pointer-events:none;
+}

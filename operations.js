@@ -219,39 +219,83 @@ export const MOBILE_PLUGIN_META = [
 
 
 
+
 export function extendedPluginDocs() {
   return {
     'net-link': {
-      title: 'Net Link', role: 'Подключение терминала к региональной сети.',
-      steps: ['run net-link', 'list', 'connect bayshore', 'status'],
-      inputs: 'region_id (bayshore|midtown|ironreach|southgate|oakridge|shadowline)',
-      outputs: 'active network session', next: ['net-analyzer']
+      title: 'Net Link', role: 'Подключение терминала к региональной сети (симуляция).',
+      steps: [
+        'run net-link',
+        'list — список region_id',
+        'connect <region_id> — ~6 сек анимация',
+        'status — текущая сеть',
+        'disconnect — сброс сети и discovered'
+      ],
+      inputs: 'region_id: bayshore | midtown | ironreach | southgate | oakridge | shadowline',
+      outputs: 'active network в phoneWorld.network',
+      next: ['net-analyzer'],
+      limits: 'Без подключения scan недоступен. Не реальная сеть.'
     },
     'net-analyzer': {
-      title: 'Net Analyzer', role: 'Полный реестр PHONE_ID региона (~550).',
-      steps: ['run net-analyzer', 'scan', 'save <имя>'],
-      inputs: 'подключённая сеть', outputs: 'network-report file', next: ['phone-access']
+      title: 'Net Analyzer', role: 'Полный реестр PHONE_ID региона (~550 устройств).',
+      steps: [
+        'Сначала net-link → connect',
+        'run net-analyzer',
+        'scan — ~7 сек поток данных',
+        'save <имя> — полный отчёт в Files'
+      ],
+      inputs: 'подключённая региональная сеть',
+      outputs: 'network-report файл со всеми PHONE_ID',
+      next: ['phone-access'],
+      limits: 'Только при активном net-link.'
     },
     'phone-access': {
-      title: 'Phone Access', role: 'Открыть виртуальный телефон по PHONE_ID.',
-      steps: ['run phone-access', 'open PH-BAYS-0042', 'status'],
-      inputs: 'PHONE_ID из отчёта', outputs: 'active phone target', next: ['Phone Lab app']
+      title: 'Phone Access', role: 'Сессия доступа к виртуальному телефону по PHONE_ID.',
+      steps: [
+        'Взять PHONE_ID из отчёта net-analyzer',
+        'run phone-access',
+        'open <PHONE_ID> — ~4 сек поиск уязвимости',
+        'Откроется Phone Lab',
+        'disconnect — закрыть сессию (ID пропадает из discovered)'
+      ],
+      inputs: 'PHONE_ID формата PH-XXXX-0000',
+      outputs: 'активная сессия + Phone Lab',
+      next: ['Phone Lab app'],
+      limits: 'Управление только в Phone Lab, не в terminal.'
     },
-
     'mail-drop': {
-      title: 'Mail Drop', role: 'Вложение для NPC; шанс открытия → PHONE_ID в почте.',
-      steps: ['craft payload', 'save file', 'N-Mail attach + send'],
-      inputs: '—', outputs: 'mail-drop file / pending open', next: []
+      title: 'Mail Drop', role: 'Вложение для NPC через N-Mail (альтернативный путь к ID).',
+      steps: ['run mail-drop', 'craft <имя>', 'save файл', 'N-Mail → вложение → отправка NPC'],
+      inputs: '—', outputs: 'mail-drop файл / шанс открытия → PHONE_ID в почте',
+      next: [], limits: 'Симуляция, не реальная почта.'
     },
     'sms-bomber': {
-      title: 'SMS Bomber', role: 'Симуляция SMS-нагрузки (40 000 CR).',
-      steps: ['install', 'bomb <PHONE_ID>'], inputs: 'PHONE_ID', outputs: 'sim flood', next: []
+      title: 'SMS Bomber', role: 'Игровая нагрузка SMS (покупка 40 000 CR).',
+      steps: ['Купить в NULForge', 'run sms-bomber', 'bomb <PHONE_ID>'],
+      inputs: 'PHONE_ID', outputs: 'sim flood', next: [], limits: 'Только симуляция.'
     },
     'bank-peek': {
       title: 'Bank Peek', role: 'Виртуальные bank notes телефона (100 000 CR).',
-      steps: ['install', 'peek <PHONE_ID>'], inputs: 'PHONE_ID', outputs: 'notes', next: []
+      steps: ['Купить в NULForge', 'run bank-peek', 'peek <PHONE_ID>'],
+      inputs: 'PHONE_ID', outputs: 'игровые заметки', next: [], limits: 'Не реальный банк.'
     },
-    'device-scout': { title: 'Device Scout', role: 'Устарел / заменён.', steps: [], inputs: '—', outputs: '—', next: [] },
-    'site-analyzer': { title: 'Site Analyzer', role: 'Web WIP — закрыт.', steps: ['на доработке'], inputs: '—', outputs: '—', next: [] }
+    'site-analyzer': {
+      title: 'Site Analyzer', role: 'Web-модуль на доработке.',
+      steps: ['Недоступен'], inputs: '—', outputs: '—', next: [], limits: 'LOCKED — нельзя установить/запустить.'
+    },
+    'artifact-decoder': { title: 'Artifact Decoder', role: 'На доработке.', steps: ['Недоступен'], inputs: '—', outputs: '—', next: [], limits: 'LOCKED' },
+    'node-radar': { title: 'Node Radar', role: 'На доработке.', steps: ['Недоступен'], inputs: '—', outputs: '—', next: [], limits: 'LOCKED' },
+    'weakness-lab': { title: 'Weakness Lab', role: 'На доработке.', steps: ['Недоступен'], inputs: '—', outputs: '—', next: [], limits: 'LOCKED' },
+    'sim-exploit': { title: 'Sim Exploit', role: 'На доработке.', steps: ['Недоступен'], inputs: '—', outputs: '—', next: [], limits: 'LOCKED' },
+    'data-exporter': { title: 'Data Exporter', role: 'На доработке.', steps: ['Недоступен'], inputs: '—', outputs: '—', next: [], limits: 'LOCKED' },
+    'site-editor': { title: 'Site Editor', role: 'На доработке.', steps: ['Недоступен'], inputs: '—', outputs: '—', next: [], limits: 'LOCKED' },
+    'db-reader': { title: 'DB Reader', role: 'На доработке.', steps: ['Недоступен'], inputs: '—', outputs: '—', next: [], limits: 'LOCKED' },
+    'identity-mask': { title: 'Identity Mask', role: 'На доработке.', steps: ['Недоступен'], inputs: '—', outputs: '—', next: [], limits: 'LOCKED' },
+    'bank-decryptor': { title: 'Bank Decryptor', role: 'На доработке.', steps: ['Недоступен'], inputs: '—', outputs: '—', next: [], limits: 'LOCKED' },
+    'obfuscator': { title: 'Obfuscator', role: 'На доработке.', steps: ['Недоступен'], inputs: '—', outputs: '—', next: [], limits: 'LOCKED' },
+    'file-forge': { title: 'File Forge', role: 'На доработке.', steps: ['Недоступен'], inputs: '—', outputs: '—', next: [], limits: 'LOCKED' },
+    'server-index': { title: 'Server Index', role: 'На доработке.', steps: ['Недоступен'], inputs: '—', outputs: '—', next: [], limits: 'LOCKED' },
+    'target-extractor': { title: 'Target Extractor', role: 'На доработке.', steps: ['Недоступен'], inputs: '—', outputs: '—', next: [], limits: 'LOCKED' },
+    'archive-exporter': { title: 'Archive Exporter', role: 'На доработке.', steps: ['Недоступен'], inputs: '—', outputs: '—', next: [], limits: 'LOCKED' }
   };
 }

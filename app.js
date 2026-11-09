@@ -5,7 +5,7 @@ import {
   processTimedEvents, bankStatus, bankRisk, attemptBankSimulation, saveEditorFile, validateNbs, runNbs,
   recordHistory, addBookmark, idempotencyKey,
   PLUGIN_SHELLS, PLUGIN_ANIM, runPluginShellCommand, pluginShellBootLines, resolveSiteRef, savePlayerNamedFile, findFileByName, markServerModified,
-  isPluginLocked, isMissionVisible, xpThresholdForLevel, listRegionPhones
+  isPluginLocked, isMissionVisible, xpThresholdForLevel, bindPhoneMissionTarget, ensureTrading, TRADING_TICKERS, tradingSparkline, listRegionPhones
 } from './engine.js';
 import { findPhone, phoneMessages, phoneGallery, phoneCallLog, phoneContacts, lockPhone } from './phones.js';
 import { bankLogin, bankTransfer, getBankSession, searchNpcs, pluginDocs, touchNpc, NPC_POOL_SIZE } from './npc.js';
@@ -716,6 +716,42 @@ function renderSitePage(g, site, page, progress) {
 
   // Nav helper
   const nav = (items) => `<nav class="site-nav">${items.map(([pg, lab]) => `<button type="button" class="site-nav-link ${p===pg?'on':''}" data-action="browser-page" data-page="${pg}">${lab}</button>`).join('')}</nav>`;
+
+  
+  if (site.kind === 'trading' || site.id === 'nulltrading') {
+    const tr = ensureTrading(g);
+    const tickers = TRADING_TICKERS || [];
+    const navT = nav([['home','Главная'],['people','Люди'],['profile','Профиль']]);
+    const cards = tickers.map(tk => {
+      const series = tr.series[tk.id] || [tk.base];
+      const sp = tradingSparkline(series, 160, 48);
+      const stroke = sp.up ? '#3dd68c' : '#f07178';
+      return `<div class="nt-card">
+        <div class="nt-card-head"><strong>${esc(tk.name)}</strong><span class="${sp.up?'up':'down'}">${sp.last.toFixed(2)}</span></div>
+        <svg class="nt-spark" viewBox="0 0 160 48" width="100%" height="48" preserveAspectRatio="none"><polyline fill="none" stroke="${stroke}" stroke-width="2" points="${sp.points}"/></svg>
+        <small class="muted">симуляция · ваш локальный ряд</small>
+      </div>`;
+    }).join('');
+    if (p === 'people') {
+      const people = (tr.people || []).map(pe => `<div class="nt-person"><div><b>${esc(pe.name)}</b><small>${esc(pe.tick)}</small></div><span>${Number(pe.stake).toLocaleString('ru-RU')} CR</span></div>`).join('');
+      return `<div class="site-page site-trading"><header class="site-hero trading"><div class="site-brand">NULL<span>TRADING</span></div>${navT}</header>
+        <div class="site-body"><h2>Участники (симуляция)</h2><div class="nt-people">${people}</div>
+        <p class="site-note">Суммы вкладов виртуальные и различаются у каждого оператора.</p></div></div>`;
+    }
+    if (p === 'profile') {
+      return `<div class="site-page site-trading"><header class="site-hero trading"><div class="site-brand">NULL<span>TRADING</span></div>${navT}</header>
+        <div class="site-body"><h2>Профиль</h2>
+        <div class="notice warning">В разработке. Портфель и сделки появятся позже.</div>
+        <p class="muted">Сейчас доступны только котировки и список участников.</p></div></div>`;
+    }
+    return `<div class="site-page site-trading"><header class="site-hero trading"><div class="site-brand">NULL<span>TRADING</span></div>${navT}</header>
+      <div class="site-body">
+        <h1>Биржа .null</h1>
+        <p class="muted">Котировки NULLBYTE · 44weee · tunnel. Движение цены у каждого игрока своё, в том числе офлайн.</p>
+        <div class="nt-grid">${cards}</div>
+        <div class="notice section-gap">Вкладываться пока нельзя — функция в будущем. Графики уже рабочие.</div>
+      </div></div>`;
+  }
 
   if (site.kind === 'shop') {
     const products = [
@@ -2035,7 +2071,9 @@ function handleAction(action,el) {
       else if(state.game.phoneWorld){ state.game.phoneWorld.access[id]={...(state.game.phoneWorld.access[id]||{}), blockedUntil:Date.now()+30*60*1000}; }
       toast('Lock 30м','success'); scheduleSave(); renderWindow('phone'); break;
     }
-    case 'open-app':$('startMenu').hidden=true;$('startButton').setAttribute('aria-expanded','false');openApp(app);break;
+    case 'open-app':$('startMenu').hidden=true;$('startButton').setAttribute('aria-expanded','false');
+      if(app==='browser'&&state.game&&typeof ensureTrading==='function') ensureTrading(state.game);
+      openApp(app);break;
     case 'close-window':closeWindow(el.closest('.app-window')?.dataset.window);break;
     case 'toggle-pin-window': togglePinWindow(el.closest('.app-window')?.dataset.window); break;
     case 'minimize-window':minimizeWindow(el.closest('.app-window')?.dataset.window);break;

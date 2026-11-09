@@ -343,3 +343,15 @@ h1,h2,h3,strong,.window-title{
 .ide-gutter{background:#0c1218;color:#4a5a68;border-right:1px solid #1e2a33!important}
 .ide-body{background:#0a0e14!important;color:#d2dde8!important;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .ide-toolbar .btn{border-radius:8px}
+
+.site-hero.trading{background:linear-gradient(135deg,#0c1a22,#122830 40%,#0a1218);border-bottom:1px solid #2a4a58}
+.site-brand span{color:#5ec8ff}
+.nt-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:14px}
+.nt-card{background:#0e161e;border:1px solid #2a3a48;border-radius:12px;padding:12px}
+.nt-card-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.nt-card-head .up{color:#3dd68c;font-weight:700}
+.nt-card-head .down{color:#f07178;font-weight:700}
+.nt-spark{display:block;margin-top:4px}
+.nt-people{display:flex;flex-direction:column;gap:8px}
+.nt-person{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:#0e161e;border:1px solid #2a3a48;border-radius:10px}
+.nt-person small{display:block;color:#7d92a3}

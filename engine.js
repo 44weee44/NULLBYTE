@@ -7,6 +7,78 @@ import { npcReply, openingLine, moneyDialogue, dialogueStats, getTrust } from '.
 import { PHONE_REGIONS, PHONES_PER_REGION, createEmptyPhoneWorld, migratePhoneWorld, generatePhone, listRegionPhones, findPhone, buildNetworkReport, connectNetwork, analyzeNetwork, accessPhone, lockPhone, phoneMessages, phoneContacts, phoneGallery, phoneCallLog, makePhoneId } from './phones.js';
 import { createEmptyEvents, migrateEvents, processWorldEvents, listActiveEvents } from './events.js';
 export const SAVE_VERSION = 1;
+
+/** Per-player simulated market — prices drift offline via timestamps. */
+export const TRADING_TICKERS = [
+  { id: 'NULLBYTE', name: 'NULLBYTE', base: 100 },
+  { id: '44weee', name: '44weee', base: 44 },
+  { id: 'tunnel', name: 'tunnel', base: 18 }
+];
+
+export function createEmptyTrading(seed = 'nb') {
+  return { version: 1, seed: String(seed), lastTick: Date.now(), series: {}, people: null };
+}
+
+function tradingHash(s) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < String(s).length; i++) { h ^= String(s).charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
+export function ensureTrading(state) {
+  if (!state.trading) state.trading = createEmptyTrading(state.player?.nickname || state.meta?.seed || 'nb');
+  const t = state.trading;
+  const seed = t.seed || state.player?.nickname || 'nb';
+  const now = Date.now();
+  // advance ~1 point per 45s offline, cap catch-up
+  const steps = Math.min(40, Math.max(0, Math.floor((now - (t.lastTick || now)) / 45000)));
+  for (const tk of TRADING_TICKERS) {
+    if (!Array.isArray(t.series[tk.id]) || t.series[tk.id].length < 2) {
+      let p = tk.base * (0.92 + (tradingHash(seed + tk.id) % 100) / 500);
+      const arr = [];
+      for (let i = 0; i < 24; i++) {
+        const n = ((tradingHash(seed + tk.id + ':' + i) % 100) - 50) / 1000;
+        p = Math.max(tk.base * 0.7, Math.min(tk.base * 1.45, p * (1 + n)));
+        arr.push(Math.round(p * 100) / 100);
+      }
+      t.series[tk.id] = arr;
+    }
+    let p = t.series[tk.id][t.series[tk.id].length - 1];
+    for (let s = 0; s < steps; s++) {
+      const n = ((tradingHash(seed + tk.id + ':t' + (t.lastTick + s)) % 100) - 50) / 1400;
+      p = Math.max(tk.base * 0.72, Math.min(tk.base * 1.4, p * (1 + n)));
+      t.series[tk.id].push(Math.round(p * 100) / 100);
+      if (t.series[tk.id].length > 48) t.series[tk.id].shift();
+    }
+  }
+  if (steps > 0) t.lastTick = now;
+  if (!t.people) {
+    const names = ['Mira Voss','Eli North','Kai Reed','Nora Shaw','Dax Kane','Vera Cole','Pavel Orlov','Anya Volkov','Roman Hayes','Lena Frost','Omar Blake','Sera Quinn'];
+    t.people = names.map((name, i) => ({
+      name,
+      stake: Math.round((200 + (tradingHash(seed + name) % 8000) + i * 37) * 10) / 10,
+      tick: TRADING_TICKERS[i % TRADING_TICKERS.length].id
+    }));
+  }
+  return t;
+}
+
+export function tradingSparkline(values, w = 120, h = 36) {
+  const arr = values || [1, 1];
+  const min = Math.min(...arr), max = Math.max(...arr);
+  const span = Math.max(0.01, max - min);
+  const pts = arr.map((v, i) => {
+    const x = (i / Math.max(1, arr.length - 1)) * w;
+    const y = h - ((v - min) / span) * (h - 4) - 2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const last = arr[arr.length - 1];
+  const prev = arr[Math.max(0, arr.length - 2)];
+  const up = last >= prev;
+  return { points: pts, last, up, min, max };
+}
+
+
 export const PHONE_JOBS = [
   {id:'phone-001',title:'Список контактов',client:'Mira Voss',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:180,xp:40,
     objective:'Подключись к сети региона цели, открой телефон и выгрузи contacts.',
@@ -112,8 +184,8 @@ export const SITES = [
   {id:'campus-net',domain:'campus.null',title:'Campus Net',kind:'forum',security:1,region:'Окридж',district:'Кампус',description:'Студенческая сеть.',artifact:'CLASS-101',data:'Расписание',siteText:'Учёба в симуляции.'},
   {id:'metro-pass',domain:'metropass.null',title:'Metro Pass',kind:'utility',security:2,region:'Саутгейт',district:'Транспорт',description:'Транспортные карты.',artifact:'PASS-55',data:'Карта 55',siteText:'Проезд виртуальный.'},
   {id:'signal-tower',domain:'signtower.null',title:'Signal Tower',kind:'wifi',security:2,region:'Шэдоулайн',district:'Вышка',description:'Релейная точка.',artifact:'RELAY-3',data:'Узел 3',siteText:'Только покрытие.'},
-  {id:'ledger-club',domain:'ledgerclub.null',title:'Ledger Club',kind:'bank',security:4,region:'Мидтаун-Спайн',district:'Клуб',description:'Закрытый учётный клуб (не Aster).',artifact:'LEDGER-X',data:'Членство X',siteText:'Отдельный контур.'}
-
+  {id:'ledger-club',domain:'ledgerclub.null',title:'Ledger Club',kind:'bank',security:4,region:'Мидтаун-Спайн',district:'Клуб',description:'Закрытый учётный клуб (не Aster).',artifact:'LEDGER-X',data:'Членство X',siteText:'Отдельный контур.'},
+  {id:'nulltrading',domain:'nulltrading.null',title:'NullTrading',kind:'trading',security:2,region:'Мидтаун-Спайн',district:'Биржа',description:'Симуляция биржи: NULLBYTE, 44weee, tunnel. Графики локальные, без реальных денег.',artifact:'NT-TICK',data:'Котировки симулируются на клиенте.',siteText:'Рынок открыт (симуляция).'}
 ];
 
 export const LOCATIONS = [
@@ -213,6 +285,8 @@ export function createInitialState(tgUser=null) {
   state0.ops = createEmptyOpsState();
   state0.phoneWorld = createEmptyPhoneWorld();
   state0.events = createEmptyEvents();
+  state0.trading = createEmptyTrading(state0.player?.nickname || 'nb');
+  ensureTrading(state0);
   unlockMissions(state0);
   rotateMissionBoard(state0, Date.now(), true);
   return state0;
@@ -251,6 +325,9 @@ export function migrateSave(raw,tgUser=null) {
   out.npcWorld=migrateNpcWorld(raw.npcWorld);
   out.ops=migrateOps(raw.ops);
   out.phoneWorld=migratePhoneWorld(raw.phoneWorld);
+  out.trading = raw.trading && typeof raw.trading === 'object' ? { ...createEmptyTrading(), ...raw.trading } : createEmptyTrading(out.player?.nickname||'nb');
+  ensureTrading(out);
+
   if (Array.isArray(out.missions?.items)) {
     out.missions.items.forEach(m => { if (m && String(m.id||'').startsWith('phone-')) bindPhoneMissionTarget(m, 'nb'); });
   }

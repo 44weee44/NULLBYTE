@@ -920,16 +920,15 @@ function renderMap(g) {
   }
   // static unavailable placeholders for event areas
   const eventZones = [
-    { id: 'evt_zone_a', name: 'Зона ивента A', x: 18, y: 18, blocked: true },
-    { id: 'evt_zone_b', name: 'Зона ивента B', x: 82, y: 22, blocked: true },
-    { id: 'evt_zone_c', name: 'Закрытый сектор', x: 55, y: 78, blocked: true }
+    { x: 16, y: 16, w: 18, h: 16 },
+    { x: 74, y: 18, w: 16, h: 14 },
+    { x: 48, y: 70, w: 20, h: 15 }
   ];
   const points = locs.map(loc => {
-    const hard = blocked.has(loc.id);
-    return `<button type="button" class="map-point ${selected===loc.id?'on':''} ${hard?'map-blocked':''}" style="left:${loc.x||50}%;top:${loc.y||50}%" data-action="map-select" data-id="${esc(loc.id)}" title="${esc(loc.name)}"><span>${esc(loc.name)}</span></button>`;
+    return `<button type="button" class="map-point ${selected===loc.id?'on':''}" style="left:${loc.x||50}%;top:${loc.y||50}%" data-action="map-select" data-id="${esc(loc.id)}" title="${esc(loc.name)}"><span>${esc(loc.name)}</span></button>`;
   }).join('');
   const ez = eventZones.map(z =>
-    `<div class="map-point map-blocked map-event-zone" style="left:${z.x}%;top:${z.y}%" title="${esc(z.name)}"><span>${esc(z.name)}</span></div>`
+    `<div class="map-event-zone" style="left:${z.x}%;top:${z.y}%;width:${z.w}%;height:${z.h}%"></div>`
   ).join('');
   const detail = selected ? (locs.find(l=>l.id===selected)||{}) : null;
   return `<div class="app-heading"><div><div class="eyebrow">NULLATLAS</div><h2>Карта</h2><p>Регионы и зоны событий</p></div><span class="badge">${locs.length} LOC</span></div>
@@ -1192,33 +1191,29 @@ async function animateWorkTimed(termId, pluginId, totalMs) {
   const randMac = () => [...Array(6)].map(() => ((Math.random()*256)|0).toString(16).padStart(2,'0')).join(':');
   const randPhone = () => `PH-${regions[(Math.random()*regions.length)|0]}-${String((Math.random()*550)|0).padStart(4,'0')}`;
   const titles = {
-    'net-link': 'NET LINK · connecting',
-    'net-analyzer': 'NET ANALYZER · deep sweep',
-    'phone-access': 'PHONE ACCESS · vuln probe'
+    'net-link': 'NET LINK · link up',
+    'net-analyzer': 'NET ANALYZER · sweep',
+    'phone-access': 'PHONE ACCESS · probe'
   };
   termAdd(termId, `┌─ ${titles[pluginId]||pluginId}`, 'blue');
   let step = 0;
   while (performance.now() - start < totalMs) {
     step++;
-    const elapsed = performance.now() - start;
-    const pct = Math.min(99, Math.round((elapsed / totalMs) * 100));
-    const bar = '█'.repeat(Math.round(pct/5)) + '░'.repeat(20 - Math.round(pct/5));
     if (pluginId === 'net-analyzer') {
       termAdd(termId, `│ ${randPhone()}  rssi=-${40+((Math.random()*45)|0)}  ${randMac()}`, 'muted');
-      if (step % 3 === 0) termAdd(termId, `│ [${bar}] ${pct}%  devices≈${Math.min(550, step*12)}`, 'blue');
+      if (step % 4 === 0) termAdd(termId, `│ · indexing handsets…`, 'blue');
     } else if (pluginId === 'net-link') {
-      termAdd(termId, `│ handshake ${step}  bssid=${randMac()}  rtt=${((Math.random()*40)+2)|0}ms`, 'muted');
-      if (step % 2 === 0) termAdd(termId, `│ [${bar}] ${pct}%`, 'blue');
+      termAdd(termId, `│ handshake  bssid=${randMac()}  rtt=${((Math.random()*40)+2)|0}ms`, 'muted');
+      if (step % 3 === 0) termAdd(termId, `│ · auth / lease…`, 'blue');
     } else if (pluginId === 'phone-access') {
-      termAdd(termId, `│ probe 0x${((Math.random()*0xffffff)|0).toString(16)}  surface=${['lock','svc','fs','ipc'][step%4]}`, 'muted');
-      if (step % 2 === 0) termAdd(termId, `│ vuln search… [${bar}] ${pct}%`, 'blue');
+      termAdd(termId, `│ probe surface=${['lock','svc','fs','ipc','radio'][step%5]}  0x${((Math.random()*0xffffff)|0).toString(16)}`, 'muted');
+      if (step % 3 === 0) termAdd(termId, `│ · vuln chain…`, 'blue');
     } else {
-      termAdd(termId, `│ ${pct}%`, 'muted');
+      termAdd(termId, `│ · working…`, 'muted');
     }
-    await sleep(Math.max(80, totalMs / 28));
+    await sleep(Math.max(100, totalMs / 32));
   }
-  termAdd(termId, `│ [${'█'.repeat(20)}] 100%`, 'green');
-  termAdd(termId, `└─ done`, 'green');
+  termAdd(termId, `└─ ready`, 'green');
 }
 
 async function animateWork(termId, pluginId) {
@@ -1466,9 +1461,9 @@ async function runTerminalCommand(termId, raw) {
       } else {
         const cmd0h = (cmd.split(/\s+/)[0]||'').toLowerCase();
         const heavyMap = {
-          'net-link': { cmds:['connect'], ms: 6000 },
-          'net-analyzer': { cmds:['scan','analyze'], ms: 7000 },
-          'phone-access': { cmds:['open'], ms: 4000 }
+          'net-link': { cmds:['connect'], ms: 8000 },
+          'net-analyzer': { cmds:['scan','analyze'], ms: 9000 },
+          'phone-access': { cmds:['open'], ms: 6000 }
         };
         const hm = heavyMap[term.plugin];
         if (hm && hm.cmds.includes(cmd0h)) {
@@ -1510,9 +1505,12 @@ async function runTerminalCommand(termId, raw) {
           state._phoneTarget = null;
           if (state.opened.has('phone')) renderWindow('phone');
           termAdd(termId, '→ Phone Lab: нет активной сессии.', 'muted');
-        } else if (term.plugin === 'phone-access' && state._phoneTarget) {
+        } else if (term.plugin === 'phone-access' && (state._phoneTarget || result.ok)) {
+          if (!state._phoneTarget && result.lines) {
+            // try recover from last open
+          }
           openApp('phone');
-          if (state.opened.has('phone')) renderWindow('phone');
+          renderWindow('phone');
           termAdd(termId, '→ Phone Lab открыт.', 'green');
         }
         if (result.progressUpdated && state.opened.has('phone')) renderWindow('phone');
@@ -1660,10 +1658,13 @@ function renderFbi() {
 function renderPhoneLab(g) {
   const pw = g.phoneWorld || {};
   const net = pw.network;
-  const activeId = state._phoneTarget || null;
+  let activeId = state._phoneTarget || null;
+  if (!activeId && pw.access) {
+    const keys = Object.keys(pw.access).filter(k => pw.access[k] && (!pw.access[k].blockedUntil || pw.access[k].blockedUntil > Date.now()));
+    if (keys.length) activeId = keys[keys.length - 1];
+  }
   let phone = null;
-  try { if (activeId) phone = findPhone(activeId, g.meta?.seed || 'nb'); } catch (e) {}
-  const discovered = [];
+  try { if (activeId) phone = findPhone(String(activeId).trim(), g.meta?.seed || 'nb'); } catch (e) { console.warn(e); }
 
   let body = `<div class="empty-state"><b>Нет активного телефона</b><p>1) net-link connect · 2) net-analyzer scan · 3) phone-access open PH-… · Phone Lab откроется сам</p></div>`;
   if (phone) {

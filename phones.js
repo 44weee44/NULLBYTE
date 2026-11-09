@@ -1,10 +1,6 @@
 /**
  * NULLBYTE virtual phone registry — PHONE_ID based, regional, stable seeds.
- * ~550 phones per region × 6 regions. Simulation only.
  */
-
-
-
 export const PHONE_REGIONS = [
   { id: 'bayshore', name: 'Бейшор-Хайтс', netKey: 'NET-BAYSHORE', ssid: 'Bayshore-Mesh', x: 22, y: 28 },
   { id: 'midtown', name: 'Мидтаун-Спайн', netKey: 'NET-MIDTOWN', ssid: 'Spine-Public', x: 52, y: 42 },
@@ -16,8 +12,25 @@ export const PHONE_REGIONS = [
 
 export const PHONES_PER_REGION = 550;
 
-const OWNER_TYPES = ['civilian', 'business', 'hacker', 'corp', 'student', 'courier', 'freelancer'];
-const MODELS = ['N-Phone 7', 'Pulse X', 'GridHand', 'OakLite', 'ShadowFold', 'BayTab', 'Spine SE'];
+const FIRST = [
+  'Alex','Mira','Eli','Nora','Kai','Vera','Dax','Lena','Omar','Sera','Jon','Rita','Pavel','Anya','Chris','Nina','Leo','Tara','Ilya','Maya',
+  'Daniel','Sophie','Marcus','Elena','Viktor','Anna','James','Olivia','Noah','Emma','Lucas','Ava','Mateo','Isabella','Ethan','Mia',
+  'Artem','Polina','Kirill','Daria','Maxim','Yulia','Sergei','Katya','Andrei','Irina','Roman','Alina','Dmitry','Natalia',
+  'Ryan','Grace','Owen','Chloe','Caleb','Hannah','Nathan','Lily','Adrian','Zoe','Julian','Stella','Hugo','Clara','Felix','Alice',
+  'Boris','Svetlana','Gleb','Oksana','Timur','Valeria','Ruslan','Kristina','Nikita','Marina','Oleg','Tatiana','Ivan','Ekaterina'
+];
+const LAST = [
+  'Voss','North','Vale','Cross','Reed','Shaw','Kane','Frost','Cole','Hayes','Orlov','Volkov','Stone','Blake','Quinn','Marsh',
+  'Petrov','Sokolov','Kuznetsov','Smirnov','Popov','Lebedev','Kozlov','Novikov','Morozov','Fedorov','Mikhailov','Alexeev',
+  'Walker','Bennett','Parker','Cooper','Murphy','Bailey','Rivera','Foster','Bryant','Hayes','Coleman','Jenkins','Perry','Powell',
+  'Ivanov','Sidorov','Nikolaev','Belov','Gromov','Tarasov','Zaitsev','Vinogradov','Bogdanov','Kiselev','Makarov','Andreev',
+  'Miller','Wilson','Moore','Taylor','Anderson','Thomas','Jackson','White','Harris','Martin','Thompson','Garcia','Martinez','Robinson'
+];
+const OWNER_TYPES = [
+  'civilian','business','hacker','corp','student','courier','freelancer',
+  'medic','driver','barista','designer','engineer','lawyer','journalist','teacher','guard','pilot','chef','analyst','trader'
+];
+const MODELS = ['N-Phone 7','Pulse X','GridHand','OakLite','ShadowFold','BayTab','Spine SE','NullOne','Mesh 12','Harbor Mini'];
 
 function hash32(str) {
   let h = 2166136261 >>> 0;
@@ -28,65 +41,49 @@ function hash32(str) {
   }
   return h >>> 0;
 }
-
 function pick(seed, arr) {
   return arr[hash32(String(seed)) % arr.length];
 }
+function uniqueFullName(seed, used) {
+  for (let k = 0; k < 80; k++) {
+    const f = pick(seed + ':f:' + k, FIRST);
+    const l = pick(seed + ':l:' + k, LAST);
+    const full = `${f} ${l}`;
+    if (!used.has(full)) { used.add(full); return full; }
+  }
+  return `${pick(seed, FIRST)} ${pick(seed + 'x', LAST)} ${hash32(seed) % 99}`;
+}
 
-/** Stable PHONE_ID: PH-RRRR-XXXX */
 export function makePhoneId(regionId, index) {
   const r = String(regionId).slice(0, 4).toUpperCase().padEnd(4, 'X');
-  const n = String(index).padStart(4, '0');
+  const n = String(((Number(index) % PHONES_PER_REGION) + PHONES_PER_REGION) % PHONES_PER_REGION).padStart(4, '0');
   return `PH-${r}-${n}`;
 }
 
 export function createEmptyPhoneWorld() {
-  return {
-    version: 1,
-    network: null,          // { regionId, connectedAt }
-    analyzed: {},           // regionId -> { at, reportFileId }
-    access: {},             // phoneId -> { level, at, blockedUntil }
-    purchases: { smsBomber: false, bankData: false },
-    reputation: 0,
-    discovered: {}          // phoneId -> true
-  };
+  return { version: 1, network: null, analyzed: {}, access: {}, purchases: { smsBomber: false, bankData: false }, reputation: 0, discovered: {} };
 }
-
 export function migratePhoneWorld(raw) {
   const b = createEmptyPhoneWorld();
   if (!raw || typeof raw !== 'object') return b;
-  return {
-    ...b,
-    ...raw,
-    analyzed: raw.analyzed || {},
-    access: raw.access || {},
-    purchases: { smsBomber: false, bankData: false, ...(raw.purchases || {}) },
-    reputation: Number(raw.reputation) || 0,
-    discovered: raw.discovered || {},
-    network: raw.network || null
-  };
+  return { ...b, ...raw, analyzed: raw.analyzed || {}, access: raw.access || {}, purchases: { smsBomber: false, bankData: false, ...(raw.purchases || {}) }, reputation: Number(raw.reputation) || 0, discovered: raw.discovered || {}, network: raw.network || null };
 }
 
-/** Deterministic phone record — no storage of 3300 full objects */
 export function generatePhone(regionId, index, seedRoot = 'nb') {
   const i = ((Number(index) % PHONES_PER_REGION) + PHONES_PER_REGION) % PHONES_PER_REGION;
   const id = makePhoneId(regionId, i);
   const h = hash32(`${seedRoot}:${id}`);
   const type = OWNER_TYPES[h % OWNER_TYPES.length];
-  const first = pick(h + 'f', ['Alex','Mira','Eli','Nora','Kai','Vera','Dax','Lena','Omar','Sera','Jon','Rita','Pavel','Anya','Chris','Nina','Leo','Tara','Ilya','Maya']);
-  const last = pick(h + 'l', ['Voss','North','Vale','Cross','Reed','Shaw','Kane','Frost','Cole','Hayes','Orlov','Volkov','Stone','Blake','Quinn','Marsh']);
-  const npcIdx = h % 2000;
+  const used = new Set();
+  const ownerName = uniqueFullName(`${seedRoot}:own:${id}`, used);
+  const digits = String(9000000000 + (h % 899999999)).slice(0, 10);
   return {
-    id,
-    regionId,
-    index: i,
-    ownerName: `${first} ${last}`,
-    ownerType: type,
-    npcId: `npc_${String(npcIdx).padStart(4, '0')}`,
+    id, regionId, index: i, ownerName, ownerType: type,
+    npcId: `npc_${String(h % 2000).padStart(4, '0')}`,
     model: MODELS[h % MODELS.length],
-    number: `+7-9${String(100000000 + (h % 900000000)).slice(0, 9)}`,
+    number: `+7-${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`,
     security: 1 + (h % 5),
-    os: ['vOS 3', 'vOS 4', 'PulseOS', 'GridOS'][h % 4]
+    os: ['vOS 3', 'vOS 4', 'PulseOS', 'GridOS', 'NullOS'][h % 5]
   };
 }
 
@@ -97,26 +94,21 @@ export function listRegionPhones(regionId, seedRoot = 'nb') {
 }
 
 export function findPhone(phoneId, seedRoot = 'nb') {
-  const m = String(phoneId || '').match(/^PH-([A-Z0-9]{4})-(\d{4})$/i);
+  const m = String(phoneId || '').trim().match(/^PH-([A-Z0-9]{4})-(\d{4})$/i);
   if (!m) return null;
   const code = m[1].toUpperCase();
-  const region = PHONE_REGIONS.find(r => r.id.slice(0, 4).toUpperCase().padEnd(4, 'X').startsWith(code.slice(0, 3)) || makePhoneId(r.id, 0).startsWith(`PH-${code}`));
-  // resolve region by matching makePhoneId prefix
-  let rid = null;
+  const idx = Number(m[2]);
   for (const r of PHONE_REGIONS) {
-    if (makePhoneId(r.id, 0).slice(0, 7) === `PH-${code}`.slice(0, 7) || makePhoneId(r.id, Number(m[2])).id === phoneId) {
-      rid = r.id;
-      break;
+    const trial = makePhoneId(r.id, idx);
+    if (trial.toUpperCase() === String(phoneId).trim().toUpperCase()) {
+      return generatePhone(r.id, idx, seedRoot);
+    }
+    // prefix match PH-BAYS vs bayshore
+    if (makePhoneId(r.id, 0).slice(0, 7) === `PH-${code}`.slice(0, 7)) {
+      return generatePhone(r.id, idx, seedRoot);
     }
   }
-  if (!rid) {
-    for (const r of PHONE_REGIONS) {
-      const trial = makePhoneId(r.id, Number(m[2]));
-      if (trial.toUpperCase() === String(phoneId).toUpperCase()) { rid = r.id; break; }
-    }
-  }
-  if (!rid) return null;
-  return generatePhone(rid, Number(m[2]), seedRoot);
+  return null;
 }
 
 export function buildNetworkReport(regionId, seedRoot = 'nb') {
@@ -136,7 +128,6 @@ export function buildNetworkReport(regionId, seedRoot = 'nb') {
   return { region, phones, text: lines.join('\n'), count: phones.length };
 }
 
-/** Unique-ish message seeds per phone */
 export function phoneMessages(phone, seedRoot = 'nb') {
   const h = hash32(`${seedRoot}:msg:${phone.id}`);
   const templates = {
@@ -146,47 +137,52 @@ export function phoneMessages(phone, seedRoot = 'nb') {
     corp: ['Регламент Q3', 'Доступ к wiki', 'Совещание', 'NDA reminder', 'Badge expired'],
     student: ['Дедлайн завтра', 'Конспект?', 'Столовая', 'Пара отменена', 'Wi‑Fi кампуса'],
     courier: ['Адрес сменился', 'Ожидание 10 мин', 'Код домофона 42', 'Заказ закрыт', 'Новый слот'],
-    freelancer: ['Макет готов', 'Оплата пришла?', 'Правки v2', 'Созвон', 'Портфолио']
+    freelancer: ['Макет готов', 'Оплата пришла?', 'Правки v2', 'Созвон', 'Портфолио'],
+    medic: ['Смена до 8', 'Палата 4', 'Рецепт готов', 'Вызов', 'Журнал'],
+    driver: ['Адрес сменился', 'На месте', 'Пробка', 'Клиент ждёт', 'Топливо'],
+    barista: ['Смена', 'Заказ готов', 'Закрытие в 22', 'Молоко закончилось', 'Чаевые'],
+    designer: ['Макет в Figma', 'Правки клиента', 'Дедлайн пятница', 'Шрифты', 'Брендбук'],
+    engineer: ['Лог ошибки', 'Патч готов', 'Сервер up', 'Ревью', 'Тесты green'],
+    lawyer: ['Черновик договора', 'Суд в 11', 'Клиент перенёс', 'Документы', 'NDA'],
+    journalist: ['Источник', 'Черновик', 'Редакция', 'Фото', 'Дедлайн'],
+    teacher: ['Класс 7Б', 'Собрание', 'Оценки', 'Экзамен', 'Родители'],
+    guard: ['Обход', 'Камера 3', 'Смена', 'Инцидент', 'Отчёт'],
+    pilot: ['Слот', 'Погода', 'Борт готов', 'Задержка', 'Маршрут'],
+    chef: ['Меню', 'Поставка', 'Смена', 'Заказ банкета', 'Инвентарь'],
+    analyst: ['Отчёт Q', 'Модель', 'Данные dirty', 'Митинг', 'Dashboard'],
+    trader: ['Цена', 'Лот', 'Склад', 'Оплата', 'Доставка']
   };
   const base = templates[phone.ownerType] || templates.civilian;
+  const used = new Set();
   return base.map((t, i) => ({
     id: `msg_${phone.id}_${i}`,
-    from: i % 2 === 0 ? phone.ownerName : pick(h + i, ['Unknown', 'Boss', 'Mom', 'Client', 'NetFriend']),
+    from: i % 2 === 0 ? phone.ownerName : uniqueFullName(`${seedRoot}:msgfrom:${phone.id}:${i}`, used),
     text: t,
     at: Date.now() - (h % 100000) - i * 3600000
   }));
 }
 
 export function phoneContacts(phone, seedRoot = 'nb') {
-  const h = hash32(`${seedRoot}:ct:${phone.id}`);
-  return [0, 1, 2, 3, 4].map(i => ({
-    name: pick(h + i, ['Alex', 'Sam', 'Jordan', 'Casey', 'Riley', 'Quinn']),
-    number: `+7-9${String(200000000 + ((h + i * 17) % 700000000)).slice(0, 9)}`
-  }));
+  const used = new Set([phone.ownerName]);
+  const out = [];
+  for (let i = 0; i < 6; i++) {
+    const name = uniqueFullName(`${seedRoot}:ct:${phone.id}:${i}`, used);
+    const h = hash32(`${seedRoot}:ctn:${phone.id}:${i}`);
+    const d = String(9000000000 + (h % 899999999)).slice(0, 10);
+    out.push({ name, number: `+7-${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}` });
+  }
+  return out;
 }
 
 export function phoneGallery(phone, seedRoot = 'nb') {
   const h = hash32(`${seedRoot}:gal:${phone.id}`);
-  const tags = {
-    civilian: ['home', 'street', 'pet'],
-    business: ['office', 'card', 'sign'],
-    hacker: ['terminal', 'cable', 'note'],
-    corp: ['badge', 'lobby', 'desk'],
-    student: ['campus', 'notes', 'cafe'],
-    courier: ['package', 'door', 'map'],
-    freelancer: ['screen', 'mockup', 'workspace']
-  };
-  const t = tags[phone.ownerType] || tags.civilian;
-  return t.map((tag, i) => ({ id: `img_${phone.id}_${i}`, title: `${tag}_${i + 1}`, note: `Виртуальное фото (${tag})` }));
+  const tags = ['home','street','work','note','cafe','night','desk','park'];
+  return [0,1,2,3].map(i => ({ id: `img_${phone.id}_${i}`, title: `${tags[(h+i)%tags.length]}_${i+1}`, note: `Виртуальное фото` }));
 }
 
 export function phoneCallLog(phone, seedRoot = 'nb') {
-  const h = hash32(`${seedRoot}:call:${phone.id}`);
-  return [0, 1, 2].map(i => ({
-    with: pick(h + i, phoneContacts(phone, seedRoot)).name,
-    dir: i % 2 ? 'in' : 'out',
-    at: Date.now() - i * 7200000 - (h % 50000)
-  }));
+  const ct = phoneContacts(phone, seedRoot);
+  return [0,1,2,3].map(i => ({ with: ct[i % ct.length].name, dir: i % 2 ? 'in' : 'out', at: Date.now() - i * 7200000 }));
 }
 
 export function connectNetwork(state, regionId) {
@@ -196,7 +192,6 @@ export function connectNetwork(state, regionId) {
   state.phoneWorld.network = { regionId, connectedAt: Date.now(), netKey: region.netKey, ssid: region.ssid };
   return { ok: true, region };
 }
-
 export function analyzeNetwork(state, seedRoot = 'nb') {
   if (!state.phoneWorld?.network) return { ok: false, reason: 'Сначала: net connect <region_id>' };
   const report = buildNetworkReport(state.phoneWorld.network.regionId, seedRoot);
@@ -204,7 +199,6 @@ export function analyzeNetwork(state, seedRoot = 'nb') {
   state.phoneWorld.analyzed[report.region.id] = { at: Date.now() };
   return { ok: true, report };
 }
-
 export function accessPhone(state, phoneId, seedRoot = 'nb') {
   if (!state.phoneWorld) state.phoneWorld = createEmptyPhoneWorld();
   const phone = findPhone(phoneId, seedRoot);
@@ -217,7 +211,6 @@ export function accessPhone(state, phoneId, seedRoot = 'nb') {
   state.phoneWorld.discovered[phone.id] = true;
   return { ok: true, phone };
 }
-
 export function lockPhone(state, phoneId, minutes = 30) {
   if (!state.phoneWorld) return { ok: false, reason: 'нет phoneWorld' };
   const id = String(phoneId);

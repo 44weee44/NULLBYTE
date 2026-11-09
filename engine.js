@@ -424,6 +424,11 @@ export function cancelMission(state, missionId) {
 /** Keep 3–4 available offers; never touch accepted/submitted. */
 export function rotateMissionBoard(state, now = Date.now(), force = false) {
   ensureIntel(state);
+  // current build: only phone-* can be offered
+  state.missions.items.forEach(m => {
+    if (!String(m.id||'').startsWith('phone-') && m.status === 'available') m.status = 'locked';
+  });
+
   if (!state.intel.nextBoardAt) state.intel.nextBoardAt = now + 20 * 60 * 1000;
   if (!force && state.intel.nextBoardAt > now) {
     return { rotated: false, nextBoardAt: state.intel.nextBoardAt, offered: state.intel.boardIds || [] };
@@ -1572,9 +1577,8 @@ export function processTimedEvents(state,now=Date.now()) {
   return notices;
 }
 function unlockMissions(state) {
-  // Level-gate only: mark eligible locked contracts as available so progression tests and free-play work.
-  // Board rotation still reshuffles the *offer list* every 20m without touching accepted.
   for (const m of state.missions.items) {
+    if (!String(m.id||'').startsWith('phone-')) continue;
     if (m.status === 'locked' && m.minLevel <= state.player.level) m.status = 'available';
   }
 }
@@ -1758,11 +1762,11 @@ export { npcReply, openingLine, moneyDialogue, dialogueStats } from './dialogue.
 
 /** Bind concrete phone identity to a phone mission (stable per mission id + seed). */
 export function bindPhoneMissionTarget(mission, seedRoot = 'nb') {
-  if (!mission || mission.category !== 'phone') return mission;
+  if (!mission || !(String(mission.id || '').startsWith('phone-'))) return mission;
+  if (mission._bound) return mission; // once
   const regionId = mission.regionId || 'bayshore';
   try {
     const list = listRegionPhones(regionId, seedRoot);
-    // pick stable index from mission id hash
     let h = 0; const s = String(mission.id || 'p');
     for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
     const phone = list[Math.abs(h) % list.length];
@@ -1770,7 +1774,10 @@ export function bindPhoneMissionTarget(mission, seedRoot = 'nb') {
     mission.ownerName = phone.ownerName;
     mission.phoneNumber = phone.number;
     mission.regionId = regionId;
-    mission.objective = `${mission.objective || ''} Сеть: ${regionId}, номер: ${phone.number}, ориентир: ${phone.ownerName}`.trim();
+    mission._bound = true;
+    // clean objective once (no stack)
+    const baseObj = String(mission.objective || '').split(' Сеть:')[0].trim();
+    mission.objective = baseObj;
   } catch (e) {}
   return mission;
 }

@@ -1238,15 +1238,16 @@ async function animatePluginBoot(termId, pluginId) {
 }
 
 
-async function animateWorkTimed(termId, pluginId, totalMs) {
+async function animateWorkTimed(termId, pluginId, totalMs, mode) {
   const start = performance.now();
   const regions = ['BAYS','MIDT','IRON','SOUT','OAKR','SHAD'];
   const randMac = () => [...Array(6)].map(() => ((Math.random()*256)|0).toString(16).padStart(2,'0')).join(':');
   const randPhone = () => `PH-${regions[(Math.random()*regions.length)|0]}-${String((Math.random()*550)|0).padStart(4,'0')}`;
+  const randPin = () => String(1000 + ((Math.random()*9000)|0));
   const titles = {
     'net-link': 'NET LINK · link up',
     'net-analyzer': 'NET ANALYZER · sweep',
-    'phone-access': 'PHONE ACCESS · probe'
+    'phone-access': mode === 'attack' ? 'PHONE ACCESS · brute PIN' : 'PHONE ACCESS · open session'
   };
   termAdd(termId, `┌─ ${titles[pluginId]||pluginId}`, 'blue');
   let step = 0;
@@ -1258,16 +1259,38 @@ async function animateWorkTimed(termId, pluginId, totalMs) {
     } else if (pluginId === 'net-link') {
       termAdd(termId, `│ handshake  bssid=${randMac()}  rtt=${((Math.random()*40)+2)|0}ms`, 'muted');
       if (step % 3 === 0) termAdd(termId, `│ · auth / lease…`, 'blue');
+    } else if (pluginId === 'phone-access' && mode === 'attack') {
+      const tryPin = randPin();
+      const msgs = [
+        `│ brute  try=${tryPin}  entropy=${(Math.random()*8+1).toFixed(2)}`,
+        `│ dict  wordlist=${['rock','null','mesh','grid'][step%4]}  hit=0`,
+        `│ mask  ????  cand=${(Math.random()*9999)|0}`,
+        `│ side-channel  jitter=${((Math.random()*12)+1).toFixed(1)}ms`,
+        `│ gpu  kernel pin4  batch=${1000+((Math.random()*8000)|0)}`
+      ];
+      termAdd(termId, msgs[step % msgs.length], 'muted');
+      if (step % 2 === 0) {
+        const errs = [
+          `│ ! DEFENSE reject pin ${tryPin}`,
+          `│ ! watchdog tick 0x${((Math.random()*0xffffff)|0).toString(16)}`,
+          `│ ! rate-limit  backoff ${((Math.random()*400)|0)}ms`,
+          `│ ! integrity mismatch`,
+          `│ ! crypto oracle noise`
+        ];
+        termAdd(termId, errs[step % errs.length], 'error');
+      }
+      if (step % 5 === 0) termAdd(termId, `│ · cracking… candidates≈${step * 240}`, 'blue');
     } else if (pluginId === 'phone-access') {
       termAdd(termId, `│ probe surface=${['lock','svc','fs','ipc','radio'][step%5]}  0x${((Math.random()*0xffffff)|0).toString(16)}`, 'muted');
-      if (step % 3 === 0) termAdd(termId, `│ · vuln chain…`, 'blue');
+      if (step % 3 === 0) termAdd(termId, `│ · session bootstrap…`, 'blue');
     } else {
       termAdd(termId, `│ · working…`, 'muted');
     }
-    await sleep(Math.max(100, totalMs / 32));
+    await sleep(Math.max(90, totalMs / 36));
   }
   termAdd(termId, `└─ ready`, 'green');
 }
+
 
 async function animateWork(termId, pluginId) {
   const steps = (typeof PLUGIN_ANIM !== 'undefined' && PLUGIN_ANIM[pluginId]) || ['processing…', 'done'];
@@ -1543,7 +1566,7 @@ async function runTerminalCommand(termId, raw) {
         };
         const hm = heavyMap[term.plugin];
         if (term.plugin === 'phone-access' && cmd0h === 'attack') {
-          await animateWorkTimed(termId, 'phone-access', 13000);
+          await animateWorkTimed(termId, 'phone-access', 13000, 'attack');
         } else if (hm && hm.cmds.includes(cmd0h)) {
           // validate before long anim
           if (term.plugin === 'net-analyzer' && !state.game.phoneWorld?.network) {
@@ -2114,8 +2137,15 @@ function handleAction(action,el) {
     case 'phone-pin-ok':{
       const pid = state._phoneTarget;
       const r = unlockWithPin(state.game, pid, state.pinInput||'');
-      if (r.ok) { state.pinInput=''; state.phoneLabTab='home'; }
-      else { state.pinInput=''; }
+      if (r.ok) {
+        state.pinInput='';
+        state.phoneLabTab='home';
+        toast('Телефон разблокирован','success');
+      } else {
+        state.pinInput='';
+        toast(r.reason || 'Неверный PIN','error');
+      }
+      scheduleSave();
       renderWindow('phone'); break;
     }
     case 'phone-lab-tab':{

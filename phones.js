@@ -250,6 +250,7 @@ export function rollAttack(state, phoneId) {
       ...(state.phoneWorld.access[phone.id] || {}),
       attackOk: true,
       pin,
+      pinUsed: false,
       unlocked: false
     };
     state.phoneWorld.failCounts[key] = 0;
@@ -281,8 +282,18 @@ export function rollAttack(state, phoneId) {
 export function unlockWithPin(state, phoneId, pin) {
   const acc = state.phoneWorld?.access?.[phoneId];
   if (!acc?.attackOk || !acc.pin) return { ok: false, reason: 'Сначала attack' };
-  if (String(pin) !== String(acc.pin)) return { ok: false, reason: 'Неверный PIN' };
+  if (acc.pinUsed) return { ok: false, reason: 'PIN уже использован — нужен новый attack' };
+  if (String(pin).trim() !== String(acc.pin).trim()) return { ok: false, reason: 'Неверный PIN' };
   acc.unlocked = true;
+  acc.pinUsed = true; // one-shot
+  acc.pin = null;     // cannot reuse
+  acc.attackOk = false;
+  // freeze SMS once for this unlock session
+  const phone = findPhone(phoneId);
+  if (phone && !state.phoneWorld.sessionFrozenSms) {
+    state.phoneWorld.sessionFrozenSms = phoneMessages(phone, Date.now());
+    try { registerBankFromMessages(state, phone, state.phoneWorld.sessionFrozenSms); } catch (e) {}
+  }
   return { ok: true };
 }
 

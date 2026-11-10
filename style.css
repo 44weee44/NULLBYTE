@@ -378,3 +378,18 @@ h1,h2,h3,strong,.window-title{
 .map-point{position:absolute;transform:translate(-50%,-50%);padding:7px 11px;border-radius:999px;border:1px solid #3d6a80;background:#152029ee;color:#d5e0ea;font-size:10px;cursor:pointer;box-shadow:0 4px 16px #0006}
 .map-point.on{border-color:#5ec8ff;box-shadow:0 0 16px #5ec8ff55}
 .map-event-zone{position:absolute;border:2px solid #e05555;background:rgba(160,30,30,.32);border-radius:12px;pointer-events:none;box-shadow:inset 0 0 24px #c0444488}
+
+.phone-lock-screen{min-height:520px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(ellipse at 50% 20%,#1a0a2e,#050810 60%);padding:20px;border-radius:24px}
+.phone-lock-clock{font-size:48px;font-weight:700;background:linear-gradient(90deg,#00e5ff,#ff2bd6);-webkit-background-clip:text;color:transparent;letter-spacing:4px}
+.phone-lock-sub{color:#8af;margin:8px 0 16px;font-size:12px}
+.phone-lock-icon{font-size:36px;margin:8px}
+.pin-dots{display:flex;gap:12px;margin:16px 0}
+.pin-dot{width:12px;height:12px;border-radius:50%;border:2px solid #5ec8ff;background:transparent}
+.pin-dot.on{background:#ff2bd6;border-color:#ff2bd6;box-shadow:0 0 10px #ff2bd6}
+.pin-pad{display:grid;grid-template-columns:repeat(3,64px);gap:12px;justify-content:center}
+.pin-key{width:64px;height:64px;border-radius:50%;border:2px solid #2a4a6a;background:#0a1520;color:#e0f0ff;font-size:22px;font-weight:600}
+.pin-key:active{background:#1a3050}
+.phone-home-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:12px 0}
+.phone-app-icon{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;background:#0e1620;border:1px solid #2a3a48;border-radius:14px;color:#9ef;font-size:11px}
+.phone-app-icon span{font-size:22px}
+.phone-unlocked .phone-screen{background:#070b12}

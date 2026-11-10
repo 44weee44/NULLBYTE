@@ -7,7 +7,7 @@ import {
   PLUGIN_SHELLS, PLUGIN_ANIM, runPluginShellCommand, pluginShellBootLines, resolveSiteRef, savePlayerNamedFile, findFileByName, markServerModified,
   isPluginLocked, isMissionVisible, xpThresholdForLevel, bindPhoneMissionTarget, ensureTrading, TRADING_TICKERS, tradingSparkline, listRegionPhones, scheduleMailDrop, processMailDrops
 } from './engine.js';
-import { findPhone, phoneMessages, phoneGallery, phoneCallLog, phoneContacts, lockPhone } from './phones.js';
+import { findPhone, phoneMessages, phoneGallery, phoneCallLog, phoneContacts, lockPhone, unlockWithPin, isNetworkBanned, PROTECTION_RULES, registerBankFromMessages } from './phones.js';
 import { bankLogin, bankTransfer, getBankSession, searchNpcs, pluginDocs, touchNpc, NPC_POOL_SIZE } from './npc.js';
 import { extendedPluginDocs } from './operations.js';
 import { loadSavedGame, saveGame } from './storage.js';
@@ -969,18 +969,22 @@ function renderMap(g) {
   const points = locs.map(loc => {
     const x = loc.x != null ? loc.x : 50;
     const y = loc.y != null ? loc.y : 50;
+    const banned = false;
     return `<button type="button" class="map-point ${selected===loc.id?'on':''}" style="left:${x}%;top:${y}%" data-action="map-select" data-id="${esc(loc.id)}"><span>${esc(loc.name)}</span></button>`;
   }).join('');
   const ez = eventZones.map(z => `<div class="map-event-zone" style="left:${z.x}%;top:${z.y}%;width:${z.w}%;height:${z.h}%"></div>`).join('');
   const detail = selected ? (locs.find(l => l.id === selected) || {}) : null;
   const regions = ['bayshore','midtown','ironreach','southgate','oakridge','shadowline'];
   const net = g.phoneWorld?.network;
+  const bans = g.phoneWorld?.networkBanUntil || {};
+  const banNote = Object.keys(bans).filter(k => bans[k] > Date.now()).map(k => k).join(', ');
   return `<div class="app-heading"><div><div class="eyebrow">NULLATLAS</div><h2>Карта</h2><p>Районы и сети</p></div><span class="badge">${locs.length}</span></div>
   <div class="map-canvas section-gap">${ez}${points}</div>
   <div class="panel section-gap">${detail ? `<strong>${esc(detail.name||selected)}</strong><p class="muted small">${esc(detail.desc||'')}</p>` : '<span class="muted">Выбери район</span>'}
   <div class="kv"><span>Активная сеть</span><b>${net ? esc(net.regionId)+' · '+esc(net.netKey||'') : '—'}</b></div>
   <div class="muted small section-gap">Сети: ${regions.map(esc).join(' · ')}</div>
-  <div class="muted small">Красные зоны — ивент / недоступно</div></div>`;
+  ${banNote?`<div class="notice warning">Бан сети 30м: ${esc(banNote)}</div>`:''}
+  <div class="muted small">Красные зоны — ивент / бан сети</div></div>`;
 }
 
 
@@ -1512,10 +1516,12 @@ async function runTerminalCommand(termId, raw) {
         const heavyMap = {
           'net-link': { cmds:['connect'], ms: 8000 },
           'net-analyzer': { cmds:['scan','analyze'], ms: 9000 },
-          'phone-access': { cmds:['open'], ms: 6000 }
+          'phone-access': { cmds:['open'], ms: 6000, attack: 13000 }
         };
         const hm = heavyMap[term.plugin];
-        if (hm && hm.cmds.includes(cmd0h)) {
+        if (term.plugin === 'phone-access' && cmd0h === 'attack') {
+          await animateWorkTimed(termId, 'phone-access', 13000);
+        } else if (hm && hm.cmds.includes(cmd0h)) {
           // validate before long anim
           if (term.plugin === 'net-analyzer' && !state.game.phoneWorld?.network) {
             termAdd(termId, 'Сначала net-link → connect <region>', 'error');
@@ -1538,6 +1544,7 @@ async function runTerminalCommand(termId, raw) {
           await sleep(20);
         }
         if (result.pendingSave) term.pendingSave = result.pendingSave;
+        if (result.awaitFilename) term.awaitFilename = result.awaitFilename;
         if (result.serverSession) {
           term.plugin = null;
           const win = document.querySelector(`[data-window="${termId}"]`);
@@ -1554,14 +1561,10 @@ async function runTerminalCommand(termId, raw) {
           state._phoneTarget = null;
           if (state.opened.has('phone')) renderWindow('phone');
           termAdd(termId, '→ Phone Lab: нет активной сессии.', 'muted');
-        } else if (term.plugin === 'phone-access' && (state._phoneTarget || result.ok)) {
-          if (!state._phoneTarget && result.lines) {
-            // try recover from last open
-          }
-          openApp('phone');
-          renderWindow('phone');
-          termAdd(termId, '→ Phone Lab открыт.', 'green');
+        } else if (result.closePhoneLab) {
+          if (state.opened.has('phone')) renderWindow('phone');
         }
+
         if (result.progressUpdated && state.opened.has('phone')) renderWindow('phone');
       }
     } finally {
@@ -1653,23 +1656,11 @@ async function runTerminalCommand(termId, raw) {
 
 
 function renderMail(g) {
-  const pending=g.missions.items.filter(m=>m.status==='accepted'&&m.resultFileId);
-  const selected=g.mail.messages.find(m=>m.id===state.selectedMail)||g.mail.messages[0];
-  const list=g.mail.messages.slice(0,30).map(m=>`<button class="mail-item ${m.status==='unread'?'unread':''}" data-action="mail-open" data-id="${m.id}"><strong>${esc(m.subject)}</strong><small>${formatTime(m.at)}</small><p>${esc(m.from)} · ${esc(m.body.slice(0,110))}${m.body.length>110?'…':''}</p></button>`).join('');
-  return `<div class="app-heading"><div><div class="eyebrow">N-MAIL / INTERNAL MESSAGING</div><h2>N-Mail</h2><p>Внутриигровые письма, контракты и отправка файлов.</p></div><span class="badge">${g.mail.messages.filter(m=>m.status==='unread').length} UNREAD</span></div>
-  ${pending.length?`<div class="panel"><div class="panel-title"><span>ГОТОВО К ОТПРАВКЕ</span><small>DELIVERY QUEUE</small></div><div class="list">${pending.map(m=>{const f=g.computer.files.find(x=>x.id===m.resultFileId);return `<div class="list-row"><div class="list-main"><strong>${esc(m.title)}</strong><small>${esc(m.client)} · ${esc(f?.name||'result file')}</small></div><button class="btn tiny primary" data-action="deliver-mission" data-id="${m.id}">ОТПРАВИТЬ</button></div>`;}).join('')}</div></div>`:''}
-  
-  <div class="panel section-gap"><div class="panel-title"><span>НАПИСАТЬ</span><small>COMPOSE</small></div>
-  <form id="mailComposeForm">
-    <input class="field" name="to" placeholder="Получатель (клиент / система)" style="margin-bottom:6px">
-    <input class="field" name="subject" placeholder="Тема" style="margin-bottom:6px">
-    <textarea class="field" name="body" rows="3" placeholder="Текст" style="margin-bottom:6px"></textarea>
-    <select class="field" name="attach" style="margin-bottom:6px"><option value="">— вложение —</option>${(g.computer.files||[]).slice(0,40).map(f=>`<option value="${esc(f.id)}">${esc(f.name)}</option>`).join('')}</select>
-    <button class="btn primary" type="submit">ОТПРАВИТЬ ПИСЬМО</button>
-  </form></div>
-<div class="grid-2 section-gap" style="align-items:start"><div class="list">${list||'<div class="empty-state"><b>Входящие пусты</b><p>Письма появятся после контрактов и системных событий.</p></div>'}</div><div class="panel">${selected?`<div class="eyebrow">${selected.direction==='in'?'INCOMING MESSAGE':'SENT MESSAGE'}</div><div class="btn-row" style="margin-bottom:8px"><button type="button" class="btn tiny danger" data-action="mail-delete" data-id="${esc(selected.id)}">УДАЛИТЬ</button></div><h3 style="margin:8px 0;color:#e1ebf1;font-size:13px">${esc(selected.subject)}</h3><div class="kv"><span>От</span><b>${esc(selected.from)}</b></div><div class="kv"><span>Дата</span><b>${formatDate(selected.at)} ${formatTime(selected.at)}</b></div><div class="divider"></div><div class="mail-body">${esc(selected.body)}</div>${selected.attachments?.length?selected.attachments.map(id=>{const f=g.computer.files.find(x=>x.id===id);return f?`<button class="attachment" data-action="file-open" data-id="${esc(f.id)}">▣ ${esc(f.name)} · ${f.size} KB</button>`:''}).join(''):''}<div class="btn-row section-gap"><button class="btn tiny ghost" data-action="mail-mark" data-id="${selected.id}">ОТМЕТИТЬ ПРОЧИТАННЫМ</button></div>`:'<div class="empty-state"><b>Выбери письмо</b><p>Содержимое появится здесь.</p></div>'}${state.selectedFileId?(()=>{const f=g.computer.files.find(x=>x.id===state.selectedFileId);return f?`<div class="panel section-gap"><div class="panel-title"><span>ПРОСМОТР ВЛОЖЕНИЯ</span><button class="btn tiny ghost" data-action="file-close">ЗАКРЫТЬ</button></div><strong>${esc(f.name)}</strong><pre class="file-preview">${esc(String(f.content||'').slice(0,2400))}${String(f.content||'').length>2400?'\n… файл сокращён для просмотра':''}</pre></div>`:''})():''}</div></div>
-  `;
+  return `<div class="app-heading"><div><div class="eyebrow">N-MAIL</div><h2>Почта</h2></div><span class="badge gray">WIP</span></div>
+  <div class="notice warning section-gap">На доработке. Сдача заданий временно через интерфейс контракта (BlackWire).</div>
+  <div class="empty-state"><b>N-MAIL OFFLINE</b><p>Модуль почты будет пересобран.</p></div>`;
 }
+
 
 function renderBank(g) {
   const status=bankStatus(g),risk=bankRisk(g),tx=g.economy.transactions.slice(0,30);
@@ -1706,70 +1697,83 @@ function renderFbi() {
 function renderPhoneLab(g) {
   const pw = g.phoneWorld || {};
   const net = pw.network;
-  let activeId = state._phoneTarget || null;
-  if (!activeId && pw.access) {
-    const keys = Object.keys(pw.access).filter(k => pw.access[k] && (!pw.access[k].blockedUntil || pw.access[k].blockedUntil > Date.now()));
-    if (keys.length) activeId = keys[keys.length - 1];
+  let activeId = state._phoneTarget || pw.activeSession?.phoneId || null;
+  const phone = activeId ? findPhone(activeId) : null;
+  if (!phone) {
+    return `<div class="app-heading"><div><div class="eyebrow">PHONE LAB</div><h2>Телефон</h2></div><span class="badge">IDLE</span></div>
+      <div class="empty-state"><b>Нет сессии</b><p>phone-access → open PH-… · затем attack · PIN</p></div>
+      <div class="kv"><span>Сеть</span><b>${net ? esc(net.regionId) : '—'}</b></div>`;
   }
-  let phone = null;
-  try { if (activeId) phone = findPhone(String(activeId).trim(), g.meta?.seed || 'nb'); } catch (e) { console.warn(e); }
-
-  let body = `<div class="empty-state"><b>Нет активного телефона</b><p>1) net-link connect · 2) net-analyzer scan · 3) phone-access open PH-… · Phone Lab откроется сам</p></div>`;
-  if (phone) {
-    const seed = g.meta?.seed || 'nb';
-    const msgs = phoneMessages(phone, seed);
-    // rare bank leak → register account so Aster Bank login works
-    try {
-      for (const m of msgs) {
-        if (m.kind === 'bank' && m.bankLogin && m.bankPassword) {
-          if (!g.npcWorld) g.npcWorld = { bankAccounts: {}, bankSessions: {} };
-          if (!g.npcWorld.bankAccounts) g.npcWorld.bankAccounts = {};
-          const aid = 'acc_' + m.bankLogin;
-          if (!g.npcWorld.bankAccounts[aid]) {
-            g.npcWorld.bankAccounts[aid] = {
-              id: aid, npcId: phone.npcId, login: m.bankLogin, password: m.bankPassword,
-              balance: m.bankAmount || 500, currency: 'CR', notify: [],
-              ownerName: phone.ownerName
-            };
-          }
-        }
-      }
-    } catch (e) {}
-
-    const gal = phoneGallery(phone, seed);
-    const calls = typeof phoneCallLog === 'function' ? phoneCallLog(phone, seed) : [];
-    const contacts = typeof phoneContacts === 'function' ? phoneContacts(phone, seed) : [];
-    const blocked = pw.access?.[phone.id]?.blockedUntil > Date.now();
-    body = `<div class="phone-lab-wrap"><div class="phone-frame">
-      <div class="phone-screen">
-        <div class="phone-status">${esc(phone.model)} · ${esc(phone.os)} ${blocked?'· LOCKED':''}</div>
-        <div class="phone-owner"><b>${esc(phone.ownerName)}</b><small>${esc(phone.ownerType)} · sec ${phone.security}</small></div>
-        <div class="phone-num">${esc(phone.id)} · ${esc(phone.number)}</div>
-        <div class="phone-tabs btn-row section-gap">
-          <button type="button" class="btn tiny ${state.phoneLabTab!=='calls'&&state.phoneLabTab!=='contacts'&&state.phoneLabTab!=='gallery'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="msgs">SMS</button>
-          <button type="button" class="btn tiny ${state.phoneLabTab==='calls'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="calls">Звонки</button>
-          <button type="button" class="btn tiny ${state.phoneLabTab==='contacts'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="contacts">Контакты</button>
-          <button type="button" class="btn tiny ${state.phoneLabTab==='gallery'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="gallery">Галерея</button>
-        </div>
-        <div class="phone-section">
-          ${state.phoneLabTab==='calls' ? calls.map(c=>`<div class="phone-msg"><span>${esc(c.dir)}</span><p>${esc(c.with)}</p></div>`).join('') :
-            state.phoneLabTab==='contacts' ? contacts.map(c=>`<div class="phone-msg"><span>${esc(c.name)}</span><p>${esc(c.number)}</p></div>`).join('') :
-            state.phoneLabTab==='gallery' ? `<div class="phone-gal">${gal.map(x=>`<div class="phone-thumb">${esc(x.title)}</div>`).join('')}</div>` :
-            msgs.map(m=>`<div class="phone-msg"><span>${esc(m.from)}</span><p>${esc(m.text)}</p></div>`).join('')}
-        </div>
-        <div class="btn-row section-gap">
-          <button type="button" class="btn tiny" data-action="phone-lab-export" data-kind="msgs" data-id="${esc(phone.id)}">Сохранить SMS</button>
-          <button type="button" class="btn tiny" data-action="phone-lab-export" data-kind="gallery" data-id="${esc(phone.id)}">Сохранить галерею</button>
-          <button type="button" class="btn tiny danger" data-action="phone-lab-lock" data-id="${esc(phone.id)}">Lock 30м</button>
-          <button type="button" class="btn tiny ghost" data-action="copy-text" data-text="${esc(phone.id)}">Copy ID</button>
-
-        </div>
+  const acc = pw.access?.[phone.id] || {};
+  if (acc.blocked) {
+    return `<div class="app-heading"><div><div class="eyebrow">PHONE LAB</div><h2>Заблокирован</h2></div></div>
+      <div class="empty-state"><b>${esc(phone.id)}</b><p>Полная блокировка (block). Доступ закрыт.</p></div>`;
+  }
+  // LOCK SCREEN
+  if (!acc.unlocked) {
+    const pinUi = state.pinInput || '';
+    const dots = [0,1,2,3].map(i => `<span class="pin-dot ${i < pinUi.length ? 'on':''}"></span>`).join('');
+    const keys = ['1','2','3','4','5','6','7','8','9','','0','⌫'].map(k => {
+      if (k === '') return '<span></span>';
+      const act = k === '⌫' ? 'phone-pin-del' : 'phone-pin-digit';
+      return `<button type="button" class="pin-key" data-action="${act}" data-digit="${k==='⌫'?'':k}">${k}</button>`;
+    }).join('');
+    return `<div class="phone-lab-wrap"><div class="phone-frame phone-lock">
+      <div class="phone-lock-screen">
+        <div class="phone-lock-status">NULLBYTE · ${esc(phone.model)}</div>
+        <div class="phone-lock-clock" id="phoneLockClock">--:--</div>
+        <div class="phone-lock-sub">${esc(phone.ownerName)}</div>
+        <div class="phone-lock-icon">🔒</div>
+        <div class="pin-dots">${dots}</div>
+        <div class="pin-pad">${keys}</div>
+        <button type="button" class="btn tiny ghost" data-action="phone-pin-ok" style="margin-top:10px">OK</button>
+        <div class="muted small section-gap">attack в Terminal → PIN появится в логе</div>
       </div>
     </div></div>`;
   }
-  return `<div class="app-heading"><div><div class="eyebrow">PHONE LAB</div><h2>Телефон</h2><p>Только активная сессия phone-access · open PHONE_ID</p></div><span class="badge">${activeId?'SESSION':'IDLE'}</span></div>
-  <div class="kv"><span>Сеть</span><b>${net ? esc(net.regionId)+' · '+esc(net.netKey||'') : 'не подключено (net-link)'}</b></div>
-  <div class="section-gap">${body}</div>`;
+  // UNLOCKED UI — neon cyber home
+  const seed = g.meta?.seed || 'nb';
+  const now = Date.now();
+  const msgs = (pw.sessionFrozenSms) || phoneMessages(phone, now);
+  try { registerBankFromMessages(g, phone, msgs); } catch (e) {}
+  const gal = phoneGallery(phone);
+  const calls = phoneCallLog(phone, now);
+  const contacts = phoneContacts(phone, now);
+  const tab = state.phoneLabTab || 'home';
+  let body = '';
+  if (tab === 'msgs') {
+    body = msgs.map(m => `<div class="phone-msg"><span>${esc(m.from)}</span><p>${esc(m.text)}</p></div>`).join('') || '<div class="muted">пусто</div>';
+  } else if (tab === 'calls') {
+    body = calls.map(c => `<div class="phone-msg"><span>${esc(c.info)} · ${esc(c.date)} ${esc(c.time)}</span><p>${esc(c.with)} · ${esc(c.number)}</p><small>${c.durationSec}s</small></div>`).join('');
+  } else if (tab === 'contacts') {
+    body = contacts.map(c => `<div class="phone-msg"><span>${esc(c.name)}</span><p>${esc(c.number)}</p></div>`).join('');
+  } else if (tab === 'gallery') {
+    body = `<div class="phone-gal">${gal.map(x=>`<div class="phone-thumb">${esc(x.title)}</div>`).join('')}</div>`;
+  } else {
+    body = `<div class="phone-home-grid">
+      <button type="button" class="phone-app-icon" data-action="phone-lab-tab" data-tab="msgs"><span>💬</span>Messages</button>
+      <button type="button" class="phone-app-icon" data-action="phone-lab-tab" data-tab="calls"><span>📞</span>Calls</button>
+      <button type="button" class="phone-app-icon" data-action="phone-lab-tab" data-tab="gallery"><span>🖼</span>Gallery</button>
+      <button type="button" class="phone-app-icon" data-action="phone-lab-tab" data-tab="contacts"><span>👥</span>Contacts</button>
+    </div>
+    <div class="btn-row section-gap">
+      <button type="button" class="btn tiny" data-action="phone-lab-export" data-kind="msgs" data-id="${esc(phone.id)}">Сохранить SMS</button>
+      <button type="button" class="btn tiny" data-action="phone-lab-export" data-kind="gallery" data-id="${esc(phone.id)}">Сохранить галерею</button>
+    </div>`;
+  }
+  return `<div class="phone-lab-wrap"><div class="phone-frame phone-unlocked">
+    <div class="phone-screen">
+      <div class="phone-status-bar">${esc(phone.model)} · ${esc(phone.protection)} · ${esc(phone.number)}</div>
+      <div class="phone-tabs btn-row">
+        <button type="button" class="btn tiny ${tab==='home'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="home">Home</button>
+        <button type="button" class="btn tiny ${tab==='msgs'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="msgs">SMS</button>
+        <button type="button" class="btn tiny ${tab==='calls'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="calls">Calls</button>
+        <button type="button" class="btn tiny ${tab==='contacts'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="contacts">Contacts</button>
+        <button type="button" class="btn tiny ${tab==='gallery'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="gallery">Gallery</button>
+      </div>
+      <div class="phone-section">${body}</div>
+    </div>
+  </div></div>`;
 }
 
 
@@ -2073,6 +2077,22 @@ function handleAction(action,el) {
       if(!state.game.phoneWorld) state.game.phoneWorld={access:{},discovered:{}};
       state.game.phoneWorld.access[id]={level:'user',at:Date.now()};
       state.game.phoneWorld.discovered[id]=true;
+      renderWindow('phone'); break;
+    }
+    case 'phone-pin-digit':{
+      state.pinInput = (state.pinInput||'') + (el.dataset.digit||'');
+      if (state.pinInput.length > 4) state.pinInput = state.pinInput.slice(0,4);
+      renderWindow('phone'); break;
+    }
+    case 'phone-pin-del':{
+      state.pinInput = (state.pinInput||'').slice(0,-1);
+      renderWindow('phone'); break;
+    }
+    case 'phone-pin-ok':{
+      const pid = state._phoneTarget;
+      const r = unlockWithPin(state.game, pid, state.pinInput||'');
+      if (r.ok) { state.pinInput=''; state.phoneLabTab='home'; }
+      else { state.pinInput=''; }
       renderWindow('phone'); break;
     }
     case 'phone-lab-tab':{

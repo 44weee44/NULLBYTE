@@ -4,7 +4,7 @@ import { createEmptyNpcWorld, migrateNpcWorld, getNpc, touchNpc, bankLogin, getB
 // tickNpcCommerce imported via npc named exports below
 import { createEmptyOpsState, migrateOps, processPaymentLinkRestores, buildServerIndex, extractTarget, createArchive, signalMapRegion, grantRegionKey, hijackPaymentLink, recoveryMsForSecurity, REGIONS, MOBILE_PLUGIN_META, extendedPluginDocs } from './operations.js';
 import { npcReply, openingLine, moneyDialogue, dialogueStats, getTrust } from './dialogue.js';
-import { PHONE_REGIONS, PHONES_PER_REGION, createEmptyPhoneWorld, migratePhoneWorld, generatePhone, listRegionPhones, findPhone, buildNetworkReport, connectNetwork, analyzeNetwork, accessPhone, lockPhone, phoneMessages, phoneContacts, phoneGallery, phoneCallLog, makePhoneId } from './phones.js';
+import { PHONE_REGIONS, PHONES_PER_REGION, createEmptyPhoneWorld, migratePhoneWorld, generatePhone, listRegionPhones, findPhone, buildNetworkReport, connectNetwork, analyzeNetwork, accessPhone, lockPhone, phoneMessages, phoneContacts, phoneGallery, phoneCallLog, rollAttack, unlockWithPin, isNetworkBanned, registerBankFromMessages } from './phones.js';
 import { createEmptyEvents, migrateEvents, processWorldEvents, listActiveEvents } from './events.js';
 export const SAVE_VERSION = 1;
 
@@ -563,7 +563,7 @@ export const PLUGIN_SHELLS = {
 
   'net-link': { boot: 'Net Link v1', help: 'connect <region_id> · disconnect · status · list · help · exit', commands: ['connect','disconnect','status','list','help','exit'] },
   'net-analyzer': { boot: 'Net Analyzer v1', help: 'scan — анализ сети · save <имя> — полный отчёт · help · exit', commands: ['scan','analyze','save','help','exit'] },
-  'phone-access': { boot: 'Phone Access v1', help: 'open <PHONE_ID> · status · disconnect · help · exit', commands: ['open','status','disconnect','close','help','exit'] },
+  'phone-access': { boot: 'Phone Access v2', help: 'open <PHONE_ID> · attack · block · status · disconnect · help · exit', commands: ['open','attack','block','status','disconnect','close','help','exit'] },
   'mail-drop': { boot: 'Mail Drop v1', help: 'craft <имя_файла> · attach — через N-Mail · help · exit', commands: ['craft','help','exit'] },
   'sms-bomber': { boot: 'SMS Bomber v1', help: 'bomb <PHONE_ID> · help · exit', commands: ['bomb','help','exit'] },
   'bank-peek': { boot: 'Bank Peek v1', help: 'peek <PHONE_ID> · help · exit', commands: ['peek','help','exit'] },
@@ -1402,17 +1402,16 @@ if (pluginId === 'data-exporter' && (cmd === 'export' || cmd === 'pack')) {
 
   if (pluginId === 'net-analyzer') {
     if (cmd === 'scan' || cmd === 'analyze') {
-      const r = analyzeNetwork(state, state.meta?.seed || 'nb');
+      const r = analyzeNetwork(state, Date.now());
       if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
       return {
         ok: true,
         lines: [
-          { text: 'Net Analyzer — probe…', type: 'blue' },
-          { text: `Region ${r.report.region.name}`, type: '' },
-          { text: `Devices: ${r.report.count}`, type: 'green' },
-          { text: 'Полный реестр готов. save <имя>', type: 'blue' }
+          { text: 'Net Analyzer — scan complete', type: 'green' },
+          { text: `Region ${r.report.region.name} · visible ${r.report.count}`, type: '' },
+          { text: 'Введи имя файла для сохранения отчёта:', type: 'blue' }
         ],
-        pendingSave: { kind: 'net-report', content: r.report.text, defaultName: `${r.report.region.id}-net`, type: 'network-report', encrypted: false },
+        awaitFilename: { kind: 'net-report', content: r.report.text, type: 'network-report' },
         progressUpdated: true
       };
     }
@@ -1420,7 +1419,7 @@ if (pluginId === 'data-exporter' && (cmd === 'export' || cmd === 'pack')) {
 
   if (pluginId === 'phone-access') {
     if (cmd === 'open') {
-      const r = accessPhone(state, arg1, state.meta?.seed || 'nb');
+      const r = accessPhone(state, arg1 || parts[1]);
       if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
       state._phoneTarget = r.phone.id;
       return { ok: true, lines: [
@@ -1433,6 +1432,32 @@ if (pluginId === 'data-exporter' && (cmd === 'export' || cmd === 'pack')) {
     if (cmd === 'status') {
       const id = state._phoneTarget;
       return { ok: true, lines: [{ text: id ? `Active: ${id}` : 'Нет активного PHONE_ID', type: id ? 'green' : 'muted' }] };
+    }
+    if (cmd === 'attack') {
+      const pid = state._phoneTarget;
+      if (!pid) return { ok: false, lines: [{ text: 'Сначала open <PHONE_ID>', type: 'error' }] };
+      const r = rollAttack(state, pid);
+      if (r.ok) {
+        return { ok: true, lines: [
+          { text: 'ATTACK SUCCESS', type: 'green' },
+          { text: `PIN: ${r.pin}`, type: 'green' },
+          { text: 'Введи PIN в Phone Lab', type: 'blue' }
+        ], progressUpdated: true, revealedPin: r.pin };
+      }
+      const n = r.errorStyle === 'flood' ? 12 : r.errorStyle === 'many' ? 6 : r.errorStyle === 'some' ? 3 : 1;
+      const errLines = [];
+      for (let i = 0; i < n; i++) errLines.push({ text: `! DEFENSE ${r.protection} ERR 0x${(Math.random()*0xffffff|0).toString(16)}`, type: 'error' });
+      errLines.push({ text: r.reason, type: 'error' });
+      if (r.kicked) errLines.push({ text: 'NETWORK BAN 30m', type: 'error' });
+      return { ok: false, lines: errLines, progressUpdated: true, kicked: !!r.kicked };
+    }
+    if (cmd === 'block') {
+      const pid = state._phoneTarget;
+      if (!pid) return { ok: false, lines: [{ text: 'Нет сессии', type: 'error' }] };
+      const acc = state.phoneWorld?.access?.[pid];
+      if (!acc?.unlocked) return { ok: false, lines: [{ text: 'Сначала PIN unlock', type: 'error' }] };
+      lockPhone(state, pid);
+      return { ok: true, lines: [{ text: `BLOCKED ${pid}`, type: 'green' }], progressUpdated: true };
     }
     if (cmd === 'disconnect' || cmd === 'close') {
       const was = state._phoneTarget;
@@ -1931,7 +1956,7 @@ export function bindPhoneMissionTarget(mission, seedRoot = 'nb') {
   const regionId = mission.regionId || 'bayshore';
   const seed = phoneSeed(seedRoot);
   try {
-    const list = listRegionPhones(regionId, seed);
+    const list = listRegionPhones(regionId);
     if (!list.length) return mission;
     let h = 0;
     const s = String(mission.id || 'p');

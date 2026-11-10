@@ -405,6 +405,12 @@ function maximizeWindow(id) {
   else{win.maximized=false;el.classList.remove('is-maximized');if(win.oldRect)Object.assign(el.style,win.oldRect);}
   const maxBtn=el.querySelector('[data-action="maximize-window"]');if(maxBtn){maxBtn.textContent=win.maximized?'❐':'□';maxBtn.title=win.maximized?'Восстановить':'Развернуть';}focusWindow(id);
 }
+function refreshPhoneLab() {
+  if (state.opened?.has('phone')) renderWindow('phone');
+  else if (state._phoneTarget || state.game?.phoneWorld?.access) {
+    /* keep closed until user opens */
+  }
+}
 function renderWindow(id) {const el=document.querySelector(`[data-window="${id}"] [data-content]`);if(!el)return;el.innerHTML=renderApp(id);wireAppContent(id,el);}
 function refreshOpenApps(ids=null) {for(const id of (ids||[...state.opened.keys()]))if(state.opened.has(id))renderWindow(id);renderTaskbar();}
 function wireAppContent(id,el) {
@@ -1591,6 +1597,14 @@ async function runTerminalCommand(termId, raw) {
         }
         if (result.pendingSave) term.pendingSave = result.pendingSave;
         if (result.awaitFilename) term.awaitFilename = result.awaitFilename;
+        if (result.revealedPin) {
+          termAdd(termId, '→ PIN: ' + result.revealedPin + '  (введи в Phone Lab)', 'green');
+          openApp('phone');
+          renderWindow('phone');
+        }
+        if (term.plugin === 'phone-access' && result.ok && !result.revealedPin) {
+          if (state.opened.has('phone')) renderWindow('phone');
+        }
         if (result.serverSession) {
           term.plugin = null;
           const win = document.querySelector(`[data-window="${termId}"]`);
@@ -1744,62 +1758,70 @@ function renderPhoneLab(g) {
   const pw = g.phoneWorld || {};
   const net = pw.network;
   let activeId = state._phoneTarget || pw.activeSession?.phoneId || null;
+  if (!activeId && pw.access) {
+    const keys = Object.keys(pw.access);
+    activeId = keys.find(k => pw.access[k]?.unlocked) || keys.find(k => pw.access[k]?.pin || pw.access[k]?.attackOk) || null;
+  }
   const phone = activeId ? findPhone(activeId) : null;
   if (!phone) {
     return `<div class="app-heading"><div><div class="eyebrow">PHONE LAB</div><h2>Телефон</h2></div><span class="badge">IDLE</span></div>
-      <div class="empty-state"><b>Нет сессии</b><p>phone-access → open PH-… · затем attack · PIN</p></div>
+      <div class="empty-state"><b>Нет сессии</b><p>1) open PH-…  2) attack  3) PIN (4 цифры)</p></div>
       <div class="kv"><span>Сеть</span><b>${net ? esc(net.regionId) : '—'}</b></div>`;
   }
-  let acc = pw.access?.[phone.id] || pw.access?.[String(phone.id).toUpperCase()] || {};
-  if (!acc.unlocked && !acc.pin) {
-    const k = Object.keys(pw.access||{}).find(x => x.toUpperCase() === String(phone.id).toUpperCase());
-    if (k) acc = pw.access[k] || acc;
+  // resolve access entry
+  let accKey = phone.id;
+  let acc = pw.access?.[phone.id];
+  if (!acc) {
+    accKey = Object.keys(pw.access || {}).find(k => k.toUpperCase() === phone.id.toUpperCase()) || phone.id;
+    acc = pw.access?.[accKey] || {};
   }
   if (acc.blocked) {
     return `<div class="app-heading"><div><div class="eyebrow">PHONE LAB</div><h2>Заблокирован</h2></div></div>
-      <div class="empty-state"><b>${esc(phone.id)}</b><p>Полная блокировка (block). Доступ закрыт.</p></div>`;
+      <div class="empty-state"><b>${esc(phone.id)}</b><p>block — доступ закрыт навсегда</p></div>`;
   }
-  // LOCK SCREEN
-  if (!acc.unlocked) {
+
+  const isUnlocked = !!(acc.unlocked || state.phoneUnlocked === phone.id);
+  if (!isUnlocked) {
     const pinUi = state.pinInput || '';
-    const dots = [0,1,2,3].map(i => `<span class="pin-dot ${i < pinUi.length ? 'on':''}"></span>`).join('');
+    const dots = [0,1,2,3].map(i => `<span class="pin-dot ${i < pinUi.length ? 'on' : ''}"></span>`).join('');
     const keys = ['1','2','3','4','5','6','7','8','9','','0','⌫'].map(k => {
       if (k === '') return '<span></span>';
       const act = k === '⌫' ? 'phone-pin-del' : 'phone-pin-digit';
-      return `<button type="button" class="pin-key" data-action="${act}" data-digit="${k==='⌫'?'':k}">${k}</button>`;
+      return `<button type="button" class="pin-key" data-action="${act}" data-digit="${k === '⌫' ? '' : k}">${k}</button>`;
     }).join('');
     return `<div class="phone-lab-wrap"><div class="phone-frame phone-lock">
       <div class="phone-lock-screen">
-        <div class="phone-lock-status">NULLBYTE · ${esc(phone.model)}</div>
-        <div class="phone-lock-clock" id="phoneLockClock">--:--</div>
+        <div class="phone-lock-status">${esc(phone.model)} · ${esc(phone.protection || '')}</div>
+        <div class="phone-lock-clock">${new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</div>
         <div class="phone-lock-sub">${esc(phone.ownerName)}</div>
         <div class="phone-lock-icon">🔒</div>
         <div class="pin-dots">${dots}</div>
         <div class="pin-pad">${keys}</div>
-        <button type="button" class="btn tiny ghost" data-action="phone-pin-ok" style="margin-top:10px">OK</button>
-        ${state.pinError?`<div class="text-red small section-gap">${esc(state.pinError)}</div>`:''}
-        <div class="muted small section-gap">attack в Terminal → PIN в логе · 4 цифры</div>
+        ${state.pinError ? `<div style="color:#f07178;margin-top:10px;font-size:12px">${esc(state.pinError)}</div>` : ''}
+        <div class="muted small" style="margin-top:12px">PIN из Terminal после attack</div>
       </div>
     </div></div>`;
   }
-  // UNLOCKED UI — neon cyber home
-  const seed = g.meta?.seed || 'nb';
+
+  // HOME
   const now = Date.now();
-  const msgs = (pw.sessionFrozenSms) || phoneMessages(phone, now);
+  let msgs = [];
+  try { msgs = (pw.sessionFrozenSms && pw.sessionFrozenSms.length) ? pw.sessionFrozenSms : phoneMessages(phone, now); } catch (e) { msgs = []; }
   try { registerBankFromMessages(g, phone, msgs); } catch (e) {}
-  const gal = phoneGallery(phone);
-  const calls = phoneCallLog(phone, now);
-  const contacts = phoneContacts(phone, now);
+  let gal = [], calls = [], contacts = [];
+  try { gal = phoneGallery(phone) || []; } catch (e) {}
+  try { calls = phoneCallLog(phone, now) || []; } catch (e) {}
+  try { contacts = phoneContacts(phone, now) || []; } catch (e) {}
   const tab = state.phoneLabTab || 'home';
   let body = '';
   if (tab === 'msgs') {
-    body = msgs.map(m => `<div class="phone-msg"><span>${esc(m.from)}</span><p>${esc(m.text)}</p></div>`).join('') || '<div class="muted">пусто</div>';
+    body = msgs.map(m => `<div class="phone-msg"><span>${esc(m.from || '')}</span><p>${esc(m.text || '')}</p></div>`).join('') || '<div class="muted">нет SMS</div>';
   } else if (tab === 'calls') {
-    body = calls.map(c => `<div class="phone-msg"><span>${esc(c.info)} · ${esc(c.date)} ${esc(c.time)}</span><p>${esc(c.with)} · ${esc(c.number)}</p><small>${c.durationSec}s</small></div>`).join('');
+    body = calls.map(c => `<div class="phone-msg"><span>${esc(c.info || '')} · ${esc(c.date || '')} ${esc(c.time || '')}</span><p>${esc(c.with || '')} · ${esc(c.number || '')}</p><small>${c.durationSec || 0}s</small></div>`).join('') || '<div class="muted">пусто</div>';
   } else if (tab === 'contacts') {
-    body = contacts.map(c => `<div class="phone-msg"><span>${esc(c.name)}</span><p>${esc(c.number)}</p></div>`).join('');
+    body = contacts.map(c => `<div class="phone-msg"><span>${esc(c.name || '')}</span><p>${esc(c.number || '')}</p></div>`).join('') || '<div class="muted">пусто</div>';
   } else if (tab === 'gallery') {
-    body = `<div class="phone-gal">${gal.map(x=>`<div class="phone-thumb">${esc(x.title)}</div>`).join('')}</div>`;
+    body = `<div class="phone-gal">${gal.map(x => `<div class="phone-thumb">${esc(x.title || '')}</div>`).join('')}</div>`;
   } else {
     body = `<div class="phone-home-grid">
       <button type="button" class="phone-app-icon" data-action="phone-lab-tab" data-tab="msgs"><span>💬</span>Messages</button>
@@ -1814,7 +1836,7 @@ function renderPhoneLab(g) {
   }
   return `<div class="phone-lab-wrap"><div class="phone-frame phone-unlocked">
     <div class="phone-screen">
-      <div class="phone-status-bar">${esc(phone.model)} · ${esc(phone.protection)} · ${esc(phone.number)}</div>
+      <div class="phone-status-bar">${esc(phone.model)} · ${esc(phone.number)} · ${esc(phone.ownerName)}</div>
       <div class="phone-tabs btn-row">
         <button type="button" class="btn tiny ${tab==='home'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="home">Home</button>
         <button type="button" class="btn tiny ${tab==='msgs'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="msgs">SMS</button>
@@ -1826,7 +1848,6 @@ function renderPhoneLab(g) {
     </div>
   </div></div>`;
 }
-
 
 function renderIntel(g) {
   const intel = g.intel || {};
@@ -2131,47 +2152,38 @@ function handleAction(action,el) {
       renderWindow('phone'); break;
     }
     case 'phone-pin-digit':{
-      const d = el.dataset.digit || '';
-      if (!d) break;
-      state.pinInput = (state.pinInput || '') + d;
+      const d = String(el.dataset.digit || '');
+      if (!/^[0-9]$/.test(d)) break;
+      state.pinInput = String(state.pinInput || '') + d;
       if (state.pinInput.length > 4) state.pinInput = state.pinInput.slice(0, 4);
       state.pinError = '';
       if (state.pinInput.length === 4) {
         const pid = state._phoneTarget || state.game?.phoneWorld?.activeSession?.phoneId;
-        const r = unlockWithPin(state.game, pid, state.pinInput);
+        let r = { ok: false, reason: 'Нет сессии' };
+        try { r = unlockWithPin(state.game, pid, state.pinInput); } catch (err) { r = { ok: false, reason: String(err.message || err) }; }
         if (r.ok) {
           state.pinInput = '';
           state.pinError = '';
           state.phoneLabTab = 'home';
-          try { toast('Телефон разблокирован', 'success'); } catch (e) {}
+          state.phoneUnlocked = r.phoneId || pid;
+          // force access unlocked
+          try {
+            const id = r.phoneId || pid;
+            if (state.game.phoneWorld?.access?.[id]) state.game.phoneWorld.access[id].unlocked = true;
+          } catch (e) {}
           scheduleSave();
         } else {
           state.pinError = r.reason || 'Неверный PIN';
           state.pinInput = '';
+          state.phoneUnlocked = null;
         }
       }
       renderWindow('phone');
       break;
     }
     case 'phone-pin-del':{
-      state.pinInput = (state.pinInput || '').slice(0, -1);
+      state.pinInput = String(state.pinInput || '').slice(0, -1);
       state.pinError = '';
-      renderWindow('phone');
-      break;
-    }
-    case 'phone-pin-ok':{
-      const pid = state._phoneTarget || state.game?.phoneWorld?.activeSession?.phoneId;
-      const r = unlockWithPin(state.game, pid, state.pinInput || '');
-      if (r.ok) {
-        state.pinInput = '';
-        state.pinError = '';
-        state.phoneLabTab = 'home';
-        try { toast('Телефон разблокирован', 'success'); } catch (e) {}
-      } else {
-        state.pinError = r.reason || 'Неверный PIN';
-        state.pinInput = '';
-      }
-      scheduleSave();
       renderWindow('phone');
       break;
     }

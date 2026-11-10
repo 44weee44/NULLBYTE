@@ -87,17 +87,37 @@ export function buildNetworkReport(regionId, now = Date.now()) {
   const region = PHONE_REGIONS.find(r => r.id === regionId);
   if (!region) return null;
   const phones = visiblePhones(regionId, rotationEpoch(now));
-  const lines = [
-    'NULLBYTE NET SCAN',
-    `REGION ${region.name}`,
-    `REGION_ID ${region.id}`,
-    `NET_KEY ${region.netKey}`,
-    `SSID ${region.ssid}`,
-    `VISIBLE ${phones.length}/${PHONES_PER_REGION}`,
-    `EPOCH ${rotationEpoch(now)}`,
-    '--- DEVICES ---',
-    ...phones.map(p => `${p.id} | ${p.ownerName} | ${p.number} | ${p.model} | ${p.protection}`)
+  const header = [
+    '╔══════════════════════════════════════════════╗',
+    '║           NULLBYTE NET SCAN                  ║',
+    '╚══════════════════════════════════════════════╝',
+    '',
+    `  REGION     ${region.name}`,
+    `  REGION_ID  ${region.id}`,
+    `  NET_KEY    ${region.netKey}`,
+    `  SSID       ${region.ssid}`,
+    `  VISIBLE    ${phones.length} / ${PHONES_PER_REGION}`,
+    `  EPOCH      ${rotationEpoch(now)}`,
+    '',
+    '────────────────────────────────────────────────',
+    '  DEVICES',
+    '────────────────────────────────────────────────',
+    ''
   ];
+  const devices = phones.map((p, i) => {
+    const n = String(i + 1).padStart(3, '0');
+    return [
+      `  #${n}`,
+      `  ID       ${p.id}`,
+      `  NAME     ${p.ownerName}`,
+      `  ROLE     ${p.role || '—'}`,
+      `  NUMBER   ${p.number}`,
+      `  MODEL    ${p.model}`,
+      `  DEFENSE  ${p.protection}`,
+      ''
+    ].join('\n');
+  });
+  const lines = [...header, ...devices, '────────────────────────────────────────────────', `  TOTAL ${phones.length}`];
   return { region, phones, text: lines.join('\n'), count: phones.length };
 }
 

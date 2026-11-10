@@ -280,21 +280,35 @@ export function rollAttack(state, phoneId) {
 }
 
 export function unlockWithPin(state, phoneId, pin) {
-  const acc = state.phoneWorld?.access?.[phoneId];
-  if (!acc?.attackOk || !acc.pin) return { ok: false, reason: 'Сначала attack' };
-  if (acc.pinUsed) return { ok: false, reason: 'PIN уже использован — нужен новый attack' };
-  if (String(pin).trim() !== String(acc.pin).trim()) return { ok: false, reason: 'Неверный PIN' };
-  acc.unlocked = true;
-  acc.pinUsed = true; // one-shot
-  acc.pin = null;     // cannot reuse
-  acc.attackOk = false;
-  // freeze SMS once for this unlock session
-  const phone = findPhone(phoneId);
-  if (phone && !state.phoneWorld.sessionFrozenSms) {
-    state.phoneWorld.sessionFrozenSms = phoneMessages(phone, Date.now());
-    try { registerBankFromMessages(state, phone, state.phoneWorld.sessionFrozenSms); } catch (e) {}
+  if (!state.phoneWorld) state.phoneWorld = createEmptyPhoneWorld();
+  const id = String(phoneId || '').trim();
+  if (!id) return { ok: false, reason: 'Нет активного телефона' };
+  // resolve access by exact or case-insensitive key
+  let key = id;
+  if (!state.phoneWorld.access?.[key]) {
+    const found = Object.keys(state.phoneWorld.access || {}).find(k => k.toUpperCase() === id.toUpperCase());
+    if (found) key = found;
   }
-  return { ok: true };
+  const acc = state.phoneWorld.access?.[key];
+  if (!acc) return { ok: false, reason: 'Нет сессии — open + attack' };
+  if (acc.pinUsed && !acc.pin) return { ok: false, reason: 'PIN уже использован — нужен новый attack' };
+  if (!acc.pin) return { ok: false, reason: 'Сначала attack — PIN в терминале' };
+  if (String(pin || '').trim() !== String(acc.pin).trim()) return { ok: false, reason: 'Неверный PIN' };
+  acc.unlocked = true;
+  acc.pinUsed = true;
+  const usedPin = acc.pin;
+  acc.pin = null;
+  acc.attackOk = false;
+  state._phoneTarget = key;
+  state.phoneWorld.activeSession = { phoneId: key, at: Date.now() };
+  const phone = findPhone(key);
+  if (phone) {
+    try {
+      state.phoneWorld.sessionFrozenSms = phoneMessages(phone, Date.now());
+      registerBankFromMessages(state, phone, state.phoneWorld.sessionFrozenSms);
+    } catch (e) {}
+  }
+  return { ok: true, phoneId: key, pin: usedPin };
 }
 
 export function lockPhone(state, phoneId) {

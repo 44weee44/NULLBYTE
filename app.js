@@ -1750,7 +1750,11 @@ function renderPhoneLab(g) {
       <div class="empty-state"><b>Нет сессии</b><p>phone-access → open PH-… · затем attack · PIN</p></div>
       <div class="kv"><span>Сеть</span><b>${net ? esc(net.regionId) : '—'}</b></div>`;
   }
-  const acc = pw.access?.[phone.id] || {};
+  let acc = pw.access?.[phone.id] || pw.access?.[String(phone.id).toUpperCase()] || {};
+  if (!acc.unlocked && !acc.pin) {
+    const k = Object.keys(pw.access||{}).find(x => x.toUpperCase() === String(phone.id).toUpperCase());
+    if (k) acc = pw.access[k] || acc;
+  }
   if (acc.blocked) {
     return `<div class="app-heading"><div><div class="eyebrow">PHONE LAB</div><h2>Заблокирован</h2></div></div>
       <div class="empty-state"><b>${esc(phone.id)}</b><p>Полная блокировка (block). Доступ закрыт.</p></div>`;
@@ -1773,7 +1777,8 @@ function renderPhoneLab(g) {
         <div class="pin-dots">${dots}</div>
         <div class="pin-pad">${keys}</div>
         <button type="button" class="btn tiny ghost" data-action="phone-pin-ok" style="margin-top:10px">OK</button>
-        <div class="muted small section-gap">attack в Terminal → PIN появится в логе</div>
+        ${state.pinError?`<div class="text-red small section-gap">${esc(state.pinError)}</div>`:''}
+        <div class="muted small section-gap">attack в Terminal → PIN в логе · 4 цифры</div>
       </div>
     </div></div>`;
   }
@@ -2126,27 +2131,49 @@ function handleAction(action,el) {
       renderWindow('phone'); break;
     }
     case 'phone-pin-digit':{
-      state.pinInput = (state.pinInput||'') + (el.dataset.digit||'');
-      if (state.pinInput.length > 4) state.pinInput = state.pinInput.slice(0,4);
-      renderWindow('phone'); break;
+      const d = el.dataset.digit || '';
+      if (!d) break;
+      state.pinInput = (state.pinInput || '') + d;
+      if (state.pinInput.length > 4) state.pinInput = state.pinInput.slice(0, 4);
+      state.pinError = '';
+      if (state.pinInput.length === 4) {
+        const pid = state._phoneTarget || state.game?.phoneWorld?.activeSession?.phoneId;
+        const r = unlockWithPin(state.game, pid, state.pinInput);
+        if (r.ok) {
+          state.pinInput = '';
+          state.pinError = '';
+          state.phoneLabTab = 'home';
+          try { toast('Телефон разблокирован', 'success'); } catch (e) {}
+          scheduleSave();
+        } else {
+          state.pinError = r.reason || 'Неверный PIN';
+          state.pinInput = '';
+        }
+      }
+      renderWindow('phone');
+      break;
     }
     case 'phone-pin-del':{
-      state.pinInput = (state.pinInput||'').slice(0,-1);
-      renderWindow('phone'); break;
+      state.pinInput = (state.pinInput || '').slice(0, -1);
+      state.pinError = '';
+      renderWindow('phone');
+      break;
     }
     case 'phone-pin-ok':{
-      const pid = state._phoneTarget;
-      const r = unlockWithPin(state.game, pid, state.pinInput||'');
+      const pid = state._phoneTarget || state.game?.phoneWorld?.activeSession?.phoneId;
+      const r = unlockWithPin(state.game, pid, state.pinInput || '');
       if (r.ok) {
-        state.pinInput='';
-        state.phoneLabTab='home';
-        toast('Телефон разблокирован','success');
+        state.pinInput = '';
+        state.pinError = '';
+        state.phoneLabTab = 'home';
+        try { toast('Телефон разблокирован', 'success'); } catch (e) {}
       } else {
-        state.pinInput='';
-        toast(r.reason || 'Неверный PIN','error');
+        state.pinError = r.reason || 'Неверный PIN';
+        state.pinInput = '';
       }
       scheduleSave();
-      renderWindow('phone'); break;
+      renderWindow('phone');
+      break;
     }
     case 'phone-lab-tab':{
       state.phoneLabTab = el.dataset.tab || 'msgs';

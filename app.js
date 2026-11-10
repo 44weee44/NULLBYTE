@@ -1450,6 +1450,29 @@ async function runTerminalCommand(termId, raw) {
 
 
   if (term.plugin) {
+    // net-analyzer scan → next line is filename
+    if (term.awaitFilename) {
+      const af = term.awaitFilename;
+      term.awaitFilename = null;
+      const nameRaw = cmd.trim().replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 48) || 'scan';
+      const name = nameRaw.endsWith('.txt') ? nameRaw : nameRaw + '.txt';
+      const content = String(af.content || '');
+      if (!state.game.computer.files) state.game.computer.files = [];
+      const file = {
+        id: 'file_scan_' + Date.now().toString(36),
+        name,
+        type: af.type || 'network-report',
+        content,
+        path: '/scan/',
+        createdAt: Date.now(),
+        size: Math.max(1, Math.ceil(content.length / 1024))
+      };
+      state.game.computer.files.unshift(file);
+      state.game.computer.files = state.game.computer.files.slice(0, 100);
+      termAdd(termId, `Сохранено: ${file.name} (${file.size} KB)`, 'green');
+      scheduleSave();
+      return;
+    }
     const lower = cmd.toLowerCase();
     if (lower === 'exit' || lower === 'quit') {
       const result = runPluginShellCommand(state.game, term.plugin, 'exit');

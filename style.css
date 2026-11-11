@@ -463,8 +463,8 @@ h1,h2,h3,strong,.window-title{
 .nb-lock-hint{font-size:10px;color:#5a7a8e;margin-top:14px;letter-spacing:.08em;position:relative;z-index:1}
 
 /* Phone window wider */
-[data-window="phone"]{min-width:min(100%,440px)!important}
-[data-window="phone"] [data-content]{padding:10px!important;background:#05070c}
+.app-window[data-window="phone"]{min-width:280px!important;max-width:380px!important}
+.app-window[data-window="phone"] [data-content]{padding:8px!important;background:#05070c}
 
 /* Terminal input visible */
 .terminal-input-row{display:flex!important;gap:8px;align-items:center;padding:10px 12px!important;border-top:1px solid #2a4a5c!important;background:#0c1620!important}
@@ -483,18 +483,18 @@ h1,h2,h3,strong,.window-title{
 .terminal-toolbar{display:flex;align-items:center;gap:10px}
 
 /* Phone Lab not full taskbar / not full screen */
-[data-window="phone"]{
-  width:min(380px,92vw)!important;
-  max-width:380px!important;
+.app-window[data-window="phone"]{
+  width:min(360px,90vw)!important;
+  max-width:360px!important;
   min-width:280px!important;
-  height:min(620px,78vh)!important;
-  max-height:78vh!important;
+  height:min(560px,72vh)!important;
+  max-height:72vh!important;
 }
-[data-window="phone"] [data-content]{padding:8px!important;overflow:auto!important}
-.taskbar-apps{flex:1 1 auto;max-width:100%;overflow-x:auto}
-.taskbar-app{max-width:120px!important;flex:0 0 auto!important}
-.taskbar-app[data-window="phone"]{max-width:100px!important}
-.nb-phone-shell{max-width:100%!important;min-height:480px}
+.app-window[data-window="phone"] [data-content]{padding:8px!important;overflow:auto!important}
+.taskbar-apps{flex:1 1 auto;max-width:100%;overflow-x:auto!important}
+.taskbar-app{max-width:120px!important;flex:0 0 auto!important;width:auto!important;min-width:38px!important}
+.taskbar-app i{flex-shrink:0}
+.taskbar-app span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* Fix pin pad visible - no covering block */
 .nb-phone-shell.lock{

@@ -113,7 +113,10 @@ function renderDesktopIcons() {
   `).join('');
 }
 function renderTaskbar() {
-  $('taskbarApps').innerHTML=[...state.opened.entries()].map(([id,w])=>`<button class="taskbar-app ${state.active===id&&!w.minimized?'active':''} ${w.minimized?'minimized':''}" type="button" data-action="taskbar-window" data-window="${id}" title="${esc(w.title)}"><i>${icon(isTerminalId(id)?'terminal':(isBrowserId(id)?'browser':id))}</i><span>${esc(w.title)}</span></button>`).join('');
+  $('taskbarApps').innerHTML=[...state.opened.entries()].map(([id,w])=>{
+    const short = isTerminalId(id) ? `Term ${id.replace('term-','#')}` : (isBrowserId(id) ? `Web ${id.replace('browser-','#')}` : (id==='phone' ? 'Phone' : w.title));
+    return `<button class="taskbar-app ${state.active===id&&!w.minimized?'active':''} ${w.minimized?'minimized':''}" type="button" data-action="taskbar-window" data-window="${id}" title="${esc(w.title)}"><i>${icon(isTerminalId(id)?'terminal':(isBrowserId(id)?'browser':id))}</i><span>${esc(short)}</span></button>`;
+  }).join('');
   refreshSystem();
 }
 function showModal({title,eyebrow='NULLBYTE SYSTEM',body='',fields='',confirm='ПРОДОЛЖИТЬ',cancel='ОТМЕНА',danger=false,onConfirm=null}) {
@@ -1207,6 +1210,47 @@ function pluginBanner(pluginId) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+
+function clearTerminalView(termId) {
+  const term = getTerm(termId);
+  if (!term) return;
+  term.lines = [];
+  const out = document.querySelector(`[data-window="${termId}"] .terminal-output`);
+  if (out) {
+    const form = out.querySelector('.term-inline-form');
+    out.innerHTML = '';
+    if (form) out.appendChild(form);
+    else {
+      // form will come on next full render
+    }
+  }
+}
+
+async function enterPluginWorkspace(termId, pluginId) {
+  clearTerminalView(termId);
+  await animatePluginBoot(termId, pluginId);
+  // refresh prompt labels
+  const term = getTerm(termId);
+  const win = document.querySelector(`[data-window="${termId}"]`);
+  const prompt = terminalPrompt(term);
+  win?.querySelectorAll('.term-inline-prompt, .term-prompt-label').forEach(el => { el.textContent = prompt; });
+  const tool = win?.querySelector('.terminal-toolbar .term-mode');
+  if (tool) tool.textContent = pluginId;
+}
+
+async function leavePluginWorkspace(termId) {
+  clearTerminalView(termId);
+  const term = getTerm(termId);
+  termAdd(termId, 'NULLBYTE TTY', 'green');
+  termAdd(termId, 'plugins · help · clear · status', 'muted');
+  termAdd(termId, 'run <plugin>  — net-link | net-analyzer | phone-access', 'blue');
+  const win = document.querySelector(`[data-window="${termId}"]`);
+  const prompt = terminalPrompt(term);
+  win?.querySelectorAll('.term-inline-prompt, .term-prompt-label').forEach(el => { el.textContent = prompt; });
+  const tool = win?.querySelector('.terminal-toolbar .term-mode');
+  if (tool) tool.textContent = 'tty';
+}
+
 async function animatePluginBoot(termId, pluginId) {
   const t = () => new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const banners = {
@@ -1453,12 +1497,8 @@ async function enterPlugin(termId, pluginId) {
   if (term.busy) { termAdd(termId, 'busy…', 'error'); return; }
   term.busy = true;
   try {
-    await animatePluginBoot(termId, p.id);
     term.plugin = p.id;
-    const win = document.querySelector(`[data-window="${termId}"]`);
-    win?.querySelector('.terminal-form .term-prompt') && (win.querySelector('.terminal-form .term-prompt').textContent = terminalPrompt(term));
-    const tool = win?.querySelector('.terminal-toolbar .term-mode');
-    if (tool) tool.textContent = p.id;
+    await enterPluginWorkspace(termId, p.id);
   } finally {
     term.busy = false;
     const input = document.querySelector(`[data-window="${termId}"] .terminal-form input`);
@@ -1595,13 +1635,9 @@ async function runTerminalCommand(termId, raw) {
     }
     const lower = cmd.toLowerCase();
     if (lower === 'exit' || lower === 'quit') {
-      const result = runPluginShellCommand(state.game, term.plugin, 'exit');
-      for (const line of result.lines || []) termAdd(termId, line.text, line.type || '');
+      runPluginShellCommand(state.game, term.plugin, 'exit');
       term.plugin = null;
-      const win = document.querySelector(`[data-window="${termId}"]`);
-      if (win?.querySelector('.terminal-form .term-prompt')) win.querySelector('.terminal-form .term-prompt').textContent = terminalPrompt(term);
-      const tool = win?.querySelector('.terminal-toolbar .term-mode');
-      if (tool) tool.textContent = 'tty';
+      await leavePluginWorkspace(termId);
       return;
     }
     if (lower === 'help') {

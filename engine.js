@@ -1375,19 +1375,24 @@ if (pluginId === 'data-exporter' && (cmd === 'export' || cmd === 'pack')) {
         { text: `Key ${n.netKey} · SSID ${n.ssid}`, type: 'muted' }
       ]};
     }
-    if (cmd === 'disconnect') {
-      if (!state.phoneWorld?.network) return { ok: true, lines: [{ text: 'Сеть уже отключена.', type: 'muted' }] };
+        if (cmd === 'disconnect') {
+      if (!state.phoneWorld) state.phoneWorld = { network: null, access: {}, discovered: {} };
+      if (!state.phoneWorld.network) {
+        return { ok: true, lines: [{ text: 'Сеть уже отключена.', type: 'muted' }], closePhoneLab: true, clearPhone: true, progressUpdated: true };
+      }
       state.phoneWorld.network = null;
       state._phoneTarget = null;
       state.phoneWorld.access = {};
       state.phoneWorld.discovered = {};
+      state.phoneWorld.activeSession = null;
+      state.phoneWorld.sessionFrozenSms = null;
       return { ok: true, lines: [
         { text: 'Net Link — drop interface…', type: 'muted' },
         { text: 'Disconnected from regional net.', type: 'green' },
-        { text: 'Phone sessions & discovered cleared.', type: 'muted' }
+        { text: 'Phone Lab: выход с телефона.', type: 'muted' }
       ], progressUpdated: true, closePhoneLab: true, clearPhone: true };
     }
-    if (cmd === 'connect') {
+if (cmd === 'connect') {
       const rid = arg1 || parts[1];
       const r = connectNetwork(state, rid);
       if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };

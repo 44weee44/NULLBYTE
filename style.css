@@ -393,3 +393,75 @@ h1,h2,h3,strong,.window-title{
 .phone-app-icon{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;background:#0e1620;border:1px solid #2a3a48;border-radius:14px;color:#9ef;font-size:11px}
 .phone-app-icon span{font-size:22px}
 .phone-unlocked .phone-screen{background:#070b12}
+
+
+/* ===== NULLBYTE PHONE LAB (neon cyber) ===== */
+.nb-phone-shell{
+  width:100%;max-width:420px;margin:0 auto;min-height:560px;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(0,229,255,.12), transparent 55%),
+    radial-gradient(ellipse at 80% 100%, rgba(255,43,214,.1), transparent 50%),
+    linear-gradient(180deg,#05080f 0%,#0a0e18 40%,#070b12 100%);
+  border:1px solid #1e3a4a;border-radius:28px;padding:14px 14px 18px;
+  box-shadow:0 0 0 1px #0ff2 inset, 0 0 40px rgba(0,200,255,.15), 0 20px 50px #000a;
+  color:#c8e8f8;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  position:relative;overflow:hidden;
+}
+.nb-phone-shell::before{
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.25;
+  background-image:
+    linear-gradient(rgba(0,229,255,.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,43,214,.05) 1px, transparent 1px);
+  background-size:24px 24px;
+}
+.nb-phone-status-row{display:flex;justify-content:space-between;font-size:10px;color:#5ec8ff;letter-spacing:.08em;margin-bottom:8px;position:relative;z-index:1}
+.nb-phone-brand{font-size:22px;font-weight:800;letter-spacing:.12em;color:#00e5ff;text-shadow:0 0 12px #00e5ff88;position:relative;z-index:1}
+.nb-skull{color:#ff2bd6;text-shadow:0 0 10px #ff2bd6}
+.nb-phone-tag{font-size:10px;color:#7a9bb0;letter-spacing:.06em;margin:4px 0 10px;position:relative;z-index:1}
+.nb-phone-meta{font-size:11px;color:#9ec9e0;margin-bottom:12px;position:relative;z-index:1}
+.nb-tabs{display:flex;gap:0;border-bottom:1px solid #1a3a4c;margin-bottom:12px;position:relative;z-index:1}
+.nb-tab{flex:1;background:transparent;border:none;color:#5a7a8e;font-size:10px;font-weight:700;letter-spacing:.1em;padding:10px 4px;cursor:pointer;border-bottom:2px solid transparent}
+.nb-tab.on{color:#00e5ff;border-bottom-color:#00e5ff;text-shadow:0 0 8px #00e5ff66}
+.nb-phone-body{position:relative;z-index:1;min-height:320px}
+.nb-app-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:8px 4px}
+.nb-app{display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px 8px;background:rgba(10,20,32,.85);border:1px solid #1e4a5c;border-radius:14px;color:#9ed;cursor:pointer;box-shadow:0 0 12px rgba(0,200,255,.08)}
+.nb-app:hover{border-color:#00e5ff;box-shadow:0 0 16px rgba(0,229,255,.25)}
+.nb-app-ico{font-size:26px;filter:drop-shadow(0 0 6px currentColor)}
+.nb-app label{font-size:9px;letter-spacing:.08em;font-weight:700}
+.nb-cyan{color:#00e5ff;text-shadow:0 0 6px #00e5ff55}
+.nb-pink{color:#ff2bd6;text-shadow:0 0 6px #ff2bd655}
+.nb-muted{color:#5a7a8e;font-size:10px}
+.nb-list{display:flex;flex-direction:column;gap:8px;max-height:340px;overflow:auto;padding-right:2px}
+.nb-card{background:rgba(8,16,28,.9);border:1px solid #1a3a4c;border-radius:12px;padding:10px 12px}
+.nb-card-top{display:flex;justify-content:space-between;margin-bottom:6px;font-size:11px;font-weight:700}
+.nb-card-body{font-size:12px;color:#c8dce8;line-height:1.4;white-space:pre-wrap;word-break:break-word}
+.nb-gal{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.nb-thumb{aspect-ratio:1;border-radius:12px;border:1px solid #1e4a5c;background:linear-gradient(135deg,#0a1520,#121a28);display:flex;align-items:center;justify-content:center;color:#5ec8ff;font-size:11px;text-align:center;padding:8px}
+.nb-action{width:100%;margin-top:12px;padding:10px;border-radius:10px;border:1px solid #00e5ff55;background:rgba(0,229,255,.08);color:#00e5ff;font-weight:700;letter-spacing:.08em;font-size:11px;cursor:pointer}
+.nb-phone-dock{display:flex;justify-content:space-between;margin-top:14px;padding-top:10px;border-top:1px solid #1a3a4c;font-size:9px;color:#5a7a8e;letter-spacing:.06em;position:relative;z-index:1}
+.nb-empty{text-align:center;color:#5a7a8e;padding:24px;font-size:12px}
+.nb-phone-idle{text-align:center;padding:80px 20px;position:relative;z-index:1}
+.nb-phone-idle p{color:#00e5ff;font-weight:700;margin:12px 0 4px}
+.nb-phone-top{color:#00e5ff;font-weight:800;letter-spacing:.15em;position:relative;z-index:1}
+.nb-phone-footer{margin-top:20px;font-size:10px;color:#5a7a8e;text-align:center;position:relative;z-index:1}
+
+/* Lock + PIN */
+.nb-phone-shell.lock{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.nb-lock-time{font-size:52px;font-weight:800;letter-spacing:.06em;background:linear-gradient(90deg,#00e5ff 40%,#ff2bd6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;text-shadow:none;filter:drop-shadow(0 0 12px #00e5ff66);margin:12px 0 4px;position:relative;z-index:1}
+.nb-lock-date{font-size:11px;color:#7a9bb0;letter-spacing:.08em;margin-bottom:18px;position:relative;z-index:1}
+.nb-lock-hex{width:72px;height:72px;border-radius:18px;border:2px solid #ff2bd6;box-shadow:0 0 20px #ff2bd655, inset 0 0 20px #00e5ff22;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;position:relative;z-index:1;clip-path:polygon(30% 0%,70% 0%,100% 30%,100% 70%,70% 100%,30% 100%,0% 70%,0% 30%)}
+.nb-lock-icon{font-size:28px;filter:drop-shadow(0 0 8px #00e5ff)}
+.nb-lock-label{font-size:10px;letter-spacing:.2em;color:#00e5ff;margin-bottom:16px;position:relative;z-index:1}
+.nb-pin-dots{display:flex;gap:14px;justify-content:center;margin-bottom:18px;position:relative;z-index:1}
+.nb-pin-dot{width:12px;height:12px;border-radius:50%;border:2px solid #00e5ff;background:transparent;box-shadow:0 0 6px #00e5ff44}
+.nb-pin-dot.on{background:#ff2bd6;border-color:#ff2bd6;box-shadow:0 0 12px #ff2bd6}
+.nb-pin-pad{display:grid;grid-template-columns:repeat(3,70px);gap:12px;justify-content:center;position:relative;z-index:1}
+.nb-pin-key{width:70px;height:70px;border-radius:50%;border:2px solid #1e4a6a;background:radial-gradient(circle at 30% 30%,#122030,#080e18);color:#e0f4ff;font-size:24px;font-weight:600;cursor:pointer;box-shadow:0 0 10px rgba(0,200,255,.12)}
+.nb-pin-key:active{border-color:#00e5ff;box-shadow:0 0 16px #00e5ff66;color:#00e5ff}
+.nb-pin-gap{width:70px;height:70px}
+.nb-pin-err{color:#ff4d6d;font-size:12px;margin-top:12px;position:relative;z-index:1}
+.nb-lock-hint{font-size:10px;color:#5a7a8e;margin-top:14px;letter-spacing:.08em;position:relative;z-index:1}
+
+/* Phone window wider */
+[data-window="phone"]{min-width:min(100%,440px)!important}
+[data-window="phone"] [data-content]{padding:10px!important;background:#05070c}

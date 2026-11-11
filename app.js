@@ -1196,52 +1196,72 @@ function pluginBanner(pluginId) {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function animatePluginBoot(termId, pluginId) {
-  const boots = {
+  const banners = {
+    'net-link': [
+      { text: '╔══════════════════════════════════════════════════╗', type: 'green' },
+      { text: '║  NET LINK                         [SECURE BRIDGE]║', type: 'green' },
+      { text: '║  // channel · region mesh · peer hops            ║', type: 'muted' },
+      { text: '╠══════════════════════════════════════════════════╣', type: 'green' },
+      { text: '║  LINK: READY     ENC: AES-NULL     LAT: —         ║', type: 'muted' },
+      { text: '║  PEER NODES [6]   HOP PATH [TRACE]                ║', type: 'muted' },
+      { text: '║  cmds: connect <region> · disconnect · status     ║', type: 'blue' },
+      { text: '║         list · help · exit                        ║', type: 'blue' },
+      { text: '╚══════════════════════════════════════════════════╝', type: 'green' }
+    ],
+    'net-analyzer': [
+      { text: '╔══════════════════════════════════════════════════╗', type: 'green' },
+      { text: '║  NET ANALYZER v2.1          [INTEL SUITE]         ║', type: 'green' },
+      { text: '║  // live capture + topology + phone registry      ║', type: 'muted' },
+      { text: '╠══════════════════════════════════════════════════╣', type: 'green' },
+      { text: '║  LIVE TRAFFIC LOG     TOPOLOGY MINI-MAP  L3       ║', type: 'muted' },
+      { text: '║  BUFFER: 1024 pkts    FILTER: ANY                 ║', type: 'muted' },
+      { text: '║  cmds: scan · status · help · exit                ║', type: 'blue' },
+      { text: '║  after scan → type filename to save report        ║', type: 'blue' },
+      { text: '╚══════════════════════════════════════════════════╝', type: 'green' }
+    ],
+    'phone-access': [
+      { text: '╔══════════════════════════════════════════════════╗', type: 'green' },
+      { text: '║  PHONE ACCESS              [DEVICE LINK MODULE]   ║', type: 'green' },
+      { text: '║  // open · attack · block · session pin           ║', type: 'muted' },
+      { text: '╠══════════════════════════════════════════════════╣', type: 'green' },
+      { text: '║  TARGET: —        AUTH: —        CHANNEL: idle    ║', type: 'muted' },
+      { text: '║  DEVICE PROFILE · SMS INTERCEPT · CALL / CONTACT  ║', type: 'muted' },
+      { text: '║  cmds: open <PHONE_ID> · attack · block           ║', type: 'blue' },
+      { text: '║         status · disconnect · help · exit         ║', type: 'blue' },
+      { text: '╚══════════════════════════════════════════════════╝', type: 'green' }
+    ]
+  };
+  const lines = banners[pluginId] || [
+    { text: `┌─ ${pluginId}`, type: 'blue' },
+    { text: '│ shell ready', type: 'green' }
+  ];
+  for (const line of lines) {
+    termAdd(termId, line.text, line.type || '');
+    await sleep(35);
+  }
+  const extra = {
     'net-link': [
       { text: '· radio cold start', type: 'muted' },
       { text: '· load region table', type: 'muted' },
       { text: '· mesh driver OK', type: 'green' }
     ],
     'net-analyzer': [
-      { text: '· alloc scan buffer', type: 'muted' },
+      { text: '· alloc scan buffer 1024', type: 'muted' },
       { text: '· hash PHONE index', type: 'muted' },
       { text: '· analyzer ready', type: 'green' }
     ],
     'phone-access': [
       { text: '· session vault', type: 'muted' },
-      { text: '· handset protocol', type: 'muted' },
+      { text: '· handset protocol stack', type: 'muted' },
       { text: '· access shell ready', type: 'green' }
-    ],
-    'mail-drop': [
-      { text: '· envelope kit', type: 'muted' },
-      { text: '· drop ready', type: 'green' }
-    ],
-    'sms-bomber': [
-      { text: '· arm virtual modem', type: 'muted' },
-      { text: '· bomber armed', type: 'green' }
-    ],
-    'bank-peek': [
-      { text: '· open notes layer', type: 'muted' },
-      { text: '· peek ready', type: 'green' }
     ]
   };
-  const seq = boots[pluginId] || [
-    { text: '[··] init', type: 'muted' },
-    { text: '[==] ready', type: 'green' }
-  ];
-  for (const f of seq) {
-    termAdd(termId, f.text, f.type);
-    await sleep(90);
-  }
-  for (const line of pluginBanner(pluginId)) {
-    termAdd(termId, line.text, line.type);
-    await sleep(35);
-  }
-  for (const line of pluginShellBootLines(pluginId)) {
-    termAdd(termId, line.text, line.type);
-    await sleep(30);
+  for (const line of (extra[pluginId] || [])) {
+    termAdd(termId, line.text, line.type || '');
+    await sleep(40);
   }
 }
+
 
 
 async function animateWorkTimed(termId, pluginId, totalMs, mode) {
@@ -1249,53 +1269,93 @@ async function animateWorkTimed(termId, pluginId, totalMs, mode) {
   const regions = ['BAYS','MIDT','IRON','SOUT','OAKR','SHAD'];
   const randMac = () => [...Array(6)].map(() => ((Math.random()*256)|0).toString(16).padStart(2,'0')).join(':');
   const randPhone = () => `PH-${regions[(Math.random()*regions.length)|0]}-${String((Math.random()*550)|0).padStart(4,'0')}`;
-  const randPin = () => String(1000 + ((Math.random()*9000)|0));
-  const titles = {
-    'net-link': 'NET LINK · link up',
-    'net-analyzer': 'NET ANALYZER · sweep',
-    'phone-access': mode === 'attack' ? 'PHONE ACCESS · brute PIN' : 'PHONE ACCESS · open session'
+  const randIp = () => `172.16.${(Math.random()*40|0)}.${(1+Math.random()*250|0)}`;
+  const randIpPub = () => `10.0.${(Math.random()*20|0)}.${(1+Math.random()*250|0)}`;
+  const randHex = (n=6) => [...Array(n)].map(() => ((Math.random()*16)|0).toString(16)).join('');
+  const randBar = (pct) => {
+    const f = Math.max(0, Math.min(20, Math.round(pct/5)));
+    return '█'.repeat(f) + '░'.repeat(20-f);
   };
-  termAdd(termId, `┌─ ${titles[pluginId]||pluginId}`, 'blue');
+  const randPin = () => String(1000 + ((Math.random()*9000)|0));
+
+  const titles = {
+    'net-link': 'NET LINK · connect bridge',
+    'net-analyzer': 'NET ANALYZER · deep sweep',
+    'phone-access': mode === 'attack' ? 'PHONE ACCESS · brute PIN' : mode === 'open' ? 'PHONE ACCESS · device link' : 'PHONE ACCESS · work'
+  };
+  termAdd(termId, `┌─ ${titles[pluginId] || pluginId}`, 'green');
   let step = 0;
   while (performance.now() - start < totalMs) {
     step++;
-    if (pluginId === 'net-analyzer') {
-      termAdd(termId, `│ ${randPhone()}  rssi=-${40+((Math.random()*45)|0)}  ${randMac()}`, 'muted');
-      if (step % 4 === 0) termAdd(termId, `│ · indexing handsets…`, 'blue');
-    } else if (pluginId === 'net-link') {
-      termAdd(termId, `│ handshake  bssid=${randMac()}  rtt=${((Math.random()*40)+2)|0}ms`, 'muted');
-      if (step % 3 === 0) termAdd(termId, `│ · auth / lease…`, 'blue');
+    const elapsed = performance.now() - start;
+    const pct = Math.min(99, Math.round((elapsed / totalMs) * 100));
+
+    if (pluginId === 'net-link') {
+      const lines = [
+        `│ peer N0${1+(step%6)}  ${randIp()}:48101  rtt=${(5+Math.random()*20)|0}ms  ACTIVE`,
+        `│ hop  LOCAL → N0${1+(step%4)} → N0${2+(step%3)}  path_lat=${(8+Math.random()*15)|0}ms`,
+        `│ bssid=${randMac()}  lease=${(Math.random()*40+10)|0}s  qos=STANDARD`,
+        `│ uplink ${(Math.random()*12+2).toFixed(2)} Mbps  [${randBar(20+step*3)}]`,
+        `│ session ${randHex(8)}-${randHex(4)}  enc=AES-NULL`,
+        `│ AUTH handshake ${step}  nonce=0x${randHex(8)}`
+      ];
+      termAdd(termId, lines[step % lines.length], 'muted');
+      if (step % 3 === 0) termAdd(termId, `│ bridge ${pct}%  [${randBar(pct)}]`, 'blue');
+    } else if (pluginId === 'net-analyzer') {
+      const proto = ['TCP','UDP','ICMP','ARP','DNS'][step%5];
+      const lines = [
+        `│ ${String(23+(step%37)).padStart(2,'0')}:${String(40+(step%20)).padStart(2,'0')}:${String(step%60).padStart(2,'0')} ${proto}  ${randIpPub()} → ${randIp()}`,
+        `│ ${randPhone()}  rssi=-${40+((Math.random()*45)|0)}  mac=${randMac()}`,
+        `│ TOPO  node ${randIpPub()}  label=USER-${10+(step%90)}  L3`,
+        `│ DPI  flag=${['SYN','ACK','FIN','RST','DATA'][step%5]}  len=${40+((Math.random()*1400)|0)}`,
+        `│ registry idx=${(step*17)%550}  hash=0x${randHex(6)}`,
+        `│ BUFFER ${Math.min(1024, step*48)}/1024  FILTER=ANY`
+      ];
+      termAdd(termId, lines[step % lines.length], 'muted');
+      if (step % 4 === 0) termAdd(termId, `│ SCAN ${pct}%  [${randBar(pct)}]  devices≈${Math.min(250, step*9)}`, 'blue');
     } else if (pluginId === 'phone-access' && mode === 'attack') {
       const tryPin = randPin();
-      const msgs = [
-        `│ brute  try=${tryPin}  entropy=${(Math.random()*8+1).toFixed(2)}`,
-        `│ dict  wordlist=${['rock','null','mesh','grid'][step%4]}  hit=0`,
-        `│ mask  ????  cand=${(Math.random()*9999)|0}`,
-        `│ side-channel  jitter=${((Math.random()*12)+1).toFixed(1)}ms`,
-        `│ gpu  kernel pin4  batch=${1000+((Math.random()*8000)|0)}`
+      const lines = [
+        `│ brute  try=${tryPin}  entropy=${(Math.random()*8+1).toFixed(2)}  batch=${1000+((Math.random()*8000)|0)}`,
+        `│ dict  wordlist=${['rock','null','mesh','grid','pulse'][step%5]}  hit=0`,
+        `│ mask  ????  cand=${(Math.random()*9999)|0}  gpu_kernel=pin4`,
+        `│ side-channel  jitter=${((Math.random()*12)+1).toFixed(1)}ms  sample=${step}`,
+        `│ oracle  resp=0x${randHex(4)}  noise=${(Math.random()*100)|0}%`
       ];
-      termAdd(termId, msgs[step % msgs.length], 'muted');
+      termAdd(termId, lines[step % lines.length], 'muted');
       if (step % 2 === 0) {
         const errs = [
           `│ ! DEFENSE reject pin ${tryPin}`,
-          `│ ! watchdog tick 0x${((Math.random()*0xffffff)|0).toString(16)}`,
-          `│ ! rate-limit  backoff ${((Math.random()*400)|0)}ms`,
-          `│ ! integrity mismatch`,
-          `│ ! crypto oracle noise`
+          `│ ! watchdog tick 0x${randHex(6)}`,
+          `│ ! rate-limit backoff ${((Math.random()*400)|0)}ms`,
+          `│ ! integrity mismatch block=${step}`,
+          `│ ! crypto noise floor`
         ];
         termAdd(termId, errs[step % errs.length], 'error');
       }
-      if (step % 5 === 0) termAdd(termId, `│ · cracking… candidates≈${step * 240}`, 'blue');
+      if (step % 4 === 0) termAdd(termId, `│ CRACK ${pct}%  [${randBar(pct)}]  candidates≈${step*240}`, 'blue');
+    } else if (pluginId === 'phone-access' && mode === 'open') {
+      const lines = [
+        `│ link  target=${randPhone()}  channel=ENC`,
+        `│ signal  ${(Math.random()*5+1)|0}/5  rssi=-${30+((Math.random()*40)|0)} dBm`,
+        `│ profile  model=handset  os=vOS  ip=${randIp()}`,
+        `│ auth  state=HANDSHAKE  token=0x${randHex(8)}`,
+        `│ tunnel  hop=${1+(step%3)}  rtt=${(4+Math.random()*18)|0}ms`,
+        `│ vault  session=${randHex(4)}…${randHex(4)}  ttl=300s`
+      ];
+      termAdd(termId, lines[step % lines.length], 'muted');
+      if (step % 2 === 0) termAdd(termId, `│ LINK ${pct}%  [${randBar(pct)}]`, 'blue');
     } else if (pluginId === 'phone-access') {
-      termAdd(termId, `│ probe surface=${['lock','svc','fs','ipc','radio'][step%5]}  0x${((Math.random()*0xffffff)|0).toString(16)}`, 'muted');
-      if (step % 3 === 0) termAdd(termId, `│ · session bootstrap…`, 'blue');
+      termAdd(termId, `│ probe surface=${['lock','svc','fs','ipc','radio'][step%5]}  0x${randHex(6)}`, 'muted');
     } else {
-      termAdd(termId, `│ · working…`, 'muted');
+      termAdd(termId, `│ · working ${pct}%`, 'muted');
     }
-    await sleep(Math.max(90, totalMs / 36));
+    await sleep(Math.max(70, totalMs / 40));
   }
-  termAdd(termId, `└─ ready`, 'green');
+  termAdd(termId, `│ [${'█'.repeat(20)}] 100%`, 'green');
+  termAdd(termId, `└─ READY`, 'green');
 }
+
 
 
 async function animateWork(termId, pluginId) {
@@ -1568,11 +1628,13 @@ async function runTerminalCommand(termId, raw) {
         const heavyMap = {
           'net-link': { cmds:['connect'], ms: 8000 },
           'net-analyzer': { cmds:['scan','analyze'], ms: 9000 },
-          'phone-access': { cmds:['open'], ms: 6000, attack: 13000 }
+          'phone-access': { cmds:['open'], ms: 3000 }
         };
         const hm = heavyMap[term.plugin];
         if (term.plugin === 'phone-access' && cmd0h === 'attack') {
           await animateWorkTimed(termId, 'phone-access', 13000, 'attack');
+        } else if (term.plugin === 'phone-access' && cmd0h === 'open') {
+          await animateWorkTimed(termId, 'phone-access', 3000, 'open');
         } else if (hm && hm.cmds.includes(cmd0h)) {
           // validate before long anim
           if (term.plugin === 'net-analyzer' && !state.game.phoneWorld?.network) {
@@ -1581,13 +1643,13 @@ async function runTerminalCommand(termId, raw) {
             const rid = (cmd.split(/\s+/)[1]||'').toLowerCase();
             const okRegion = ['bayshore','midtown','ironreach','southgate','oakridge','shadowline'].includes(rid);
             if (!okRegion) termAdd(termId, 'Неизвестный region_id. list', 'error');
-            else await animateWorkTimed(termId, term.plugin, hm.ms);
+            else await animateWorkTimed(termId, term.plugin, hm.ms, cmd0h);
           } else if (term.plugin === 'phone-access' && cmd0h === 'open') {
             const pid = (cmd.split(/\s+/)[1]||'');
             if (!/^PH-[A-Z0-9]{4}-\d{4}$/i.test(pid)) termAdd(termId, 'Формат: open PH-XXXX-0000', 'error');
-            else await animateWorkTimed(termId, term.plugin, hm.ms);
+            else await animateWorkTimed(termId, term.plugin, hm.ms, cmd0h);
           } else {
-            await animateWorkTimed(termId, term.plugin, hm.ms);
+            await animateWorkTimed(termId, term.plugin, hm.ms, cmd0h);
           }
         }
         const result = runPluginShellCommand(state.game, term.plugin, cmd);
@@ -1619,13 +1681,16 @@ async function runTerminalCommand(termId, raw) {
         if (result.progressUpdated) refreshOpenApps(['browser', 'mail', 'blackwire', 'computer', 'files', 'phone', 'intel']);
         if (result.closePhoneLab || result.clearPhone) {
           state._phoneTarget = null;
+          state.phoneUnlocked = null;
+          state.pinInput = '';
+          state.pinError = '';
+          state.phoneLabTab = 'home';
           if (state.opened.has('phone')) renderWindow('phone');
-          termAdd(termId, '→ Phone Lab: нет активной сессии.', 'muted');
-        } else if (result.closePhoneLab) {
-          if (state.opened.has('phone')) renderWindow('phone');
+          termAdd(termId, '→ Phone Lab: сессия закрыта.', 'muted');
+        } else if (result.progressUpdated && state.opened.has('phone')) {
+          renderWindow('phone');
         }
-
-        if (result.progressUpdated && state.opened.has('phone')) renderWindow('phone');
+        if (result.progressUpdated && state.opened.has('phone') && !(result.closePhoneLab || result.clearPhone)) renderWindow('phone');
       }
     } finally {
       term.busy = false;
@@ -1764,11 +1829,12 @@ function renderPhoneLab(g) {
   }
   const phone = activeId ? findPhone(activeId) : null;
   if (!phone) {
-    return `<div class="app-heading"><div><div class="eyebrow">PHONE LAB</div><h2>Телефон</h2></div><span class="badge">IDLE</span></div>
-      <div class="empty-state"><b>Нет сессии</b><p>1) open PH-…  2) attack  3) PIN (4 цифры)</p></div>
-      <div class="kv"><span>Сеть</span><b>${net ? esc(net.regionId) : '—'}</b></div>`;
+    return `<div class="nb-phone-shell idle">
+      <div class="nb-phone-top">NULLBYTE</div>
+      <div class="nb-phone-idle"><div class="nb-lock-hex">🔒</div><p>Нет сессии</p><small>open → attack → PIN</small></div>
+      <div class="nb-phone-footer">NET: ${net ? esc(net.regionId) : 'OFFLINE'}</div>
+    </div>`;
   }
-  // resolve access entry
   let accKey = phone.id;
   let acc = pw.access?.[phone.id];
   if (!acc) {
@@ -1776,77 +1842,97 @@ function renderPhoneLab(g) {
     acc = pw.access?.[accKey] || {};
   }
   if (acc.blocked) {
-    return `<div class="app-heading"><div><div class="eyebrow">PHONE LAB</div><h2>Заблокирован</h2></div></div>
-      <div class="empty-state"><b>${esc(phone.id)}</b><p>block — доступ закрыт навсегда</p></div>`;
+    return `<div class="nb-phone-shell">
+      <div class="nb-phone-top">BLOCKED</div>
+      <div class="nb-phone-idle"><div class="nb-lock-hex">⛔</div><p>${esc(phone.id)}</p><small>block — навсегда</small></div>
+    </div>`;
   }
-
   const isUnlocked = !!(acc.unlocked || state.phoneUnlocked === phone.id);
   if (!isUnlocked) {
     const pinUi = state.pinInput || '';
-    const dots = [0,1,2,3].map(i => `<span class="pin-dot ${i < pinUi.length ? 'on' : ''}"></span>`).join('');
+    const dots = [0,1,2,3].map(i => `<span class="nb-pin-dot ${i < pinUi.length ? 'on' : ''}"></span>`).join('');
     const keys = ['1','2','3','4','5','6','7','8','9','','0','⌫'].map(k => {
-      if (k === '') return '<span></span>';
+      if (!k) return '<span class="nb-pin-gap"></span>';
       const act = k === '⌫' ? 'phone-pin-del' : 'phone-pin-digit';
-      return `<button type="button" class="pin-key" data-action="${act}" data-digit="${k === '⌫' ? '' : k}">${k}</button>`;
+      return `<button type="button" class="nb-pin-key" data-action="${act}" data-digit="${k === '⌫' ? '' : k}">${k}</button>`;
     }).join('');
-    return `<div class="phone-lab-wrap"><div class="phone-frame phone-lock">
-      <div class="phone-lock-screen">
-        <div class="phone-lock-status">${esc(phone.model)} · ${esc(phone.protection || '')}</div>
-        <div class="phone-lock-clock">${new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</div>
-        <div class="phone-lock-sub">${esc(phone.ownerName)}</div>
-        <div class="phone-lock-icon">🔒</div>
-        <div class="pin-dots">${dots}</div>
-        <div class="pin-pad">${keys}</div>
-        ${state.pinError ? `<div style="color:#f07178;margin-top:10px;font-size:12px">${esc(state.pinError)}</div>` : ''}
-        <div class="muted small" style="margin-top:12px">PIN из Terminal после attack</div>
-      </div>
-    </div></div>`;
+    const clock = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    return `<div class="nb-phone-shell lock">
+      <div class="nb-phone-status-row"><span>▣▣▣</span><span>SYS</span><span>🔋</span></div>
+      <div class="nb-lock-time">${clock}</div>
+      <div class="nb-lock-date">${esc(phone.ownerName)} · ${esc(phone.model)}</div>
+      <div class="nb-lock-hex"><span class="nb-lock-icon">🔒</span></div>
+      <div class="nb-lock-label">// SYSTEM SECURE //</div>
+      <div class="nb-pin-dots">${dots}</div>
+      <div class="nb-pin-pad">${keys}</div>
+      ${state.pinError ? `<div class="nb-pin-err">${esc(state.pinError)}</div>` : ''}
+      <div class="nb-lock-hint">PIN после attack</div>
+    </div>`;
   }
 
-  // HOME
   const now = Date.now();
-  let msgs = [];
-  try { msgs = (pw.sessionFrozenSms && pw.sessionFrozenSms.length) ? pw.sessionFrozenSms : phoneMessages(phone, now); } catch (e) { msgs = []; }
+  let msgs = [], gal = [], calls = [], contacts = [];
+  try { msgs = (pw.sessionFrozenSms && pw.sessionFrozenSms.length) ? pw.sessionFrozenSms : phoneMessages(phone, now); } catch (e) {}
   try { registerBankFromMessages(g, phone, msgs); } catch (e) {}
-  let gal = [], calls = [], contacts = [];
   try { gal = phoneGallery(phone) || []; } catch (e) {}
   try { calls = phoneCallLog(phone, now) || []; } catch (e) {}
   try { contacts = phoneContacts(phone, now) || []; } catch (e) {}
   const tab = state.phoneLabTab || 'home';
+
+  const tabs = `
+    <div class="nb-tabs">
+      <button type="button" class="nb-tab ${tab==='msgs'||tab==='home'?'on':''}" data-action="phone-lab-tab" data-tab="msgs">MESSAGES</button>
+      <button type="button" class="nb-tab ${tab==='calls'?'on':''}" data-action="phone-lab-tab" data-tab="calls">CALLS</button>
+      <button type="button" class="nb-tab ${tab==='gallery'?'on':''}" data-action="phone-lab-tab" data-tab="gallery">GALLERY</button>
+    </div>`;
+
   let body = '';
   if (tab === 'msgs') {
-    body = msgs.map(m => `<div class="phone-msg"><span>${esc(m.from || '')}</span><p>${esc(m.text || '')}</p></div>`).join('') || '<div class="muted">нет SMS</div>';
+    body = `<div class="nb-list">${msgs.map(m => `
+      <div class="nb-card">
+        <div class="nb-card-top"><span class="nb-cyan">${esc(m.from || 'SMS')}</span><span class="nb-muted">${m.kind==='bank'?'BANK':'MSG'}</span></div>
+        <div class="nb-card-body">${esc(m.text || '')}</div>
+      </div>`).join('') || '<div class="nb-empty">нет сообщений</div>'}</div>
+      <button type="button" class="nb-action" data-action="phone-lab-export" data-kind="msgs" data-id="${esc(phone.id)}">SAVE SMS</button>`;
   } else if (tab === 'calls') {
-    body = calls.map(c => `<div class="phone-msg"><span>${esc(c.info || '')} · ${esc(c.date || '')} ${esc(c.time || '')}</span><p>${esc(c.with || '')} · ${esc(c.number || '')}</p><small>${c.durationSec || 0}s</small></div>`).join('') || '<div class="muted">пусто</div>';
+    body = `<div class="nb-list">${calls.map(c => `
+      <div class="nb-card">
+        <div class="nb-card-top"><span class="nb-pink">${esc(c.info || '')}</span><span class="nb-muted">${esc(c.date||'')} ${esc(c.time||'')}</span></div>
+        <div class="nb-card-body">${esc(c.with||'')} · ${esc(c.number||'')}</div>
+        <div class="nb-muted">${c.durationSec||0}s</div>
+      </div>`).join('') || '<div class="nb-empty">нет звонков</div>'}</div>`;
   } else if (tab === 'contacts') {
-    body = contacts.map(c => `<div class="phone-msg"><span>${esc(c.name || '')}</span><p>${esc(c.number || '')}</p></div>`).join('') || '<div class="muted">пусто</div>';
+    body = `<div class="nb-list">${contacts.map(c => `
+      <div class="nb-card">
+        <div class="nb-card-top"><span class="nb-pink">${esc(c.name||'')}</span></div>
+        <div class="nb-card-body nb-cyan">${esc(c.number||'')}</div>
+      </div>`).join('') || '<div class="nb-empty">пусто</div>'}</div>`;
   } else if (tab === 'gallery') {
-    body = `<div class="phone-gal">${gal.map(x => `<div class="phone-thumb">${esc(x.title || '')}</div>`).join('')}</div>`;
+    body = `<div class="nb-gal">${gal.map(x => `<div class="nb-thumb"><span>${esc(x.title||'')}</span></div>`).join('')}</div>
+      <button type="button" class="nb-action" data-action="phone-lab-export" data-kind="gallery" data-id="${esc(phone.id)}">SAVE GALLERY</button>`;
   } else {
-    body = `<div class="phone-home-grid">
-      <button type="button" class="phone-app-icon" data-action="phone-lab-tab" data-tab="msgs"><span>💬</span>Messages</button>
-      <button type="button" class="phone-app-icon" data-action="phone-lab-tab" data-tab="calls"><span>📞</span>Calls</button>
-      <button type="button" class="phone-app-icon" data-action="phone-lab-tab" data-tab="gallery"><span>🖼</span>Gallery</button>
-      <button type="button" class="phone-app-icon" data-action="phone-lab-tab" data-tab="contacts"><span>👥</span>Contacts</button>
-    </div>
-    <div class="btn-row section-gap">
-      <button type="button" class="btn tiny" data-action="phone-lab-export" data-kind="msgs" data-id="${esc(phone.id)}">Сохранить SMS</button>
-      <button type="button" class="btn tiny" data-action="phone-lab-export" data-kind="gallery" data-id="${esc(phone.id)}">Сохранить галерею</button>
+    body = `<div class="nb-app-grid">
+      <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="msgs"><span class="nb-app-ico nb-cyan">💬</span><label>MESSAGES</label></button>
+      <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="calls"><span class="nb-app-ico nb-pink">📞</span><label>CALLS</label></button>
+      <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="gallery"><span class="nb-app-ico nb-cyan">🖼</span><label>GALLERY</label></button>
+      <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="contacts"><span class="nb-app-ico nb-pink">👥</span><label>CONTACTS</label></button>
+      <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="msgs"><span class="nb-app-ico nb-cyan">🌐</span><label>BROWSER</label></button>
+      <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="home"><span class="nb-app-ico nb-pink">▦</span><label>MORE</label></button>
     </div>`;
   }
-  return `<div class="phone-lab-wrap"><div class="phone-frame phone-unlocked">
-    <div class="phone-screen">
-      <div class="phone-status-bar">${esc(phone.model)} · ${esc(phone.number)} · ${esc(phone.ownerName)}</div>
-      <div class="phone-tabs btn-row">
-        <button type="button" class="btn tiny ${tab==='home'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="home">Home</button>
-        <button type="button" class="btn tiny ${tab==='msgs'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="msgs">SMS</button>
-        <button type="button" class="btn tiny ${tab==='calls'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="calls">Calls</button>
-        <button type="button" class="btn tiny ${tab==='contacts'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="contacts">Contacts</button>
-        <button type="button" class="btn tiny ${tab==='gallery'?'primary':'ghost'}" data-action="phone-lab-tab" data-tab="gallery">Gallery</button>
-      </div>
-      <div class="phone-section">${body}</div>
+
+  return `<div class="nb-phone-shell unlocked">
+    <div class="nb-phone-status-row"><span>${new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</span><span>▣ NULLBYTE</span><span>🔋</span></div>
+    <div class="nb-phone-brand">NULLBYTE <span class="nb-skull">☠</span></div>
+    <div class="nb-phone-tag">// STAY CONNECTED. STAY GHOSTED.</div>
+    <div class="nb-phone-meta">${esc(phone.ownerName)} · ${esc(phone.role||'')} · ${esc(phone.number)}</div>
+    ${tabs}
+    <div class="nb-phone-body">${body}</div>
+    <div class="nb-phone-dock">
+      <span>SYS: SECURE</span>
+      <span>NET: ${net ? esc(net.regionId) : '—'} · ${esc(phone.protection||'')}</span>
     </div>
-  </div></div>`;
+  </div>`;
 }
 
 function renderIntel(g) {

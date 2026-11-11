@@ -263,12 +263,17 @@ function openApp(id) {
   const area=$('desktopWorkspace');
   const isTerm=isTerminalId(id);
   // Compact terminal like a real OS console; other apps keep previous sizing.
+  const isPhone = baseId === 'phone';
   const width=isTerm
     ? Math.min(560, Math.max(340, Math.floor(area.clientWidth*0.42)))
-    : Math.min(880,Math.max(Math.min(320,area.clientWidth-12),area.clientWidth-42));
+    : isPhone
+      ? Math.min(360, Math.max(280, Math.floor(area.clientWidth*0.88)))
+      : Math.min(880,Math.max(Math.min(320,area.clientWidth-12),area.clientWidth-42));
   const height=isTerm
     ? Math.min(360, Math.max(240, Math.floor(area.clientHeight*0.42)))
-    : Math.min(650,Math.max(Math.min(290,area.clientHeight-12),area.clientHeight-42));
+    : isPhone
+      ? Math.min(580, Math.max(420, Math.floor(area.clientHeight*0.72)))
+      : Math.min(650,Math.max(Math.min(290,area.clientHeight-12),area.clientHeight-42));
   const offset=(state.opened.size%5)*22;
   const title=isTerm?`Terminal ${id.replace('term-','#')}`:(isBrowserId(id)?`Browser ${id.replace('browser-','#')}`:app.title);
   const path=isTerm?`tty://${id}`:(isBrowserId(id)?`net://${id}`:app.path);
@@ -1196,71 +1201,84 @@ function pluginBanner(pluginId) {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function animatePluginBoot(termId, pluginId) {
+  const t = () => new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const banners = {
     'net-link': [
-      { text: '╔══════════════════════════════════════════════════╗', type: 'green' },
-      { text: '║  NET LINK                         [SECURE BRIDGE]║', type: 'green' },
-      { text: '║  // channel · region mesh · peer hops            ║', type: 'muted' },
-      { text: '╠══════════════════════════════════════════════════╣', type: 'green' },
-      { text: '║  LINK: READY     ENC: AES-NULL     LAT: —         ║', type: 'muted' },
-      { text: '║  PEER NODES [6]   HOP PATH [TRACE]                ║', type: 'muted' },
-      { text: '║  cmds: connect <region> · disconnect · status     ║', type: 'blue' },
-      { text: '║         list · help · exit                        ║', type: 'blue' },
-      { text: '╚══════════════════════════════════════════════════╝', type: 'green' }
+'NET LINK                                          *',
+'// SECURE CHANNEL BRIDGE',
+'+------------------------------------------------+',
+'|  TERMINAL v2.7.1     SECURE SESSION  [ready]   |',
+'+------------------------------------------------+',
+'| LINK: STANDBY   | ENC: AES-NULL  | LAT: -- ms  |',
+'+------------------------+-----------------------+',
+'| PEER NODES [6]         | HOP PATH [TRACE]      |',
+'| N01 172.16.0.7   ACTIVE|  LOCAL [SELF]         |',
+'| N02 172.16.0.15  ACTIVE|   -> N01              |',
+'| N03 172.16.0.3   ACTIVE|   -> N03              |',
+'| N04 172.16.0.21  ACTIVE|   -> N04              |',
+'| N05 172.16.0.9   IDLE  |   -> N02              |',
+'| N06 172.16.0.42  ACTIVE| HOPS: 4  PATH: --ms   |',
+'+------------------------+-----------------------+',
+'| BANDWIDTH              | SESSION KEYS          |',
+'| UP   [||||------] 34%  | SID: pending          |',
+'| DOWN [||||||----] 42%  | AUTH/ENC/HMAC masked  |',
+'| CAP 25M/50M  QOS STD   | KEY ROT: on connect   |',
+'+------------------------+-----------------------+',
+'| cmds: connect <region_id> | disconnect | status|',
+'|       list | help | exit                       |',
+'+------------------------------------------------+',
+`> net_link --bridge   ${t()}`
     ],
     'net-analyzer': [
-      { text: '╔══════════════════════════════════════════════════╗', type: 'green' },
-      { text: '║  NET ANALYZER v2.1          [INTEL SUITE]         ║', type: 'green' },
-      { text: '║  // live capture + topology + phone registry      ║', type: 'muted' },
-      { text: '╠══════════════════════════════════════════════════╣', type: 'green' },
-      { text: '║  LIVE TRAFFIC LOG     TOPOLOGY MINI-MAP  L3       ║', type: 'muted' },
-      { text: '║  BUFFER: 1024 pkts    FILTER: ANY                 ║', type: 'muted' },
-      { text: '║  cmds: scan · status · help · exit                ║', type: 'blue' },
-      { text: '║  after scan → type filename to save report        ║', type: 'blue' },
-      { text: '╚══════════════════════════════════════════════════╝', type: 'green' }
+'NET ANALYZER v2.1',
+'// NETWORK INTELLIGENCE SUITE',
+'[ LIVE CAPTURE + TOPOLOGY ANALYSIS ]',
+'+---------------------------+--------------------+',
+'| LIVE TRAFFIC LOG          | TOPOLOGY MINI-MAP  |',
+'| waiting for scan...       | L3 VIEW            |',
+'|                           |   [GW]             |',
+'| BUFFER: 1024 PACKETS      |  IDS--DNS--SRV     |',
+'| FILTER: ANY               |     |              |',
+'|                           |   users / iot      |',
+'+---------------------------+--------------------+',
+'| After SCAN: type filename to save full report  |',
+'| Report lists PHONE_ID · NAME · ROLE · NUMBER   |',
+'|               MODEL · DEFENSE                  |',
+'+------------------------------------------------+',
+'| cmds: scan | status | help | exit              |',
+'+------------------------------------------------+',
+`> net_analyze --deep   ${t()}`
     ],
     'phone-access': [
-      { text: '╔══════════════════════════════════════════════════╗', type: 'green' },
-      { text: '║  PHONE ACCESS              [DEVICE LINK MODULE]   ║', type: 'green' },
-      { text: '║  // open · attack · block · session pin           ║', type: 'muted' },
-      { text: '╠══════════════════════════════════════════════════╣', type: 'green' },
-      { text: '║  TARGET: —        AUTH: —        CHANNEL: idle    ║', type: 'muted' },
-      { text: '║  DEVICE PROFILE · SMS INTERCEPT · CALL / CONTACT  ║', type: 'muted' },
-      { text: '║  cmds: open <PHONE_ID> · attack · block           ║', type: 'blue' },
-      { text: '║         status · disconnect · help · exit         ║', type: 'blue' },
-      { text: '╚══════════════════════════════════════════════════╝', type: 'green' }
+'>>> PHONE ACCESS                    SYS: TERM-77',
+'// DEVICE LINK MODULE               USER: root',
+`TIME: ${t()}`,
+'+----------+------------+------------+',
+'| TARGET:  | AUTH:      | CHANNEL:   |',
+'| IDLE     | LOCKED     | CLOSED     |',
+'+----------+------------+------------+',
+'| --[ DEVICE PROFILE ]--  | --[ PHONE DEVICE ]-- |',
+'| DEVICE ID : (open PH-)  | link idle            |',
+'| MODEL     : —           | SIGNAL ——            |',
+'| STATUS    : WAIT        | SECURE CHANNEL off   |',
+'+-------------------------+----------------------+',
+'| --[ SMS / CALLS / CONTACTS after unlock ]--    |',
+'| open -> attack -> PIN in Phone Lab             |',
+'| block locks device permanently                 |',
+'+------------------------------------------------+',
+'| cmds: open <PHONE_ID> | attack | block         |',
+'|       status | disconnect | help | exit        |',
+'+------------------------------------------------+',
+`> phone_access --link   ${t()}`
     ]
   };
-  const lines = banners[pluginId] || [
-    { text: `┌─ ${pluginId}`, type: 'blue' },
-    { text: '│ shell ready', type: 'green' }
-  ];
+  const lines = banners[pluginId] || [`┌─ ${pluginId}`, '│ shell ready'];
   for (const line of lines) {
-    termAdd(termId, line.text, line.type || '');
-    await sleep(35);
-  }
-  const extra = {
-    'net-link': [
-      { text: '· radio cold start', type: 'muted' },
-      { text: '· load region table', type: 'muted' },
-      { text: '· mesh driver OK', type: 'green' }
-    ],
-    'net-analyzer': [
-      { text: '· alloc scan buffer 1024', type: 'muted' },
-      { text: '· hash PHONE index', type: 'muted' },
-      { text: '· analyzer ready', type: 'green' }
-    ],
-    'phone-access': [
-      { text: '· session vault', type: 'muted' },
-      { text: '· handset protocol stack', type: 'muted' },
-      { text: '· access shell ready', type: 'green' }
-    ]
-  };
-  for (const line of (extra[pluginId] || [])) {
-    termAdd(termId, line.text, line.type || '');
-    await sleep(40);
+    termAdd(termId, line, line.startsWith('>') || line.startsWith('NET') || line.startsWith('>>>') || line.startsWith('PHONE') ? 'green' : (line.includes('cmds:') ? 'blue' : 'muted'));
+    await sleep(18);
   }
 }
+
 
 
 
@@ -1453,7 +1471,19 @@ async function enterPlugin(termId, pluginId) {
 function renderTerminal(g, termId) {
   const term = getTerm(termId);
   const plug = term.plugin ? getPlugin(term.plugin) : null;
-  return `<div class="term-root"><div class="terminal-shell terminal-shell-compact"><div class="terminal-toolbar"><span class="term-prompt-label">${esc(terminalPrompt(term))}</span><span class="term-mode">${plug ? esc(plug.id) : 'tty'}</span></div><div class="terminal-output">${term.lines.map(l => `<div class="${esc(l.type || '')}">${esc(l.text)}</div>`).join('')}</div><form class="terminal-input-row terminal-form" data-term="${esc(termId)}"><span class="term-prompt">${esc(terminalPrompt(term))}</span><input name="command" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${plug ? 'help | exit' : 'run site-analyzer'}" aria-label="Команда"></form></div></div>`;
+  return `<div class="term-root"><div class="terminal-shell terminal-shell-compact">
+    <div class="terminal-toolbar">
+      <span class="term-prompt-label">${esc(terminalPrompt(term))}</span>
+      <span class="term-mode">${plug ? esc(plug.id) : 'tty'}</span>
+      <button type="button" class="term-kb-btn" data-action="term-hide-kb" data-term="${esc(termId)}" title="Свернуть клавиатуру">⌨↓</button>
+    </div>
+    <div class="terminal-output">${term.lines.map(l => `<div class="${esc(l.type || '')}">${esc(l.text)}</div>`).join('')}</div>
+    <form class="terminal-input-row terminal-form" data-term="${esc(termId)}">
+      <span class="term-prompt">${esc(terminalPrompt(term))}</span>
+      <input class="term-cmd-input" name="command" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="send" placeholder="${plug ? 'команда…' : 'run net-link'}" aria-label="Команда">
+      <button type="submit" class="term-send-btn">↵</button>
+    </form>
+  </div></div>`;
 }
 
 async function runTerminalCommand(termId, raw) {
@@ -2306,6 +2336,13 @@ function handleAction(action,el) {
     case 'toggle-pin-window': togglePinWindow(el.closest('.app-window')?.dataset.window); break;
     case 'minimize-window':minimizeWindow(el.closest('.app-window')?.dataset.window);break;
     case 'maximize-window':maximizeWindow(el.closest('.app-window')?.dataset.window);break;
+    case 'term-hide-kb':{
+      const tid = el.dataset.term;
+      const inp = document.querySelector(`[data-window="${tid}"] .term-cmd-input, [data-window="${tid}"] .terminal-form input`);
+      if (inp) { inp.blur(); }
+      try { document.activeElement && document.activeElement.blur(); } catch (e) {}
+      break;
+    }
     case 'taskbar-window':{const w=state.opened.get(el.dataset.window);if(!w)break;if(!w.minimized&&state.active===w.id)minimizeWindow(w.id);else focusWindow(w.id);break;}
     case 'install-plugin':doInstall(id);break;
     case 'upgrade-hardware':doHardware(part);break;

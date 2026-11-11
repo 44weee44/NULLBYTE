@@ -465,3 +465,33 @@ h1,h2,h3,strong,.window-title{
 /* Phone window wider */
 [data-window="phone"]{min-width:min(100%,440px)!important}
 [data-window="phone"] [data-content]{padding:10px!important;background:#05070c}
+
+/* Terminal input visible */
+.terminal-input-row{display:flex!important;gap:8px;align-items:center;padding:10px 12px!important;border-top:1px solid #2a4a5c!important;background:#0c1620!important}
+.terminal-input-row .term-prompt{color:#3dd68c!important;font:12px var(--mono)!important;flex-shrink:0}
+.terminal-input-row .term-cmd-input,
+.terminal-input-row input[name="command"]{
+  min-width:0;flex:1;border:1px solid #2a4a5c!important;border-radius:6px!important;
+  outline:0;background:#061018!important;color:#e8f4fc!important;
+  font:13px/1.4 var(--mono)!important;padding:8px 10px!important;
+  caret-color:#3dd68c;
+}
+.terminal-input-row .term-cmd-input:focus,
+.terminal-input-row input[name="command"]:focus{border-color:#3dd68c!important;box-shadow:0 0 0 1px #3dd68c55}
+.term-send-btn{flex-shrink:0;width:36px;height:36px;border-radius:8px;border:1px solid #2a6a4a;background:#0a2018;color:#3dd68c;font-size:16px;cursor:pointer}
+.term-kb-btn{margin-left:auto;border:1px solid #2a4a5c;background:#0c1620;color:#8ab;border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer}
+.terminal-toolbar{display:flex;align-items:center;gap:10px}
+
+/* Phone Lab not full taskbar / not full screen */
+[data-window="phone"]{
+  width:min(380px,92vw)!important;
+  max-width:380px!important;
+  min-width:280px!important;
+  height:min(620px,78vh)!important;
+  max-height:78vh!important;
+}
+[data-window="phone"] [data-content]{padding:8px!important;overflow:auto!important}
+.taskbar-apps{flex:1 1 auto;max-width:100%;overflow-x:auto}
+.taskbar-app{max-width:120px!important;flex:0 0 auto!important}
+.taskbar-app[data-window="phone"]{max-width:100px!important}
+.nb-phone-shell{max-width:100%!important;min-height:480px}

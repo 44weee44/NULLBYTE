@@ -13,17 +13,15 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
-  <section class="boot-screen" id="bootScreen" aria-label="Загрузка NULLBYTE">
-    <div class="boot-center">
-      <div class="boot-logo"><img src="icon.png" alt="NULLBYTE"></div>
-      <div class="boot-wordmark">NULLBYTE <span>OS</span></div>
-      <div class="boot-version">PERSONAL WORKSTATION // BUILD 1.0.0</div>
+    <section class="boot-screen" id="bootScreen" aria-label="Загрузка NULLBYTE">
+    <div class="boot-kernel">
+      <div class="boot-dragon"><img src="icon.png" alt="NULLBYTE OS"></div>
+      <div class="boot-kernel-title">NULLBYTE OS 1.0.0-nullbyte (tty1)</div>
       <div class="boot-terminal" id="bootLog" aria-live="polite"></div>
-      <div class="boot-progress"><i id="bootProgress"></i></div>
-      
+      <div class="boot-progress-wrap"><div class="boot-progress"><i id="bootProgress"></i></div></div>
     </div>
-    <div class="boot-foot"><span>NULLBYTE SYSTEMS</span><span>FICTIONAL SIMULATION ENVIRONMENT</span></div>
   </section>
+
 
   <main class="desktop-shell" id="desktopShell" hidden>
     <header class="top-panel">

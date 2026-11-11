@@ -130,11 +130,68 @@ function confirm(title,body,onConfirm,{danger=false,confirmText='ПОДТВЕР�
 function finishModal() {const fn=state.modalConfirm;if(fn){const result=fn();if(result===false)return;}closeModal();}
 
 function boot() {
-  const lines=['NULLBYTE firmware 1.0.2','Initializing virtual hardware profile','Loading fictional world snapshot','Mounting player save container','Starting desktop services'];
-  const log=$('bootLog'),bar=$('bootProgress');let index=0;
-  const run=()=>{if(index<lines.length){const row=document.createElement('div');row.textContent=lines[index++];log.append(row);bar.style.width=`${index/lines.length*100}%`;setTimeout(run,220);}else setTimeout(finishBoot,280);};
-  const skip=()=>finishBoot();(document.getElementById('bootSkip')||{addEventListener(){},style:{}}).addEventListener('click',skip);run();
+  const lines = [
+    { t: '[ 0.000000] Linux version 6.1.0-nullbyte', c: '' },
+    { t: '[ 0.142831] Command line: BOOT_IMAGE=/boot/vmlinuz root=UUID=nullbyte', c: '' },
+    { t: '[ 0.318204] Initializing virtual hardware profile', c: '' },
+    { t: '[ 0.491773] Loading fictional world snapshot', c: '' },
+    { t: '[ 0.672915] Mounting player save container', c: 'ok' },
+    { t: '[ 0.854102] Starting desktop services', c: '' },
+    { t: '[ 1.021440] nullnet: mesh driver loaded', c: '' },
+    { t: '[ 1.188203] phone-lab: protocol stack ready', c: '' },
+    { t: '[ 1.340112] nbs-ide: workspace mount ok', c: '' },
+    { t: '[ OK ] Reached target Local File Systems', c: 'ok' },
+    { t: '[ OK ] Reached target Network', c: 'ok' },
+    { t: '[ OK ] Started NULLBYTE Simulation Environment', c: 'ok' },
+    { t: '[ OK ] Reached target Multi-User System', c: 'ok' }
+  ];
+  // shuffle in a few random decoy lines mid-boot
+  const decoys = [
+    '[ 0.910002] cpu0: nullcore @ 3.20GHz',
+    '[ 1.002331] mem: 8192MB simulated RAM',
+    '[ 1.110448] fsck: volume nullfs clean',
+    '[ 1.250001] audit: type=1400 op=start',
+    '[ 1.401122] dbus: system bus online'
+  ];
+  const log = $('bootLog'), bar = $('bootProgress');
+  let index = 0;
+  let progress = 0;
+  if (bar) bar.style.width = '0%';
+  const tickBar = () => {
+    progress = Math.min(98, progress + 2 + Math.random() * 4);
+    if (bar) bar.style.width = progress + '%';
+  };
+  const barTimer = setInterval(tickBar, 80);
+  const run = () => {
+    if (index >= lines.length) {
+      clearInterval(barTimer);
+      if (bar) bar.style.width = '100%';
+      setTimeout(finishBoot, 420);
+      return;
+    }
+    // occasionally inject decoy
+    if (index === 6 && Math.random() > 0.3) {
+      const d = decoys[(Math.random() * decoys.length) | 0];
+      const row = document.createElement('div');
+      row.className = 'boot-line';
+      row.innerHTML = d.replace(/(\[ OK \])/, '<span class="boot-ok">$1</span>').replace(/(nullbyte|nullnet|phone-lab|nbs-ide|player save)/gi, '<span class="boot-hi">$1</span>');
+      log.append(row);
+    }
+    const item = lines[index++];
+    const row = document.createElement('div');
+    row.className = 'boot-line' + (item.c === 'ok' ? ' boot-line-ok' : '');
+    let html = item.t
+      .replace(/\[ OK \]/g, '<span class="boot-ok">[ OK ]</span>')
+      .replace(/(BOOT_IMAGE=\/boot\/vmlinuz|root=UUID=nullbyte)/g, '<span class="boot-hi">$1</span>')
+      .replace(/(player save|NULLBYTE Simulation Environment|nullbyte|nullnet|phone-lab|nbs-ide)/g, '<span class="boot-hi">$1</span>');
+    row.innerHTML = html;
+    log.append(row);
+    log.scrollTop = log.scrollHeight;
+    setTimeout(run, 220 + Math.random() * 180);
+  };
+  run();
 }
+
 let bootFinished=false;
 async function finishBoot() {
   if(bootFinished)return;bootFinished=true;

@@ -327,12 +327,12 @@ function openApp(id) {
   const width=isTerm
     ? Math.min(560, Math.max(340, Math.floor(area.clientWidth*0.42)))
     : isPhone
-      ? Math.min(360, Math.max(280, Math.floor(area.clientWidth*0.88)))
+      ? Math.max(280, area.clientWidth - 16)
       : Math.min(880,Math.max(Math.min(320,area.clientWidth-12),area.clientWidth-42));
   const height=isTerm
     ? Math.min(360, Math.max(240, Math.floor(area.clientHeight*0.42)))
     : isPhone
-      ? Math.min(580, Math.max(420, Math.floor(area.clientHeight*0.72)))
+      ? Math.max(400, area.clientHeight - 56)
       : Math.min(650,Math.max(Math.min(290,area.clientHeight-12),area.clientHeight-42));
   const offset=(state.opened.size%5)*22;
   const title=isTerm?`Terminal ${id.replace('term-','#')}`:(isBrowserId(id)?`Browser ${id.replace('browser-','#')}`:app.title);
@@ -1284,15 +1284,22 @@ function clearTerminalView(termId) {
 }
 
 async function enterPluginWorkspace(termId, pluginId) {
+  // remember focus — do NOT blur keyboard on mobile
+  const keep = document.querySelector(`[data-window="${termId}"] .term-inline-input, [data-window="${termId}"] .terminal-form input`);
   clearTerminalView(termId);
   await animatePluginBoot(termId, pluginId);
-  // refresh prompt labels
   const term = getTerm(termId);
   const win = document.querySelector(`[data-window="${termId}"]`);
   const prompt = terminalPrompt(term);
   win?.querySelectorAll('.term-inline-prompt, .term-prompt-label').forEach(el => { el.textContent = prompt; });
   const tool = win?.querySelector('.terminal-toolbar .term-mode');
   if (tool) tool.textContent = pluginId;
+  queueMicrotask(() => {
+    const inp = document.querySelector(`[data-window="${termId}"] .term-inline-input, [data-window="${termId}"] .terminal-form input`);
+    if (inp) {
+      try { inp.focus({ preventScroll: true }); } catch (e) { try { inp.focus(); } catch (e2) {} }
+    }
+  });
 }
 
 async function leavePluginWorkspace(termId) {
@@ -1312,70 +1319,86 @@ async function animatePluginBoot(termId, pluginId) {
   const t = () => new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const banners = {
     'net-link': [
-      { t: '╔════════════════════════════════════════════════════════╗', c: 'green' },
-      { t: '║  NET LINK              // SECURE CHANNEL BRIDGE        ║', c: 'green' },
-      { t: '║  TERMINAL v2.7.1              SECURE SESSION ■         ║', c: 'muted' },
-      { t: '╠══════════════════════╦═════════════════════════════════╣', c: 'green' },
-      { t: '║ LINK: STANDBY ■      ║ ENC: AES-NULL   LAT: — ms       ║', c: 'muted' },
-      { t: '╠══════════════════════╩═════════════════════════════════╣', c: 'green' },
-      { t: '║ PEER NODES [6]              HOP PATH [TRACE]            ║', c: 'blue' },
-      { t: '║  ● N01  172.16.0.7:48101   11ms  ACTIVE                 ║', c: 'muted' },
-      { t: '║  ● N02  172.16.0.15:48101  14ms  ACTIVE                 ║', c: 'muted' },
-      { t: '║  ● N03  172.16.0.3:48101    9ms  ACTIVE                 ║', c: 'muted' },
-      { t: '║  ● N04  172.16.0.21:48101  18ms  ACTIVE                 ║', c: 'muted' },
-      { t: '║  ○ N05  172.16.0.9:48101   13ms  IDLE                   ║', c: 'muted' },
-      { t: '║  ● N06  172.16.0.42:48101  16ms  ACTIVE                 ║', c: 'muted' },
-      { t: '║ LOCAL→N01→N03→N04→N02   HOPS:4   PATH LAT: —           ║', c: 'muted' },
-      { t: '╠══════════════════════╦═════════════════════════════════╣', c: 'green' },
-      { t: '║ BANDWIDTH             ║ SESSION KEYS 🔒                 ║', c: 'blue' },
-      { t: '║ UP   ████████░░░░ 34% ║ SID: (on connect)                ║', c: 'muted' },
-      { t: '║ DOWN ██████████░░ 42% ║ AUTH/ENC/HMAC masked            ║', c: 'muted' },
-      { t: '║ CAP 25M↑ / 50M↓       ║ KEY ROTATION: on connect        ║', c: 'muted' },
-      { t: '╠══════════════════════╩═════════════════════════════════╣', c: 'green' },
-      { t: '║ connect <region> · disconnect · status · list · help    ║', c: 'blue' },
-      { t: '╚════════════════════════════════════════════════════════╝', c: 'green' },
+      { t: 'NET LINK                                          △', c: 'green' },
+      { t: '// SECURE CHANNEL BRIDGE', c: 'muted' },
+      { t: 'TERMINAL v2.7.1          SECURE SESSION ■', c: 'muted' },
+      { t: '────────────────────────────────────────────────', c: 'green' },
+      { t: 'LINK: ESTABLISHED ■  ENC: AES-NULL  LATENCY: 12ms', c: 'green' },
+      { t: '────────────────────────────────────────────────', c: 'green' },
+      { t: 'PEER NODES [6]                    HOP PATH [TRACE]', c: 'blue' },
+      { t: 'NODE   ADDRESS            RTT   STATUS', c: 'muted' },
+      { t: '● N01  172.16.0.7:48101   11ms  ACTIVE    LOCAL [SELF]', c: 'muted' },
+      { t: '● N02  172.16.0.15:48101  14ms  ACTIVE      ↓ N01 [172.16.0.7]', c: 'muted' },
+      { t: '● N03  172.16.0.3:48101    9ms  ACTIVE      ↓ N03 [172.16.0.3]', c: 'muted' },
+      { t: '● N04  172.16.0.21:48101  18ms  ACTIVE      ↓ N04 [172.16.0.21]', c: 'muted' },
+      { t: '○ N05  172.16.0.9:48101   13ms  IDLE        ↓ N02 [172.16.0.15]', c: 'muted' },
+      { t: '● N06  172.16.0.42:48101  16ms  ACTIVE', c: 'muted' },
+      { t: 'LAST SCAN: now | ACTIVE: 5 | IDLE: 1 | HOPS: 4 | PATH: 12ms', c: 'muted' },
+      { t: '────────────────────────────────────────────────', c: 'green' },
+      { t: 'BANDWIDTH USAGE                   SESSION KEYS 🔒', c: 'blue' },
+      { t: 'UPLINK   8.73 / 25.00 Mbps  ████████░░░░ 34%', c: 'muted' },
+      { t: 'DOWNLINK 21.46 / 50.00 Mbps ██████████░░ 42%', c: 'muted' },
+      { t: 'CAP: 25M↑ / 50M↓ | QOS: STANDARD', c: 'muted' },
+      { t: 'SID · AUTH/ENC/HMAC masked | KEY ROT on connect', c: 'muted' },
+      { t: '────────────────────────────────────────────────', c: 'green' },
+      { t: '↑ UPLINK  pkts 1.23M  bytes 1.48GB  err 0  drop 7', c: 'muted' },
+      { t: '↓ DOWN    pkts 2.75M  bytes 3.62GB  err 0  drop 3', c: 'muted' },
+      { t: '────────────────────────────────────────────────', c: 'green' },
+      { t: 'cmds: connect <region> · disconnect · status · list · help · exit', c: 'blue' },
       { t: `> net_link --bridge   ${t()}`, c: 'green' }
     ],
     'net-analyzer': [
-      { t: '╔════════════════════════════════════════════════════════╗', c: 'green' },
-      { t: '║  NET ANALYZER v2.1     // NETWORK INTELLIGENCE SUITE    ║', c: 'green' },
-      { t: '║  [ LIVE CAPTURE + TOPOLOGY ANALYSIS ]                   ║', c: 'muted' },
-      { t: '╠═══════════════════════════╦════════════════════════════╣', c: 'green' },
-      { t: '║ LIVE TRAFFIC LOG           ║ TOPOLOGY MINI-MAP  L3      ║', c: 'blue' },
-      { t: '║ idle — run scan            ║      [GW 10.0.0.1]         ║', c: 'muted' },
-      { t: '║ BUFFER: 1024 PACKETS       ║   IDS──DNS──SRV──DB        ║', c: 'muted' },
-      { t: '║ FILTER: ANY                ║        │                   ║', c: 'muted' },
-      { t: '║                            ║   users / iot / cam        ║', c: 'muted' },
-      { t: '╠═══════════════════════════╩════════════════════════════╣', c: 'green' },
-      { t: '║ scan → filename → report: ID NAME ROLE NUMBER MODEL DEF ║', c: 'blue' },
-      { t: '║ cmds: scan · status · help · exit                       ║', c: 'blue' },
-      { t: '╚════════════════════════════════════════════════════════╝', c: 'green' },
+      { t: 'NET ANALYZER v2.1', c: 'green' },
+      { t: '// NETWORK INTELLIGENCE SUITE', c: 'muted' },
+      { t: '[ LIVE CAPTURE + TOPOLOGY ANALYSIS ]', c: 'blue' },
+      { t: '────────────────────────────────────────────────', c: 'green' },
+      { t: '● LIVE TRAFFIC LOG          UPDATING…    TOPOLOGY L3', c: 'blue' },
+      { t: '23:46:52 TCP  SYN  192.168.1.23:443 → 10.0.0.5:51234', c: 'muted' },
+      { t: '23:46:53 UDP  QUERY 192.168.1.8:53 → 10.0.0.3:5353', c: 'muted' },
+      { t: '23:46:53 TCP  ACK  10.0.0.5:51234 → 192.168.1.23:443', c: 'muted' },
+      { t: '23:46:54 ICMP ECHO 192.168.1.1 → 10.0.0.1', c: 'muted' },
+      { t: '23:46:55 TCP  SYN  192.168.1.45:80 → 10.0.0.7:49876', c: 'muted' },
+      { t: '23:46:56 UDP  STREAM 10.0.0.9:12345 → 192.168.1.15:53', c: 'muted' },
+      { t: '23:46:58 ARP  REQUEST WHO HAS 10.0.0.8? TELL 192.168.1.1', c: 'muted' },
+      { t: '23:47:00 DNS  RESPONSE 10.0.0.3:53 → 192.168.1.8:5353', c: 'muted' },
+      { t: '…', c: 'muted' },
+      { t: 'BUFFER: 1024 PACKETS    FILTER: ANY', c: 'muted' },
+      { t: 'TOPO: GW 10.0.0.1 · IDS · DNS · SRV · DB · users/iot/cam', c: 'muted' },
+      { t: '────────────────────────────────────────────────', c: 'green' },
+      { t: 'scan → type filename to save full phone report', c: 'blue' },
+      { t: 'cmds: scan · status · help · exit', c: 'blue' },
       { t: `> net_analyze --deep   ${t()}`, c: 'green' }
     ],
     'phone-access': [
-      { t: '╔════════════════════════════════════════════════════════╗', c: 'green' },
-      { t: '║ >>> PHONE ACCESS           // DEVICE LINK MODULE        ║', c: 'green' },
-      { t: '║ SYS: TERM-77  USER: root  TIME: ' + t() + '              ║', c: 'muted' },
-      { t: '╠════════════╦══════════════╦═════════════════════════════╣', c: 'green' },
-      { t: '║ TARGET:IDLE ║ AUTH:LOCKED ║ CHANNEL: CLOSED 🔒          ║', c: 'muted' },
-      { t: '╠════════════╩══════════════╩═════════════════════════════╣', c: 'green' },
-      { t: '║ DEVICE PROFILE          │ PHONE DEVICE                  ║', c: 'blue' },
-      { t: '║ ID: (open PH-…)         │ signal ——                     ║', c: 'muted' },
-      { t: '║ MODEL: —                │ SECURE CHANNEL off            ║', c: 'muted' },
-      { t: '║ STATUS: WAIT            │ SMS / CALLS after unlock      ║', c: 'muted' },
-      { t: '╠═════════════════════════════════════════════════════════╣', c: 'green' },
-      { t: '║ open <PHONE_ID> · attack · block · disconnect · status  ║', c: 'blue' },
-      { t: '╚════════════════════════════════════════════════════════╝', c: 'green' },
+      { t: '>>> PHONE ACCESS                    SYS: TERM-77', c: 'green' },
+      { t: '// DEVICE LINK MODULE               USER: root', c: 'muted' },
+      { t: `TIME: ${t()}`, c: 'muted' },
+      { t: '────────────────────────────────────────────────', c: 'green' },
+      { t: 'TARGET: IDLE    AUTH: LOCKED    CHANNEL: CLOSED 🔒', c: 'muted' },
+      { t: '────────────────────────────────────────────────', c: 'green' },
+      { t: '--[ DEVICE PROFILE ]--     --[ PHONE DEVICE ]--', c: 'blue' },
+      { t: 'DEVICE ID : (open PH-…)     link idle', c: 'muted' },
+      { t: 'MODEL     : —               signal ——', c: 'muted' },
+      { t: 'OS VER    : —               SECURE CHANNEL off', c: 'muted' },
+      { t: 'STATUS    : WAIT', c: 'muted' },
+      { t: '[ LINK STATE: STANDBY ]', c: 'muted' },
+      { t: '────────────────────────────────────────────────', c: 'green' },
+      { t: '--[ SMS / CALLS / CONTACTS after unlock in Phone Lab ]--', c: 'blue' },
+      { t: 'open → attack → PIN → Phone Lab home', c: 'muted' },
+      { t: 'block — permanent lock of target device', c: 'muted' },
+      { t: '────────────────────────────────────────────────', c: 'green' },
+      { t: 'cmds: open <PHONE_ID> · attack · block · status', c: 'blue' },
+      { t: '      disconnect · help · exit', c: 'blue' },
       { t: `> phone_access --link   ${t()}`, c: 'green' }
     ]
   };
-  // fix template - phone-access TIME line used f-string wrong in JS
   const list = banners[pluginId] || [{ t: `┌─ ${pluginId}`, c: 'blue' }, { t: '│ ready', c: 'green' }];
   for (const line of list) {
     termAdd(termId, line.t, line.c || 'muted');
-    await sleep(16);
+    await sleep(12);
   }
 }
+
 
 
 
@@ -1558,7 +1581,7 @@ async function enterPlugin(termId, pluginId) {
     await enterPluginWorkspace(termId, p.id);
   } finally {
     term.busy = false;
-    const input = document.querySelector(`[data-window="${termId}"] .terminal-form input`);
+    const input = document.querySelector(`[data-window="${termId}"] .term-inline-input, [data-window="${termId}"] .terminal-form input`);
     if (input) { input.disabled = false; input.focus({ preventScroll: true }); }
   }
 }

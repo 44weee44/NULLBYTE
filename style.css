@@ -567,3 +567,38 @@ h1,h2,h3,strong,.window-title{
 }
 /* hide old wordmark if present */
 .boot-center,.boot-wordmark,.boot-version,.boot-foot{display:none!important}
+
+/* Phone Lab full workspace */
+.app-window[data-window="phone"]{
+  left:8px!important;top:8px!important;
+  width:calc(100% - 16px)!important;
+  max-width:none!important;
+  min-width:0!important;
+  height:calc(100% - 52px)!important;
+  max-height:none!important;
+}
+.app-window[data-window="phone"] [data-content]{
+  padding:6px!important;height:100%;overflow:auto!important;
+}
+.nb-phone-shell{max-width:480px!important;margin:0 auto!important}
+
+/* Taskbar icons uniform — no stretch/gap bugs */
+.taskbar-app{
+  max-width:120px!important;min-width:38px!important;width:auto!important;
+  flex:0 0 auto!important;height:36px!important;
+  display:inline-flex!important;align-items:center!important;gap:6px!important;
+  padding:0 8px!important;box-sizing:border-box!important;
+}
+.taskbar-app i,.taskbar-app svg{
+  width:16px!important;height:16px!important;flex-shrink:0!important;
+  display:block!important;
+}
+.taskbar-app span{
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  max-width:72px;font-size:10px;
+}
+.taskbar-brand img, .start-menu-head img, .topbar img, .desktop-header img {
+  background:transparent!important;
+  object-fit:contain;
+}
+.taskbar-brand img{width:28px;height:28px}

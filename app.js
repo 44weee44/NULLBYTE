@@ -1126,8 +1126,15 @@ function termAdd(termId, text, type = '') {
     const row = document.createElement('div');
     if (type) row.className = type;
     row.textContent = text;
-    out.appendChild(row);
-    while (out.children.length > 200) out.removeChild(out.firstChild);
+    const form = out.querySelector('.term-inline-form');
+    if (form) out.insertBefore(row, form);
+    else out.appendChild(row);
+    // prune old lines but keep form
+    while (out.children.length > 201) {
+      const first = out.firstChild;
+      if (first && first.classList && first.classList.contains('term-inline-form')) break;
+      if (first) out.removeChild(first);
+    }
     scrollTerminalBottom(termId, true);
   }
 }
@@ -1204,80 +1211,71 @@ async function animatePluginBoot(termId, pluginId) {
   const t = () => new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const banners = {
     'net-link': [
-'NET LINK                                          *',
-'// SECURE CHANNEL BRIDGE',
-'+------------------------------------------------+',
-'|  TERMINAL v2.7.1     SECURE SESSION  [ready]   |',
-'+------------------------------------------------+',
-'| LINK: STANDBY   | ENC: AES-NULL  | LAT: -- ms  |',
-'+------------------------+-----------------------+',
-'| PEER NODES [6]         | HOP PATH [TRACE]      |',
-'| N01 172.16.0.7   ACTIVE|  LOCAL [SELF]         |',
-'| N02 172.16.0.15  ACTIVE|   -> N01              |',
-'| N03 172.16.0.3   ACTIVE|   -> N03              |',
-'| N04 172.16.0.21  ACTIVE|   -> N04              |',
-'| N05 172.16.0.9   IDLE  |   -> N02              |',
-'| N06 172.16.0.42  ACTIVE| HOPS: 4  PATH: --ms   |',
-'+------------------------+-----------------------+',
-'| BANDWIDTH              | SESSION KEYS          |',
-'| UP   [||||------] 34%  | SID: pending          |',
-'| DOWN [||||||----] 42%  | AUTH/ENC/HMAC masked  |',
-'| CAP 25M/50M  QOS STD   | KEY ROT: on connect   |',
-'+------------------------+-----------------------+',
-'| cmds: connect <region_id> | disconnect | status|',
-'|       list | help | exit                       |',
-'+------------------------------------------------+',
-`> net_link --bridge   ${t()}`
+      { t: '╔════════════════════════════════════════════════════════╗', c: 'green' },
+      { t: '║  NET LINK              // SECURE CHANNEL BRIDGE        ║', c: 'green' },
+      { t: '║  TERMINAL v2.7.1              SECURE SESSION ■         ║', c: 'muted' },
+      { t: '╠══════════════════════╦═════════════════════════════════╣', c: 'green' },
+      { t: '║ LINK: STANDBY ■      ║ ENC: AES-NULL   LAT: — ms       ║', c: 'muted' },
+      { t: '╠══════════════════════╩═════════════════════════════════╣', c: 'green' },
+      { t: '║ PEER NODES [6]              HOP PATH [TRACE]            ║', c: 'blue' },
+      { t: '║  ● N01  172.16.0.7:48101   11ms  ACTIVE                 ║', c: 'muted' },
+      { t: '║  ● N02  172.16.0.15:48101  14ms  ACTIVE                 ║', c: 'muted' },
+      { t: '║  ● N03  172.16.0.3:48101    9ms  ACTIVE                 ║', c: 'muted' },
+      { t: '║  ● N04  172.16.0.21:48101  18ms  ACTIVE                 ║', c: 'muted' },
+      { t: '║  ○ N05  172.16.0.9:48101   13ms  IDLE                   ║', c: 'muted' },
+      { t: '║  ● N06  172.16.0.42:48101  16ms  ACTIVE                 ║', c: 'muted' },
+      { t: '║ LOCAL→N01→N03→N04→N02   HOPS:4   PATH LAT: —           ║', c: 'muted' },
+      { t: '╠══════════════════════╦═════════════════════════════════╣', c: 'green' },
+      { t: '║ BANDWIDTH             ║ SESSION KEYS 🔒                 ║', c: 'blue' },
+      { t: '║ UP   ████████░░░░ 34% ║ SID: (on connect)                ║', c: 'muted' },
+      { t: '║ DOWN ██████████░░ 42% ║ AUTH/ENC/HMAC masked            ║', c: 'muted' },
+      { t: '║ CAP 25M↑ / 50M↓       ║ KEY ROTATION: on connect        ║', c: 'muted' },
+      { t: '╠══════════════════════╩═════════════════════════════════╣', c: 'green' },
+      { t: '║ connect <region> · disconnect · status · list · help    ║', c: 'blue' },
+      { t: '╚════════════════════════════════════════════════════════╝', c: 'green' },
+      { t: `> net_link --bridge   ${t()}`, c: 'green' }
     ],
     'net-analyzer': [
-'NET ANALYZER v2.1',
-'// NETWORK INTELLIGENCE SUITE',
-'[ LIVE CAPTURE + TOPOLOGY ANALYSIS ]',
-'+---------------------------+--------------------+',
-'| LIVE TRAFFIC LOG          | TOPOLOGY MINI-MAP  |',
-'| waiting for scan...       | L3 VIEW            |',
-'|                           |   [GW]             |',
-'| BUFFER: 1024 PACKETS      |  IDS--DNS--SRV     |',
-'| FILTER: ANY               |     |              |',
-'|                           |   users / iot      |',
-'+---------------------------+--------------------+',
-'| After SCAN: type filename to save full report  |',
-'| Report lists PHONE_ID · NAME · ROLE · NUMBER   |',
-'|               MODEL · DEFENSE                  |',
-'+------------------------------------------------+',
-'| cmds: scan | status | help | exit              |',
-'+------------------------------------------------+',
-`> net_analyze --deep   ${t()}`
+      { t: '╔════════════════════════════════════════════════════════╗', c: 'green' },
+      { t: '║  NET ANALYZER v2.1     // NETWORK INTELLIGENCE SUITE    ║', c: 'green' },
+      { t: '║  [ LIVE CAPTURE + TOPOLOGY ANALYSIS ]                   ║', c: 'muted' },
+      { t: '╠═══════════════════════════╦════════════════════════════╣', c: 'green' },
+      { t: '║ LIVE TRAFFIC LOG           ║ TOPOLOGY MINI-MAP  L3      ║', c: 'blue' },
+      { t: '║ idle — run scan            ║      [GW 10.0.0.1]         ║', c: 'muted' },
+      { t: '║ BUFFER: 1024 PACKETS       ║   IDS──DNS──SRV──DB        ║', c: 'muted' },
+      { t: '║ FILTER: ANY                ║        │                   ║', c: 'muted' },
+      { t: '║                            ║   users / iot / cam        ║', c: 'muted' },
+      { t: '╠═══════════════════════════╩════════════════════════════╣', c: 'green' },
+      { t: '║ scan → filename → report: ID NAME ROLE NUMBER MODEL DEF ║', c: 'blue' },
+      { t: '║ cmds: scan · status · help · exit                       ║', c: 'blue' },
+      { t: '╚════════════════════════════════════════════════════════╝', c: 'green' },
+      { t: `> net_analyze --deep   ${t()}`, c: 'green' }
     ],
     'phone-access': [
-'>>> PHONE ACCESS                    SYS: TERM-77',
-'// DEVICE LINK MODULE               USER: root',
-`TIME: ${t()}`,
-'+----------+------------+------------+',
-'| TARGET:  | AUTH:      | CHANNEL:   |',
-'| IDLE     | LOCKED     | CLOSED     |',
-'+----------+------------+------------+',
-'| --[ DEVICE PROFILE ]--  | --[ PHONE DEVICE ]-- |',
-'| DEVICE ID : (open PH-)  | link idle            |',
-'| MODEL     : —           | SIGNAL ——            |',
-'| STATUS    : WAIT        | SECURE CHANNEL off   |',
-'+-------------------------+----------------------+',
-'| --[ SMS / CALLS / CONTACTS after unlock ]--    |',
-'| open -> attack -> PIN in Phone Lab             |',
-'| block locks device permanently                 |',
-'+------------------------------------------------+',
-'| cmds: open <PHONE_ID> | attack | block         |',
-'|       status | disconnect | help | exit        |',
-'+------------------------------------------------+',
-`> phone_access --link   ${t()}`
+      { t: '╔════════════════════════════════════════════════════════╗', c: 'green' },
+      { t: '║ >>> PHONE ACCESS           // DEVICE LINK MODULE        ║', c: 'green' },
+      { t: '║ SYS: TERM-77  USER: root  TIME: ' + t() + '              ║', c: 'muted' },
+      { t: '╠════════════╦══════════════╦═════════════════════════════╣', c: 'green' },
+      { t: '║ TARGET:IDLE ║ AUTH:LOCKED ║ CHANNEL: CLOSED 🔒          ║', c: 'muted' },
+      { t: '╠════════════╩══════════════╩═════════════════════════════╣', c: 'green' },
+      { t: '║ DEVICE PROFILE          │ PHONE DEVICE                  ║', c: 'blue' },
+      { t: '║ ID: (open PH-…)         │ signal ——                     ║', c: 'muted' },
+      { t: '║ MODEL: —                │ SECURE CHANNEL off            ║', c: 'muted' },
+      { t: '║ STATUS: WAIT            │ SMS / CALLS after unlock      ║', c: 'muted' },
+      { t: '╠═════════════════════════════════════════════════════════╣', c: 'green' },
+      { t: '║ open <PHONE_ID> · attack · block · disconnect · status  ║', c: 'blue' },
+      { t: '╚════════════════════════════════════════════════════════╝', c: 'green' },
+      { t: `> phone_access --link   ${t()}`, c: 'green' }
     ]
   };
-  const lines = banners[pluginId] || [`┌─ ${pluginId}`, '│ shell ready'];
-  for (const line of lines) {
-    termAdd(termId, line, line.startsWith('>') || line.startsWith('NET') || line.startsWith('>>>') || line.startsWith('PHONE') ? 'green' : (line.includes('cmds:') ? 'blue' : 'muted'));
-    await sleep(18);
+  // fix template - phone-access TIME line used f-string wrong in JS
+  const list = banners[pluginId] || [{ t: `┌─ ${pluginId}`, c: 'blue' }, { t: '│ ready', c: 'green' }];
+  for (const line of list) {
+    termAdd(termId, line.t, line.c || 'muted');
+    await sleep(16);
   }
 }
+
 
 
 
@@ -1471,18 +1469,20 @@ async function enterPlugin(termId, pluginId) {
 function renderTerminal(g, termId) {
   const term = getTerm(termId);
   const plug = term.plugin ? getPlugin(term.plugin) : null;
+  const prompt = terminalPrompt(term);
   return `<div class="term-root"><div class="terminal-shell terminal-shell-compact">
     <div class="terminal-toolbar">
-      <span class="term-prompt-label">${esc(terminalPrompt(term))}</span>
+      <span class="term-prompt-label">${esc(prompt)}</span>
       <span class="term-mode">${plug ? esc(plug.id) : 'tty'}</span>
       <button type="button" class="term-kb-btn" data-action="term-hide-kb" data-term="${esc(termId)}" title="Свернуть клавиатуру">⌨↓</button>
     </div>
-    <div class="terminal-output">${term.lines.map(l => `<div class="${esc(l.type || '')}">${esc(l.text)}</div>`).join('')}</div>
-    <form class="terminal-input-row terminal-form" data-term="${esc(termId)}">
-      <span class="term-prompt">${esc(terminalPrompt(term))}</span>
-      <input class="term-cmd-input" name="command" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="send" placeholder="${plug ? 'команда…' : 'run net-link'}" aria-label="Команда">
-      <button type="submit" class="term-send-btn">↵</button>
-    </form>
+    <div class="terminal-output" data-term-out="${esc(termId)}">
+      ${term.lines.map(l => `<div class="${esc(l.type || '')}">${esc(l.text)}</div>`).join('')}
+      <form class="term-inline-form terminal-form" data-term="${esc(termId)}">
+        <span class="term-inline-prompt">${esc(prompt)}</span>
+        <input class="term-inline-input term-cmd-input" name="command" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go" aria-label="Команда">
+      </form>
+    </div>
   </div></div>`;
 }
 
@@ -1590,6 +1590,7 @@ async function runTerminalCommand(termId, raw) {
       state.game.computer.files = state.game.computer.files.slice(0, 100);
       termAdd(termId, `Сохранено: ${file.name} (${file.size} KB)`, 'green');
       scheduleSave();
+      if (state.opened.has('ide')) renderWindow('ide');
       return;
     }
     const lower = cmd.toLowerCase();
@@ -1852,6 +1853,25 @@ function renderFbi() {
 function renderPhoneLab(g) {
   const pw = g.phoneWorld || {};
   const net = pw.network;
+  // offline => drop phone session
+  if (!net) {
+    if (state._phoneTarget || pw.activeSession || (pw.access && Object.keys(pw.access).length)) {
+      state._phoneTarget = null;
+      state.phoneUnlocked = null;
+      state.pinInput = '';
+      state.pinError = '';
+      if (g.phoneWorld) {
+        g.phoneWorld.activeSession = null;
+        g.phoneWorld.sessionFrozenSms = null;
+        g.phoneWorld.access = {};
+      }
+    }
+    return `<div class="nb-phone-shell idle">
+      <div class="nb-phone-top">NULLBYTE</div>
+      <div class="nb-phone-idle"><div class="nb-lock-hex"><span class="nb-lock-icon">📡</span></div><p>OFFLINE</p><small>net-link → connect &lt;region&gt;</small></div>
+      <div class="nb-phone-footer">NET: OFFLINE</div>
+    </div>`;
+  }
   let activeId = state._phoneTarget || pw.activeSession?.phoneId || null;
   if (!activeId && pw.access) {
     const keys = Object.keys(pw.access);
@@ -1861,45 +1881,41 @@ function renderPhoneLab(g) {
   if (!phone) {
     return `<div class="nb-phone-shell idle">
       <div class="nb-phone-top">NULLBYTE</div>
-      <div class="nb-phone-idle"><div class="nb-lock-hex">🔒</div><p>Нет сессии</p><small>open → attack → PIN</small></div>
-      <div class="nb-phone-footer">NET: ${net ? esc(net.regionId) : 'OFFLINE'}</div>
+      <div class="nb-phone-idle"><div class="nb-lock-hex"><span class="nb-lock-icon">📱</span></div><p>Нет сессии</p><small>phone-access → open → attack → PIN</small></div>
+      <div class="nb-phone-footer">NET: ${esc(net.regionId)}</div>
     </div>`;
   }
-  let accKey = phone.id;
-  let acc = pw.access?.[phone.id];
-  if (!acc) {
-    accKey = Object.keys(pw.access || {}).find(k => k.toUpperCase() === phone.id.toUpperCase()) || phone.id;
-    acc = pw.access?.[accKey] || {};
+  let acc = pw.access?.[phone.id] || {};
+  if (!acc.unlocked && !acc.pin && !acc.attackOk) {
+    const k = Object.keys(pw.access || {}).find(x => x.toUpperCase() === phone.id.toUpperCase());
+    if (k) acc = pw.access[k] || acc;
   }
   if (acc.blocked) {
-    return `<div class="nb-phone-shell">
-      <div class="nb-phone-top">BLOCKED</div>
-      <div class="nb-phone-idle"><div class="nb-lock-hex">⛔</div><p>${esc(phone.id)}</p><small>block — навсегда</small></div>
-    </div>`;
+    return `<div class="nb-phone-shell idle"><div class="nb-phone-top">BLOCKED</div>
+      <div class="nb-phone-idle"><div class="nb-lock-hex">⛔</div><p>${esc(phone.id)}</p></div></div>`;
   }
   const isUnlocked = !!(acc.unlocked || state.phoneUnlocked === phone.id);
   if (!isUnlocked) {
     const pinUi = state.pinInput || '';
     const dots = [0,1,2,3].map(i => `<span class="nb-pin-dot ${i < pinUi.length ? 'on' : ''}"></span>`).join('');
-    const keys = ['1','2','3','4','5','6','7','8','9','','0','⌫'].map(k => {
-      if (!k) return '<span class="nb-pin-gap"></span>';
-      const act = k === '⌫' ? 'phone-pin-del' : 'phone-pin-digit';
-      return `<button type="button" class="nb-pin-key" data-action="${act}" data-digit="${k === '⌫' ? '' : k}">${k}</button>`;
+    const keysHtml = ['1','2','3','4','5','6','7','8','9','del','0','ok'].map(k => {
+      if (k === 'del') return `<button type="button" class="nb-pin-key" data-action="phone-pin-del">⌫</button>`;
+      if (k === 'ok') return `<button type="button" class="nb-pin-key nb-pin-blank" disabled></button>`;
+      return `<button type="button" class="nb-pin-key" data-action="phone-pin-digit" data-digit="${k}">${k}</button>`;
     }).join('');
     const clock = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
     return `<div class="nb-phone-shell lock">
-      <div class="nb-phone-status-row"><span>▣▣▣</span><span>SYS</span><span>🔋</span></div>
+      <div class="nb-phone-status-row"><span>▣▣▣ SYS</span><span>🔋</span></div>
       <div class="nb-lock-time">${clock}</div>
       <div class="nb-lock-date">${esc(phone.ownerName)} · ${esc(phone.model)}</div>
       <div class="nb-lock-hex"><span class="nb-lock-icon">🔒</span></div>
       <div class="nb-lock-label">// SYSTEM SECURE //</div>
       <div class="nb-pin-dots">${dots}</div>
-      <div class="nb-pin-pad">${keys}</div>
+      <div class="nb-pin-pad">${keysHtml}</div>
       ${state.pinError ? `<div class="nb-pin-err">${esc(state.pinError)}</div>` : ''}
-      <div class="nb-lock-hint">PIN после attack</div>
+      <div class="nb-lock-hint">PIN после attack · 4 цифры</div>
     </div>`;
   }
-
   const now = Date.now();
   let msgs = [], gal = [], calls = [], contacts = [];
   try { msgs = (pw.sessionFrozenSms && pw.sessionFrozenSms.length) ? pw.sessionFrozenSms : phoneMessages(phone, now); } catch (e) {}
@@ -1908,37 +1924,21 @@ function renderPhoneLab(g) {
   try { calls = phoneCallLog(phone, now) || []; } catch (e) {}
   try { contacts = phoneContacts(phone, now) || []; } catch (e) {}
   const tab = state.phoneLabTab || 'home';
-
-  const tabs = `
-    <div class="nb-tabs">
+  const tabs = `<div class="nb-tabs">
       <button type="button" class="nb-tab ${tab==='msgs'||tab==='home'?'on':''}" data-action="phone-lab-tab" data-tab="msgs">MESSAGES</button>
       <button type="button" class="nb-tab ${tab==='calls'?'on':''}" data-action="phone-lab-tab" data-tab="calls">CALLS</button>
       <button type="button" class="nb-tab ${tab==='gallery'?'on':''}" data-action="phone-lab-tab" data-tab="gallery">GALLERY</button>
     </div>`;
-
   let body = '';
   if (tab === 'msgs') {
-    body = `<div class="nb-list">${msgs.map(m => `
-      <div class="nb-card">
-        <div class="nb-card-top"><span class="nb-cyan">${esc(m.from || 'SMS')}</span><span class="nb-muted">${m.kind==='bank'?'BANK':'MSG'}</span></div>
-        <div class="nb-card-body">${esc(m.text || '')}</div>
-      </div>`).join('') || '<div class="nb-empty">нет сообщений</div>'}</div>
+    body = `<div class="nb-list">${msgs.map(m => `<div class="nb-card"><div class="nb-card-top"><span class="nb-cyan">${esc(m.from||'SMS')}</span></div><div class="nb-card-body">${esc(m.text||'')}</div></div>`).join('')||'<div class="nb-empty">нет SMS</div>'}</div>
       <button type="button" class="nb-action" data-action="phone-lab-export" data-kind="msgs" data-id="${esc(phone.id)}">SAVE SMS</button>`;
   } else if (tab === 'calls') {
-    body = `<div class="nb-list">${calls.map(c => `
-      <div class="nb-card">
-        <div class="nb-card-top"><span class="nb-pink">${esc(c.info || '')}</span><span class="nb-muted">${esc(c.date||'')} ${esc(c.time||'')}</span></div>
-        <div class="nb-card-body">${esc(c.with||'')} · ${esc(c.number||'')}</div>
-        <div class="nb-muted">${c.durationSec||0}s</div>
-      </div>`).join('') || '<div class="nb-empty">нет звонков</div>'}</div>`;
+    body = `<div class="nb-list">${calls.map(c => `<div class="nb-card"><div class="nb-card-top"><span class="nb-pink">${esc(c.info||'')}</span><span class="nb-muted">${esc(c.date||'')} ${esc(c.time||'')}</span></div><div class="nb-card-body">${esc(c.with||'')} · ${esc(c.number||'')}</div></div>`).join('')||'<div class="nb-empty">пусто</div>'}</div>`;
   } else if (tab === 'contacts') {
-    body = `<div class="nb-list">${contacts.map(c => `
-      <div class="nb-card">
-        <div class="nb-card-top"><span class="nb-pink">${esc(c.name||'')}</span></div>
-        <div class="nb-card-body nb-cyan">${esc(c.number||'')}</div>
-      </div>`).join('') || '<div class="nb-empty">пусто</div>'}</div>`;
+    body = `<div class="nb-list">${contacts.map(c => `<div class="nb-card"><div class="nb-card-top"><span class="nb-pink">${esc(c.name||'')}</span></div><div class="nb-card-body nb-cyan">${esc(c.number||'')}</div></div>`).join('')||'<div class="nb-empty">пусто</div>'}</div>`;
   } else if (tab === 'gallery') {
-    body = `<div class="nb-gal">${gal.map(x => `<div class="nb-thumb"><span>${esc(x.title||'')}</span></div>`).join('')}</div>
+    body = `<div class="nb-gal">${gal.map(x=>`<div class="nb-thumb"><span>${esc(x.title||'')}</span></div>`).join('')}</div>
       <button type="button" class="nb-action" data-action="phone-lab-export" data-kind="gallery" data-id="${esc(phone.id)}">SAVE GALLERY</button>`;
   } else {
     body = `<div class="nb-app-grid">
@@ -1946,22 +1946,15 @@ function renderPhoneLab(g) {
       <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="calls"><span class="nb-app-ico nb-pink">📞</span><label>CALLS</label></button>
       <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="gallery"><span class="nb-app-ico nb-cyan">🖼</span><label>GALLERY</label></button>
       <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="contacts"><span class="nb-app-ico nb-pink">👥</span><label>CONTACTS</label></button>
-      <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="msgs"><span class="nb-app-ico nb-cyan">🌐</span><label>BROWSER</label></button>
-      <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="home"><span class="nb-app-ico nb-pink">▦</span><label>MORE</label></button>
     </div>`;
   }
-
   return `<div class="nb-phone-shell unlocked">
     <div class="nb-phone-status-row"><span>${new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</span><span>▣ NULLBYTE</span><span>🔋</span></div>
-    <div class="nb-phone-brand">NULLBYTE <span class="nb-skull">☠</span></div>
-    <div class="nb-phone-tag">// STAY CONNECTED. STAY GHOSTED.</div>
+    <div class="nb-phone-brand">NULLBYTE</div>
     <div class="nb-phone-meta">${esc(phone.ownerName)} · ${esc(phone.role||'')} · ${esc(phone.number)}</div>
     ${tabs}
     <div class="nb-phone-body">${body}</div>
-    <div class="nb-phone-dock">
-      <span>SYS: SECURE</span>
-      <span>NET: ${net ? esc(net.regionId) : '—'} · ${esc(phone.protection||'')}</span>
-    </div>
+    <div class="nb-phone-dock"><span>SYS: SECURE</span><span>NET: ${esc(net.regionId)}</span></div>
   </div>`;
 }
 
@@ -2307,10 +2300,10 @@ function handleAction(action,el) {
       state.phoneLabTab = el.dataset.tab || 'msgs';
       renderWindow('phone'); break;
     }
-    case 'phone-lab-export':{
+    case 'phone-lab-export':{ /* will refresh ide */
       const kind = el.dataset.kind || 'msgs';
       const phone = findPhone(id, state.game.meta?.seed||'nb');
-      if(!phone){ toast('Нет телефона','error'); break; }
+      if(!phone){ toast('Нет телефона','error'); if(state.opened.has('ide')) renderWindow('ide'); break; }
       let content='', name='';
       if(kind==='gallery'){
         content = phoneGallery(phone, state.game.meta?.seed||'nb').map(x=>`${x.id} ${x.title} ${x.note}`).join('\n');
@@ -2619,7 +2612,7 @@ document.addEventListener('submit',event=>{
     if(input)input.value='';
     runTerminalCommand(termId, val).then(()=>{
       queueMicrotask(()=>{
-        const i=document.querySelector(`[data-window="${termId}"] .terminal-form input`);
+        const i=document.querySelector(`[data-window="${termId}"] .term-inline-input, [data-window="${termId}"] .terminal-form input`);
         if(i) i.focus({preventScroll:true});
         scrollTerminalBottom(termId, true);
       });

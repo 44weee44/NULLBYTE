@@ -495,3 +495,40 @@ h1,h2,h3,strong,.window-title{
 .taskbar-app{max-width:120px!important;flex:0 0 auto!important}
 .taskbar-app[data-window="phone"]{max-width:100px!important}
 .nb-phone-shell{max-width:100%!important;min-height:480px}
+
+/* Fix pin pad visible - no covering block */
+.nb-phone-shell.lock{
+  display:flex!important;flex-direction:column!important;align-items:center!important;
+  justify-content:flex-start!important;text-align:center!important;
+  padding:12px 10px 20px!important;overflow:auto!important;min-height:0!important;
+  max-height:none!important;
+}
+.nb-pin-pad{
+  display:grid!important;grid-template-columns:repeat(3,64px)!important;gap:10px!important;
+  justify-content:center!important;position:relative!important;z-index:5!important;
+  margin:8px auto 0!important;background:transparent!important;
+}
+.nb-pin-key{
+  width:64px!important;height:64px!important;border-radius:50%!important;
+  border:2px solid #1e4a6a!important;background:#0c1622!important;color:#e0f4ff!important;
+  font-size:22px!important;cursor:pointer!important;position:relative!important;z-index:6!important;
+}
+.nb-pin-blank{opacity:0;pointer-events:none}
+.nb-lock-time{font-size:42px!important;margin:8px 0 4px!important}
+.nb-phone-shell{min-height:auto!important;overflow:auto!important}
+
+/* Inline terminal input (no bottom bar) */
+.terminal-input-row{display:none!important}
+.term-inline-form{
+  display:flex;align-items:center;gap:6px;margin:4px 0 8px;padding:0;
+  background:transparent;border:0;width:100%;
+}
+.term-inline-prompt{
+  color:#3dd68c;font:12px/1.4 var(--mono);white-space:nowrap;flex-shrink:0;
+}
+.term-inline-input{
+  flex:1;min-width:0;border:0!important;outline:0!important;background:transparent!important;
+  color:#e8f4fc!important;font:12px/1.4 var(--mono)!important;padding:2px 0!important;
+  caret-color:#3dd68c;box-shadow:none!important;
+}
+.terminal-output{padding-bottom:12px}

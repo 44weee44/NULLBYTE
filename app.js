@@ -5,9 +5,8 @@ import {
   processTimedEvents, bankStatus, bankRisk, attemptBankSimulation, saveEditorFile, validateNbs, runNbs,
   recordHistory, addBookmark, idempotencyKey,
   PLUGIN_SHELLS, PLUGIN_ANIM, runPluginShellCommand, pluginShellBootLines, resolveSiteRef, savePlayerNamedFile, findFileByName, markServerModified,
-  isPluginLocked, isMissionVisible, xpThresholdForLevel, bindPhoneMissionTarget, ensureTrading, TRADING_TICKERS, tradingSparkline, listRegionPhones, scheduleMailDrop, processMailDrops
-} from './engine.js';
-import { findPhone, phoneMessages, phoneGallery, phoneCallLog, phoneContacts, lockPhone, unlockWithPin, isNetworkBanned, PROTECTION_RULES, registerBankFromMessages } from './phones.js';
+  isPluginLocked, isMissionVisible, xpThresholdForLevel, bindPhoneMissionTarget, ensureTrading, TRADING_TICKERS, tradingSparkline, listRegionPhones, scheduleMailDrop, processMailDrops, sendPlayerMail, processMailDeliveries } from './engine.js';
+import { findPhone, phoneMessages, phoneGallery, phoneCallLog, phoneContacts, lockPhone, unlockWithPin, isNetworkBanned, PROTECTION_RULES, registerBankFromMessages, PHONE_REGIONS, buildNetworkReport } from './phones.js';
 import { bankLogin, bankTransfer, getBankSession, searchNpcs, pluginDocs, touchNpc, NPC_POOL_SIZE } from './npc.js';
 import { extendedPluginDocs } from './operations.js';
 import { loadSavedGame, saveGame } from './storage.js';
@@ -57,6 +56,15 @@ function humanLeft(ms) { const total=Math.max(0,Math.ceil(ms/1000)); const h=Mat
 function currentRam() { return getRamUsage(state.game,[...state.opened.values()].map(w=>({ram:w.ram,minimized:w.minimized}))); }
 function currentLevelNeed() { const lvl=state.game.player.level; if(lvl>=BALANCE.maxLevel) return 0; const need=(typeof xpThresholdForLevel==='function'?xpThresholdForLevel(lvl):BALANCE.xpToLevel[lvl])||0; return Math.max(0,need-state.game.player.xp); }
 function toast(message,type='info') { /* notifications off — no UI interrupt / keyboard steal */ return; }
+function tickMailDeliveries() {
+  try {
+    if (state.game && typeof processMailDeliveries === 'function') {
+      const done = processMailDeliveries(state.game);
+      if (done && done.length) { scheduleSave(); if (state.opened.has('mail')) renderWindow('mail'); }
+    }
+  } catch (e) {}
+}
+setInterval(tickMailDeliveries, 3000);
 function scheduleSave() { clearTimeout(state.saveTimer);state.saveTimer=setTimeout(persist,250); }
 async function persist() {
   if(!state.game||state.saveBlocked)return;
@@ -566,18 +574,30 @@ function renderHardwareUpgrade(g,part,label) {
   return `<div class="list-row hardware-upgrade"><div class="list-main"><strong>${label}: ${esc(current.name)}</strong><small>СЕЙЧАС: ${esc(hardwareDetail(part,current))}</small>${next?`<small>СЛЕДУЮЩИЙ: ${esc(next.name)} · ${esc(hardwareDetail(part,next))} · ${fmt(next.price)} CR</small>`:'<small>Достигнут максимальный уровень.</small>'}</div><div class="list-actions">${next?bankLocked?'<span class="badge red">BANK LOCK</span>':`<button class="btn tiny" data-action="upgrade-hardware" data-part="${part}">УЛУЧШИТЬ</button>`:'<span class="badge green">MAX</span>'}</div></div>`;
 }
 function renderComputer(g) {
-  const usage = getHardwareUsage(g);
-  const ram = getRamUsage(g);
   const plugs = (g.computer.installedPlugins||[]).filter(id => !(typeof isPluginLocked==='function' && isPluginLocked(id)));
   const list = plugs.map(id => {
     const p = getPlugin(id);
-    return `<div class="list-row"><div class="list-main"><strong>${esc(p?.name||id)}</strong><small>${esc(p?.category||'plugin')} · v${esc(p?.version||'1')}</small></div><span class="badge green">ON</span></div>`;
-  }).join('') || '<div class="muted">Нет установленных плагинов</div>';
-  return `<div class="app-heading"><div><div class="eyebrow">MY COMPUTER</div><h2>Система</h2><p>Плагины и характеристики ПК</p></div><span class="badge">OS ${g.computer.os}</span></div>
-  <div class="kv"><span>OS</span><b>NULLBYTE OS ${g.computer.os}</b></div>
-  <div class="kv"><span>CPU / RAM / GPU / Storage</span><b>L${g.computer.cpu} · L${g.computer.ram} · L${g.computer.gpu} · L${g.computer.storage}</b></div>
-  <div class="kv"><span>RAM load</span><b>${ram.used}/${ram.total}</b></div>
-  <div class="panel section-gap"><div class="panel-title"><span>УСТАНОВЛЕННЫЕ ПЛАГИНЫ</span><small>${plugs.length}</small></div><div class="list">${list}</div></div>`;
+    return `<div class="list-row"><div class="list-main"><strong>${esc(p?.name||id)}</strong><small>${esc(p?.category||'plugin')} · v${esc(String(p?.version||'1'))}</small></div><span class="badge green">ON</span></div>`;
+  }).join('') || '<div class="muted">Нет плагинов</div>';
+  const files = (g.computer.files||[]).length;
+  const net = g.phoneWorld?.network;
+  const lvl = g.player?.level ?? 1;
+  const xp = g.player?.xp ?? 0;
+  const nick = g.player?.nickname || 'operator';
+  const hw = g.computer?.hardware || {};
+  return `<div class="app-heading"><div><div class="eyebrow">MY COMPUTER</div><h2>Система</h2><p>Актуальные данные ПК</p></div><span class="badge">OS ${esc(String(g.computer?.os||'1.0'))}</span></div>
+  <div class="panel">
+    <div class="kv"><span>Оператор</span><b>${esc(nick)}</b></div>
+    <div class="kv"><span>Уровень / XP</span><b>L${lvl} · ${xp} XP</b></div>
+    <div class="kv"><span>OS</span><b>NULLBYTE OS ${esc(String(g.computer?.os||'1.0'))}</b></div>
+    <div class="kv"><span>CPU</span><b>${esc(String(hw.cpu||g.computer?.cpu||'NullCore'))}</b></div>
+    <div class="kv"><span>RAM</span><b>${esc(String(hw.ram||g.computer?.ram||'8 GB'))}</b></div>
+    <div class="kv"><span>GPU</span><b>${esc(String(hw.gpu||g.computer?.gpu||'—'))}</b></div>
+    <div class="kv"><span>Storage</span><b>${esc(String(hw.storage||g.computer?.storage||'—'))} · files ${files}</b></div>
+    <div class="kv"><span>Сеть</span><b>${net ? esc(net.regionId)+' / '+esc(net.netKey||'') : 'OFFLINE'}</b></div>
+  </div>
+  <h3 class="section-gap">Установленные плагины</h3>
+  <div class="list">${list}</div>`;
 }
 
 function renderFiles(g) {
@@ -613,11 +633,16 @@ function renderFiles(g) {
 
 
 function renderDarkShop(g) {
-  return `<div class="app-heading"><div><div class="eyebrow">DARKSHOP</div><h2>DarkShop</h2><p>Магазин комплектующих</p></div><span class="badge gray">WIP</span></div>
-  <div class="notice warning section-gap">В разработке. Покупка комплектующих временно недоступна.</div>
-  <div class="empty-state"><b>COMING SOON</b><p>Апгрейды CPU / RAM / GPU / Storage появятся после доработки баланса.</p></div>`;
+  return `<div class="app-heading"><div><div class="eyebrow">DARKSHOP</div><h2>DarkShop</h2><p>Каталог</p></div><span class="badge">1</span></div>
+  <div class="list section-gap">
+    <div class="list-row">
+      <div class="list-main"><strong>Сервер (rack node)</strong><small>Выделенный узел · визуал</small></div>
+      <span class="badge">1200 €</span>
+    </div>
+  </div>
+  <div class="notice warning section-gap">Покупка пока недоступна — только витрина.</div>
+  <div class="muted small">Комплектующие CPU/RAM — в разработке.</div>`;
 }
-
 
 function renderPluginCard(g,p) {
   const installed=getInstalledPlugin(g,p.id);
@@ -1026,38 +1051,45 @@ function renderBrowser(g, winId) {
 
 function renderMap(g) {
   const selected = state.mapSelected || null;
-  const locs = LOCATIONS || [];
-  const events = g.events?.active || [];
-  // event zones as pure shapes (no labels)
-  const eventZones = [
-    { x: 14, y: 14, w: 20, h: 18 },
-    { x: 70, y: 16, w: 18, h: 16 },
-    { x: 46, y: 68, w: 22, h: 18 }
-  ];
-  if (!events.length) {
-    // still show subtle zones as locked sectors
-  }
-  const points = locs.map(loc => {
-    const x = loc.x != null ? loc.x : 50;
-    const y = loc.y != null ? loc.y : 50;
-    const banned = false;
-    return `<button type="button" class="map-point ${selected===loc.id?'on':''}" style="left:${x}%;top:${y}%" data-action="map-select" data-id="${esc(loc.id)}"><span>${esc(loc.name)}</span></button>`;
-  }).join('');
-  const ez = eventZones.map(z => `<div class="map-event-zone" style="left:${z.x}%;top:${z.y}%;width:${z.w}%;height:${z.h}%"></div>`).join('');
-  const detail = selected ? (locs.find(l => l.id === selected) || {}) : null;
-  const regions = ['bayshore','midtown','ironreach','southgate','oakridge','shadowline'];
+  const regions = PHONE_REGIONS || [];
   const net = g.phoneWorld?.network;
   const bans = g.phoneWorld?.networkBanUntil || {};
-  const banNote = Object.keys(bans).filter(k => bans[k] > Date.now()).map(k => k).join(', ');
-  return `<div class="app-heading"><div><div class="eyebrow">NULLATLAS</div><h2>Карта</h2><p>Районы и сети</p></div><span class="badge">${locs.length}</span></div>
-  <div class="map-canvas section-gap">${ez}${points}</div>
-  <div class="panel section-gap">${detail ? `<strong>${esc(detail.name||selected)}</strong><p class="muted small">${esc(detail.desc||'')}</p>` : '<span class="muted">Выбери район</span>'}
-  <div class="kv"><span>Активная сеть</span><b>${net ? esc(net.regionId)+' · '+esc(net.netKey||'') : '—'}</b></div>
-  <div class="muted small section-gap">Сети: ${regions.map(esc).join(' · ')}</div>
-  ${banNote?`<div class="notice warning">Бан сети 30м: ${esc(banNote)}</div>`:''}
-  <div class="muted small">Красные зоны — ивент / бан сети</div></div>`;
+  const now = Date.now();
+  // fixed positions for 6 regions
+  const pos = {
+    bayshore: { x: 18, y: 28 }, midtown: { x: 48, y: 22 }, ironreach: { x: 78, y: 30 },
+    southgate: { x: 22, y: 68 }, oakridge: { x: 52, y: 62 }, shadowline: { x: 78, y: 72 }
+  };
+  const points = regions.map(r => {
+    const p = pos[r.id] || { x: 50, y: 50 };
+    const banned = isNetworkBanned(g, r.id);
+    return `<button type="button" class="map-point ${selected===r.id?'on':''} ${banned?'banned':''}" style="left:${p.x}%;top:${p.y}%" data-action="map-select" data-id="${esc(r.id)}"><span>${esc(r.name)}</span></button>`;
+  }).join('');
+  const detail = selected ? regions.find(r => r.id === selected) : null;
+  let info = '<span class="muted">Выбери район сети</span>';
+  if (detail) {
+    const banned = isNetworkBanned(g, detail.id);
+    const vis = listRegionPhones(detail.id).length;
+    if (banned) {
+      info = `<strong class="text-red">${esc(detail.name)}</strong>
+        <p class="text-red">НЕДОСТУПНО — бан сети</p>
+        <div class="kv"><span>Статус</span><b class="text-red">BANNED</b></div>
+        <div class="muted small">connect / scan / open недоступны до снятия бана</div>`;
+    } else {
+      info = `<strong>${esc(detail.name)}</strong>
+        <div class="kv"><span>REGION_ID</span><b>${esc(detail.id)}</b></div>
+        <div class="kv"><span>NET_KEY</span><b>${esc(detail.netKey)}</b></div>
+        <div class="kv"><span>SSID</span><b>${esc(detail.ssid)}</b></div>
+        <div class="kv"><span>Видимых устройств</span><b>${vis}</b></div>
+        <div class="kv"><span>Сейчас в сети</span><b>${net?.regionId===detail.id?'CONNECTED':'—'}</b></div>`;
+    }
+  }
+  return `<div class="app-heading"><div><div class="eyebrow">NULLATLAS</div><h2>Карта сетей</h2><p>Районы · NET_KEY · бан</p></div><span class="badge">${regions.length}</span></div>
+  <div class="map-canvas section-gap">${points}</div>
+  <div class="panel section-gap map-net-info">${info}
+  <div class="kv section-gap"><span>Активная сеть</span><b>${net ? esc(net.regionId)+' · '+esc(net.netKey||'') : 'OFFLINE'}</b></div>
+  </div>`;
 }
-
 
 function missionSteps(m, g) {
   if (!m) return [];
@@ -1283,11 +1315,68 @@ function clearTerminalView(termId) {
   }
 }
 
+
+async function showPluginDashboard(termId, pluginId) {
+  const g = state.game;
+  const net = g.phoneWorld?.network;
+  const t = () => new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  if (pluginId === 'net-link') {
+    const lines = [
+      { t: 'NET LINK  // SECURE CHANNEL BRIDGE', c: 'green' },
+      { t: `TIME ${t()}`, c: 'muted' },
+      { t: '────────────────────────────────────────', c: 'green' },
+      { t: net ? `LINK: ESTABLISHED ■  REGION: ${net.regionId}` : 'LINK: STANDBY ■  REGION: —', c: net ? 'green' : 'muted' },
+      { t: net ? `NET_KEY: ${net.netKey||'—'}  SSID: ${net.ssid||'—'}` : 'NET_KEY: —  SSID: —', c: 'muted' },
+      { t: '────────────────────────────────────────', c: 'green' },
+    ];
+    for (const r of PHONE_REGIONS) {
+      const ban = isNetworkBanned(g, r.id);
+      lines.push({ t: `${ban?'⊘':'●'} ${r.id.padEnd(12)} ${r.netKey} ${ban?'BANNED':(net?.regionId===r.id?'CONNECTED':'idle')}`, c: ban ? 'error' : 'muted' });
+    }
+    lines.push({ t: 'cmds: connect <region> · disconnect · status · list · exit', c: 'blue' });
+    for (const L of lines) { termAdd(termId, L.t, L.c); await sleep(8); }
+  } else if (pluginId === 'net-analyzer') {
+    const lines = [
+      { t: 'NET ANALYZER v2.1  // INTEL SUITE', c: 'green' },
+      { t: net ? `CAPTURE ON · ${net.regionId} · ${net.netKey}` : 'CAPTURE OFF · connect network first', c: net ? 'green' : 'error' },
+    ];
+    if (net) {
+      const phones = listRegionPhones(net.regionId).slice(0, 8);
+      lines.push({ t: `VISIBLE ${listRegionPhones(net.regionId).length} devices (sample):`, c: 'blue' });
+      for (const p of phones) {
+        lines.push({ t: `${p.id}  ${p.ownerName}  ${p.role}  ${p.protection}`, c: 'muted' });
+      }
+    }
+    lines.push({ t: 'cmds: scan · status · help · exit', c: 'blue' });
+    for (const L of lines) { termAdd(termId, L.t, L.c); await sleep(8); }
+  } else if (pluginId === 'phone-access') {
+    const tid = state._phoneTarget || g.phoneWorld?.activeSession?.phoneId;
+    const phone = tid ? findPhone(tid) : null;
+    const acc = phone ? (g.phoneWorld?.access?.[phone.id] || {}) : {};
+    const lines = [
+      { t: '>>> PHONE ACCESS  // DEVICE LINK MODULE', c: 'green' },
+      { t: `TIME ${t()}  USER root`, c: 'muted' },
+      { t: '────────────────────────────────────────', c: 'green' },
+      { t: phone ? `TARGET: ${phone.id}  ${phone.ownerName}` : 'TARGET: IDLE', c: phone ? 'green' : 'muted' },
+      { t: phone ? `AUTH: ${acc.unlocked?'UNLOCKED':(acc.attackOk?'PIN READY':'LOCKED')}  PROT: ${phone.protection}` : 'AUTH: —', c: 'muted' },
+      { t: phone ? `MODEL ${phone.model}  ROLE ${phone.role}  ${phone.number}` : 'CHANNEL: CLOSED', c: 'muted' },
+      { t: net ? `NET ${net.regionId}` : 'NET OFFLINE', c: net ? 'muted' : 'error' },
+      { t: 'cmds: open <PHONE_ID> · attack · block · disconnect · status · exit', c: 'blue' },
+    ];
+    for (const L of lines) { termAdd(termId, L.t, L.c); await sleep(8); }
+  } else {
+    await animatePluginBoot(termId, pluginId);
+  }
+  const win = document.querySelector(`[data-window="${termId}"]`);
+  const inp = win?.querySelector('.term-inline-input');
+  if (inp) try { inp.focus({ preventScroll: true }); } catch (e) {}
+}
+
 async function enterPluginWorkspace(termId, pluginId) {
   // remember focus — do NOT blur keyboard on mobile
   const keep = document.querySelector(`[data-window="${termId}"] .term-inline-input, [data-window="${termId}"] .terminal-form input`);
   clearTerminalView(termId);
-  await animatePluginBoot(termId, pluginId);
+  await showPluginDashboard(termId, pluginId);
   const term = getTerm(termId);
   const win = document.querySelector(`[data-window="${termId}"]`);
   const prompt = terminalPrompt(term);
@@ -1720,6 +1809,11 @@ async function runTerminalCommand(termId, raw) {
       await leavePluginWorkspace(termId);
       return;
     }
+    if (lower === 'status' || lower === 'home' || lower === 'dashboard') {
+      clearTerminalView(termId);
+      await showPluginDashboard(termId, term.plugin);
+      return;
+    }
     if (lower === 'help') {
       for (const line of (runPluginShellCommand(state.game, term.plugin, 'help').lines || [])) termAdd(termId, line.text, line.type || '');
       return;
@@ -1807,9 +1901,7 @@ async function runTerminalCommand(termId, raw) {
         if (result.pendingSave) term.pendingSave = result.pendingSave;
         if (result.awaitFilename) term.awaitFilename = result.awaitFilename;
         if (result.revealedPin) {
-          termAdd(termId, '→ PIN: ' + result.revealedPin + '  (введи в Phone Lab)', 'green');
-          openApp('phone');
-          renderWindow('phone');
+          termAdd(termId, '→ PIN: ' + result.revealedPin + '  · открой Phone Lab сам и введи PIN', 'green');
         }
         if (term.plugin === 'phone-access' && result.ok && !result.revealedPin) {
           if (state.opened.has('phone')) renderWindow('phone');
@@ -1928,11 +2020,55 @@ async function runTerminalCommand(termId, raw) {
 
 
 function renderMail(g) {
-  return `<div class="app-heading"><div><div class="eyebrow">N-MAIL</div><h2>Почта</h2></div><span class="badge gray">WIP</span></div>
-  <div class="notice warning section-gap">На доработке. Сдача заданий временно через интерфейс контракта (BlackWire).</div>
-  <div class="empty-state"><b>N-MAIL OFFLINE</b><p>Модуль почты будет пересобран.</p></div>`;
+  const msgs = (g.mail?.messages || []).slice(0, 80);
+  const view = state.mailView; // id of open letter
+  const compose = state.mailCompose; // {to,subject,body,attachmentId} or null
+  if (compose) {
+    return `<div class="app-heading"><div><div class="eyebrow">N-MAIL</div><h2>Новое письмо</h2></div>
+      <button type="button" class="btn tiny ghost" data-action="mail-compose-cancel">← Назад</button></div>
+      <div class="panel">
+        <label class="field"><span>Кому (Имя Фамилия NPC)</span><input id="mailTo" value="${esc(compose.to||'')}" placeholder="Ivan Petrov"></label>
+        <label class="field"><span>Тема</span><input id="mailSubject" value="${esc(compose.subject||'')}" placeholder="Тема"></label>
+        <label class="field"><span>Текст</span><textarea id="mailBody" rows="5" placeholder="Сообщение…">${esc(compose.body||'')}</textarea></label>
+        <label class="field"><span>Вложение (id файла с ПК, опционально)</span><input id="mailAttach" value="${esc(compose.attachmentId||'')}" placeholder="file_scan_…"></label>
+        <div class="btn-row section-gap">
+          <button type="button" class="btn primary" data-action="mail-send">Отправить</button>
+          <button type="button" class="btn ghost" data-action="mail-compose-cancel">Отмена</button>
+        </div>
+        <div class="muted small" id="mailSendStatus"></div>
+      </div>`;
+  }
+  if (view) {
+    const m = msgs.find(x => x.id === view);
+    if (!m) { state.mailView = null; }
+    else {
+      const atts = (m.attachments||[]).map(aid => {
+        const f = (g.computer?.files||[]).find(x => x.id === aid);
+        return f ? `<div class="list-row"><span>${esc(f.name)}</span><small>${esc(f.type||'')}</small></div>` : `<div class="muted">${esc(aid)}</div>`;
+      }).join('') || '<div class="muted">нет</div>';
+      return `<div class="app-heading"><div><div class="eyebrow">N-MAIL</div><h2>${esc(m.subject||'Письмо')}</h2></div>
+        <button type="button" class="btn tiny ghost" data-action="mail-close-view">← Входящие</button></div>
+        <div class="panel mail-letter">
+          <div class="kv"><span>От</span><b>${esc(m.from)}</b></div>
+          <div class="kv"><span>Кому</span><b>${esc(m.to)}</b></div>
+          <div class="kv"><span>Тема</span><b>${esc(m.subject)}</b></div>
+          <div class="mail-body section-gap">${esc(m.body||'')}</div>
+          <div class="section-gap"><strong>Вложения</strong>${atts}</div>
+          <div class="btn-row section-gap">
+            <button type="button" class="btn" data-action="mail-reply" data-id="${esc(m.id)}">Ответить</button>
+            <button type="button" class="btn danger" data-action="mail-delete" data-id="${esc(m.id)}">Удалить письмо</button>
+          </div>
+        </div>`;
+    }
+  }
+  const list = msgs.map(m => `<button type="button" class="list-row mail-row ${m.status==='unread'?'unread':''}" data-action="mail-open" data-id="${esc(m.id)}">
+    <div class="list-main"><strong>${esc(m.subject||'(без темы)')}</strong><small>${esc(m.from)} · ${new Date(m.at||0).toLocaleString('ru-RU')}</small></div>
+    <span class="badge ${m.direction==='in'?'blue':'gray'}">${m.direction==='in'?'IN':'OUT'}</span>
+  </button>`).join('') || '<div class="empty-state"><b>Пусто</b><p>Писем нет</p></div>';
+  return `<div class="app-heading"><div><div class="eyebrow">N-MAIL</div><h2>Почта</h2></div>
+    <button type="button" class="btn primary tiny" data-action="mail-compose">Отправить письмо</button></div>
+    <div class="list section-gap">${list}</div>`;
 }
-
 
 function renderBank(g) {
   const status=bankStatus(g),risk=bankRisk(g),tx=g.economy.transactions.slice(0,30);
@@ -2052,7 +2188,8 @@ function renderPhoneLab(g) {
   } else if (tab === 'calls') {
     body = `<div class="nb-list">${calls.map(c => `<div class="nb-card"><div class="nb-card-top"><span class="nb-pink">${esc(c.info||'')}</span><span class="nb-muted">${esc(c.date||'')} ${esc(c.time||'')}</span></div><div class="nb-card-body">${esc(c.with||'')} · ${esc(c.number||'')}</div></div>`).join('')||'<div class="nb-empty">пусто</div>'}</div>`;
   } else if (tab === 'contacts') {
-    body = `<div class="nb-list">${contacts.map(c => `<div class="nb-card"><div class="nb-card-top"><span class="nb-pink">${esc(c.name||'')}</span></div><div class="nb-card-body nb-cyan">${esc(c.number||'')}</div></div>`).join('')||'<div class="nb-empty">пусто</div>'}</div>`;
+    body = `<div class="nb-list">${contacts.map(c => `<div class="nb-card"><div class="nb-card-top"><span class="nb-pink">${esc(c.name||'')}</span></div><div class="nb-card-body nb-cyan">${esc(c.number||'')}</div></div>`).join('')||'<div class="nb-empty">пусто</div>'}</div>
+      <button type="button" class="nb-action" data-action="phone-lab-export" data-kind="contacts" data-id="${esc(phone.id)}">SAVE CONTACTS</button>`;
   } else if (tab === 'gallery') {
     body = `<div class="nb-gal">${gal.map(x=>`<div class="nb-thumb"><span>${esc(x.title||'')}</span></div>`).join('')}</div>
       <button type="button" class="nb-action" data-action="phone-lab-export" data-kind="gallery" data-id="${esc(phone.id)}">SAVE GALLERY</button>`;
@@ -2416,23 +2553,52 @@ function handleAction(action,el) {
       state.phoneLabTab = el.dataset.tab || 'msgs';
       renderWindow('phone'); break;
     }
-    case 'phone-lab-export':{ /* will refresh ide */
+    case 'phone-lab-export':{
       const kind = el.dataset.kind || 'msgs';
-      const phone = findPhone(id, state.game.meta?.seed||'nb');
-      if(!phone){ toast('Нет телефона','error'); if(state.opened.has('ide')) renderWindow('ide'); break; }
-      let content='', name='';
-      if(kind==='gallery'){
-        content = phoneGallery(phone, state.game.meta?.seed||'nb').map(x=>`${x.id} ${x.title} ${x.note}`).join('\n');
-        name = `${phone.id}-gallery.txt`;
+      const pid = el.dataset.id || id || state._phoneTarget;
+      const phone = findPhone(pid);
+      if (!phone) { toast('Нет телефона', 'error'); break; }
+      let content = '', fname = '', ftype = 'sms-dump';
+      if (kind === 'gallery') {
+        content = (phoneGallery(phone) || []).map(x => `${x.id || ''} | ${x.title || ''} | ${x.note || ''}`).join('\n');
+        fname = `${phone.id}-gallery.txt`;
+        ftype = 'gallery-dump';
+      } else if (kind === 'contacts') {
+        const cts = phoneContacts(phone, Date.now()) || [];
+        content = cts.map(c => `${c.name || ''} | ${c.number || ''}`).join('\n');
+        fname = `${phone.id}-contacts.txt`;
+        ftype = 'contacts-dump';
       } else {
-        content = phoneMessages(phone, state.game.meta?.seed||'nb').map(m=>`${m.from}: ${m.text}`).join('\n');
-        name = `${phone.id}-msgs.txt`;
+        const msgs = (state.game.phoneWorld?.sessionFrozenSms) || phoneMessages(phone, Date.now()) || [];
+        content = msgs.map(m => `[${m.kind || 'chat'}] ${m.from || ''}: ${m.text || ''}`).join('\n');
+        fname = `${phone.id}-msgs.txt`;
+        ftype = 'sms-dump';
       }
-      const file = { id:'file_ph_'+Date.now().toString(36), name, type:'phone-data', content, path:'/phone/', createdAt:Date.now(), size:Math.max(1,Math.ceil(content.length/1024)) };
+      if (!state.game.computer.files) state.game.computer.files = [];
+      const file = {
+        id: 'file_ph_' + Date.now().toString(36),
+        name: fname,
+        type: ftype,
+        content,
+        path: '/phone/',
+        createdAt: Date.now(),
+        size: Math.max(1, Math.ceil((content.length || 1) / 1024)),
+        meta: {
+          kind: ftype,
+          phoneId: phone.id,
+          ownerName: phone.ownerName,
+          regionId: phone.regionId || '',
+          number: phone.number || '',
+          role: phone.role || ''
+        }
+      };
       state.game.computer.files.unshift(file);
-      scheduleSave(); toast('Файл: '+name,'success'); break;
+      state.game.computer.files = state.game.computer.files.slice(0, 100);
+      toast(`Сохранено: ${file.name}`, 'success');
+      scheduleSave();
+      if (state.opened.has('ide')) renderWindow('ide');
+      break;
     }
-    
     case 'phone-lab-lock':{
       if(typeof lockPhone==='function') lockPhone(state.game, id, 30);
       else if(state.game.phoneWorld){ state.game.phoneWorld.access[id]={...(state.game.phoneWorld.access[id]||{}), blockedUntil:Date.now()+30*60*1000}; }
@@ -2450,6 +2616,11 @@ function handleAction(action,el) {
       const inp = document.querySelector(`[data-window="${tid}"] .term-cmd-input, [data-window="${tid}"] .terminal-form input`);
       if (inp) { inp.blur(); }
       try { document.activeElement && document.activeElement.blur(); } catch (e) {}
+      break;
+    }
+    case 'map-select':{
+      state.mapSelected = el.dataset.id || null;
+      renderWindow('map');
       break;
     }
     case 'taskbar-window':{const w=state.opened.get(el.dataset.window);if(!w)break;if(!w.minimized&&state.active===w.id)minimizeWindow(w.id);else focusWindow(w.id);break;}
@@ -2578,7 +2749,44 @@ function handleAction(action,el) {
     case 'site-operation':runSiteOperation(site,el.dataset.op);break;
     case 'export-result':exportResult(id);break;
     case 'deliver-mission':confirm('Отправить результат?',`Файл по контракту <b>${esc(id)}</b> будет передан внутриигровому заказчику.`,()=>deliverResult(id));break;
-    case 'mail-open':openMail(id);break;
+    case 'mail-open':{
+      state.mailView = el.dataset.id || id; state.mailCompose = null;
+      const msg = (state.game.mail?.messages||[]).find(x=>x.id===state.mailView);
+      if (msg && msg.status==='unread') msg.status='read';
+      scheduleSave(); renderWindow('mail'); break;
+    }
+    case 'mail-close-view':{ state.mailView=null; renderWindow('mail'); break; }
+    case 'mail-compose':{
+      state.mailCompose={to:'',subject:'',body:'',attachmentId:''}; state.mailView=null;
+      renderWindow('mail'); break;
+    }
+    case 'mail-compose-cancel':{ state.mailCompose=null; renderWindow('mail'); break; }
+    case 'mail-reply':{
+      const msg=(state.game.mail?.messages||[]).find(x=>x.id===(el.dataset.id||id));
+      if(!msg) break;
+      state.mailCompose={to:msg.from,subject:'Ответ на письмо',body:'',attachmentId:''};
+      state.mailView=null; renderWindow('mail'); break;
+    }
+    case 'mail-send':{
+      const to=(document.getElementById('mailTo')?.value||'').trim();
+      const subject=(document.getElementById('mailSubject')?.value||'').trim();
+      const body=(document.getElementById('mailBody')?.value||'').trim();
+      const att=(document.getElementById('mailAttach')?.value||'').trim();
+      if(!to){ toast('Укажи Имя Фамилия NPC','error'); break; }
+      toast('Проверка получателя…','info');
+      setTimeout(()=>{
+        try {
+          const r = sendPlayerMail(state.game, { to, subject, body, attachmentId: att });
+          if(!r.ok){ toast(r.reason||'Ошибка','error'); return; }
+          toast('Письмо отправлено','success');
+          state.mailCompose=null;
+          scheduleSave();
+          renderWindow('mail');
+        } catch(err){ toast(String(err.message||err),'error'); }
+      }, 600);
+      break;
+    }
+
     case 'file-copy-content':{
       const f=[...state.game.computer.files,...state.game.editor.files].find(x=>x.id===id);
       if(f&&navigator.clipboard?.writeText){navigator.clipboard.writeText(String(f.content||'')).then(()=>toast('Скопировано','success')).catch(()=>toast('Нет доступа к буферу','error'));}
@@ -2594,8 +2802,10 @@ function handleAction(action,el) {
     case 'file-open':state.selectedFileId=id;renderWindow('mail');break;
     case 'file-close':state.selectedFileId=null;renderWindow('mail');break;
     case 'mail-delete':{
-      state.game.mail.messages = (state.game.mail.messages||[]).filter(x => x.id !== id);
-      if (state.selectedMail === id) state.selectedMail = null;
+      const mid = el.dataset.id || id;
+      state.game.mail.messages = (state.game.mail.messages||[]).filter(x => x.id !== mid);
+      if (state.mailView === mid) state.mailView = null;
+      if (state.selectedMail === mid) state.selectedMail = null;
       scheduleSave(); renderWindow('mail'); break;
     }
     case 'mail-mark':{const m=state.game.mail.messages.find(x=>x.id===id);if(m)m.status='read';scheduleSave();renderWindow('mail');break;}

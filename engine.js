@@ -4,7 +4,7 @@ import { createEmptyNpcWorld, migrateNpcWorld, getNpc, touchNpc, bankLogin, getB
 // tickNpcCommerce imported via npc named exports below
 import { createEmptyOpsState, migrateOps, processPaymentLinkRestores, buildServerIndex, extractTarget, createArchive, signalMapRegion, grantRegionKey, hijackPaymentLink, recoveryMsForSecurity, REGIONS, MOBILE_PLUGIN_META, extendedPluginDocs } from './operations.js';
 import { npcReply, openingLine, moneyDialogue, dialogueStats, getTrust } from './dialogue.js';
-import { PHONE_REGIONS, PHONES_PER_REGION, createEmptyPhoneWorld, migratePhoneWorld, generatePhone, listRegionPhones, findPhone, buildNetworkReport, connectNetwork, analyzeNetwork, accessPhone, lockPhone, phoneMessages, phoneContacts, phoneGallery, phoneCallLog, rollAttack, unlockWithPin, isNetworkBanned, registerBankFromMessages } from './phones.js';
+import { PHONE_REGIONS, PHONES_PER_REGION, createEmptyPhoneWorld, migratePhoneWorld, generatePhone, listRegionPhones, listAllRegionPhones, findPhone, buildNetworkReport, connectNetwork, analyzeNetwork, accessPhone, lockPhone, phoneMessages, phoneContacts, phoneGallery, phoneCallLog, rollAttack, unlockWithPin, isNetworkBanned, registerBankFromMessages } from './phones.js';
 import { createEmptyEvents, migrateEvents, processWorldEvents, listActiveEvents } from './events.js';
 export const SAVE_VERSION = 1;
 
@@ -473,7 +473,28 @@ export function acceptMission(state,missionId) {
     const v = validatePhoneMissionTarget(_pre, state);
     if (!v.ok) return { ok: false, reason: 'Цель контракта не найдена в указанной сети. Контракт обновлён — открой детали снова.' };
   }
-  return acceptMission_inner(state,missionId);
+  const res = acceptMission_inner(state,missionId);
+  if (res.ok) {
+    try {
+      const m = state.missions.items.find(x=>x.id===missionId);
+      if (m) {
+        if (!state.mail) state.mail = { messages: [] };
+        state.mail.messages.unshift({
+          id: 'mail_job_'+Date.now().toString(36),
+          direction: 'in',
+          from: m.client || 'Заказчик',
+          to: state.player?.nickname || 'operator',
+          subject: m.title || ('Контракт '+m.id),
+          body: (m.brief || m.description || m.detail || 'Детали контракта') + '\n\nНаграда: ' + (m.reward||0) + ' CR · XP ' + (m.xp||0) + (m.regionId ? '\nСеть: '+m.regionId : '') + (m.targetName ? '\nЦель: '+m.targetName : '') + (m.targetNumber ? '\nНомер: '+m.targetNumber : ''),
+          at: Date.now(),
+          attachments: [],
+          status: 'unread',
+          missionId: m.id
+        });
+      }
+    } catch (err) {}
+  }
+  return res;
 }
 function acceptMission_inner(state,missionId) {
   const m=state.missions.items.find(x=>x.id===missionId);
@@ -1977,6 +1998,9 @@ export function bindPhoneMissionTarget(mission, seedRoot = 'nb') {
       }
     }
     mission.phoneId = phone.id;
+    mission.targetPhoneId = phone.id;
+    mission.targetName = phone.ownerName;
+    mission.targetNumber = phone.number;
     mission.ownerName = phone.ownerName;
     mission.phoneNumber = phone.number;
     mission.regionId = regionId;
@@ -2055,3 +2079,190 @@ export function queueMailDropOpens(state, now = Date.now()) {
   state.mail.pendingDrops = left.slice(-30);
   return notices;
 }
+
+
+/** Player N-Mail send. Validates NPC name against phone registry. */
+
+/** Player N-Mail send. Validates NPC name against phone registry. */
+export function sendPlayerMail(state, { to, subject, body, attachmentId }) {
+  const name = String(to || '').trim();
+  if (!name) return { ok: false, reason: 'Укажи имя' };
+
+  let found = null;
+  for (const r of PHONE_REGIONS) {
+    for (const p of listAllRegionPhones(r.id)) {
+      if (String(p.ownerName || '').toLowerCase() === name.toLowerCase()) { found = p; break; }
+    }
+    if (found) break;
+  }
+  if (!found) return { ok: false, reason: 'NPC не найден в базах сети' };
+
+  if (!state.mail) state.mail = { messages: [], pendingDelivery: [] };
+  if (!state.mail.messages) state.mail.messages = [];
+  if (!state.mail.pendingDelivery) state.mail.pendingDelivery = [];
+
+  const files = state.computer?.files || [];
+  const file = attachmentId
+    ? files.find(f => f.id === attachmentId || f.name === attachmentId || String(f.name).startsWith(attachmentId))
+    : null;
+
+  const msg = {
+    id: 'mail_' + Date.now().toString(36),
+    direction: 'out',
+    from: state.player?.nickname || 'operator',
+    to: found.ownerName,
+    subject: subject || '(без темы)',
+    body: body || '',
+    at: Date.now(),
+    attachments: file ? [file.id] : [],
+    status: 'sent',
+    npcId: found.id
+  };
+  state.mail.messages.unshift(msg);
+
+  if (file) {
+    // queue attachment verification in 5–20s window (default 20s)
+    const delay = 20000;
+    state.mail.pendingDelivery.push({
+      at: Date.now() + delay,
+      to: found.ownerName,
+      toPhoneId: found.id,
+      fileId: file.id,
+      msgId: msg.id,
+      checked: false
+    });
+  }
+  return { ok: true, msg, npc: found, hasAttachment: !!file };
+}
+
+/**
+ * Verify mail attachments against active missions.
+ * Success if: recipient is mission client (заказчик) AND file is SMS dump of mission target phone.
+ */
+export function processMailDeliveries(state, now = Date.now()) {
+  if (!state.mail?.pendingDelivery?.length) return [];
+  const done = [];
+  const left = [];
+
+  for (const d of state.mail.pendingDelivery) {
+    if (d.at > now) { left.push(d); continue; }
+    if (d.checked) continue;
+    d.checked = true;
+
+    const file = (state.computer?.files || []).find(f => f.id === d.fileId);
+    if (!file) {
+      state.mail.messages.unshift({
+        id: 'mail_fail_' + Date.now().toString(36),
+        direction: 'in', from: d.to, to: state.player?.nickname || 'operator',
+        subject: 'Вложение не найдено',
+        body: 'Проверка не пройдена: файл вложения отсутствует на диске.',
+        at: now, attachments: [], status: 'unread'
+      });
+      continue;
+    }
+
+    const meta = file.meta || {};
+    const ftype = String(file.type || meta.kind || '').toLowerCase();
+    const fname = String(file.name || '').toLowerCase();
+    const isSmsDump = ftype === 'sms-dump' || /msgs|sms|message/.test(fname);
+    const isContactsDump = ftype === 'contacts-dump' || /contact/.test(fname);
+    const isGalleryDump = ftype === 'gallery-dump' || /gallery/.test(fname);
+    const filePhoneId = String(meta.phoneId || '').toUpperCase();
+    const fileOwner = String(meta.ownerName || '').toLowerCase();
+
+    // Active missions for this заказчик
+    const missions = (state.missions?.items || []).filter(m => {
+      const st = String(m.status || '');
+      if (!(st === 'active' || st === 'accepted' || st === 'in_progress')) return false;
+      return String(m.client || '').toLowerCase() === String(d.to || '').toLowerCase();
+    });
+
+    if (!missions.length) {
+      state.mail.messages.unshift({
+        id: 'mail_chk_' + Date.now().toString(36),
+        direction: 'in', from: d.to, to: state.player?.nickname || 'operator',
+        subject: 'Файл получен',
+        body: 'Вложение принято, но активного контракта на это имя нет.',
+        at: now, attachments: [], status: 'unread'
+      });
+      continue;
+    }
+
+    let anyOk = false;
+    for (const m of missions) {
+      const targetId = String(m.targetPhoneId || m.phoneId || m.target || '').toUpperCase();
+      const targetName = String(m.targetName || m.targetOwner || '').toLowerCase();
+      // Mission task type → required dump
+      const task = String(m.task || m.objective || m.category || '').toLowerCase();
+      let needSms = /msg|sms|message|переписк|chat/.test(task);
+      let needContacts = /contact|контакт/.test(task);
+      let needGallery = /gallery|галер/.test(task);
+      if (!needSms && !needContacts && !needGallery) {
+        // default phone jobs accept sms or contacts
+        needSms = true;
+        needContacts = true;
+      }
+      const rightType =
+        (needSms && isSmsDump) ||
+        (needContacts && isContactsDump) ||
+        (needGallery && isGalleryDump);
+
+      let match = false;
+      if (rightType) {
+        if (filePhoneId && targetId && filePhoneId === targetId) match = true;
+        if (fileOwner && targetName && fileOwner === targetName) match = true;
+        if (!match && m.targetNumber && meta.number && String(meta.number) === String(m.targetNumber)) match = true;
+        if (!match && targetName && String(file.content || '').toLowerCase().includes((targetName.split(' ')[0] || '___'))) match = true;
+        if (!match && !targetId && !targetName) match = true;
+      }
+
+      if (!match) continue;
+
+      m.status = 'completed';
+      const reward = Number(m.reward) || 0;
+      const xp = Number(m.xp) || 50;
+      if (!state.economy) state.economy = { balance: 0, transactions: [] };
+      state.economy.balance = (Number(state.economy.balance) || 0) + reward;
+      state.economy.transactions = state.economy.transactions || [];
+      state.economy.transactions.unshift({
+        id: 'tx_mail_' + Date.now().toString(36),
+        at: now,
+        amount: reward,
+        note: `N-Mail: ${m.title || m.id}`
+      });
+      if (state.player) {
+        state.player.xp = (Number(state.player.xp) || 0) + xp;
+        // level up soft
+        const thr = typeof xpThresholdForLevel === 'function' ? xpThresholdForLevel((state.player.level || 1) + 1) : null;
+        if (thr && state.player.xp >= thr) state.player.level = (state.player.level || 1) + 1;
+      }
+      state.mail.messages.unshift({
+        id: 'mail_pay_' + Date.now().toString(36),
+        direction: 'in',
+        from: m.client || d.to,
+        to: state.player?.nickname || 'operator',
+        subject: `Оплата: ${m.title || m.id}`,
+        body: `Вложение проверено. Контракт выполнен.\n+${reward} CR\n+${xp} XP\nФайл: ${file.name}`,
+        at: now, attachments: [], status: 'unread'
+      });
+      done.push(m.id);
+      anyOk = true;
+    }
+
+    if (!anyOk) {
+      state.mail.messages.unshift({
+        id: 'mail_rej_' + Date.now().toString(36),
+        direction: 'in',
+        from: d.to,
+        to: state.player?.nickname || 'operator',
+        subject: 'Вложение отклонено',
+        body: 'Файл не соответствует цели контракта. Нужен дамп с целевого телефона (SAVE SMS / SAVE CONTACTS / SAVE GALLERY в Phone Lab) и письмо заказчику.',
+        at: now, attachments: [], status: 'unread'
+      });
+    }
+  }
+
+  state.mail.pendingDelivery = left;
+  return done;
+}
+

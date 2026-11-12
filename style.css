@@ -602,3 +602,11 @@ h1,h2,h3,strong,.window-title{
   object-fit:contain;
 }
 .taskbar-brand img{width:28px;height:28px}
+
+.map-point.banned span, .map-point.banned{color:#ff4d6d!important;border-color:#ff4d6d!important;background:rgba(80,10,20,.5)!important}
+.map-net-info{font-size:13px}
+.mail-body{white-space:pre-wrap;line-height:1.45;color:#c8d8e4}
+.mail-row.unread strong{color:#5ec8ff}
+.app-window[data-window="ide"]{max-width:min(520px,96vw)!important;width:min(480px,94vw)!important}
+.app-window[data-window="ide"] [data-content]{font-size:11px}
+.app-window[data-window="ide"] pre, .app-window[data-window="ide"] .ide-editor{font-size:10px;max-width:100%;overflow:auto;white-space:pre-wrap}

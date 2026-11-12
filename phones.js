@@ -212,6 +212,9 @@ export function phoneGallery(phone) {
 }
 
 export function connectNetwork(state, regionId) {
+  if (isNetworkBanned(state, regionId)) {
+    return { ok: false, reason: 'Сеть забанена — connect недоступен' };
+  }
   if (!state.phoneWorld) state.phoneWorld = createEmptyPhoneWorld();
   const ban = state.phoneWorld.networkBanUntil?.[regionId];
   if (ban && ban > Date.now()) {

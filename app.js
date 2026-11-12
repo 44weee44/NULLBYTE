@@ -294,7 +294,11 @@ function terminalIconId(id){return isTerminalId(id)?'terminal':id;}
 
 function createTerminalSession(){
   return {
-    lines:[{text:'NULLBYTE NBSHELL 1.0',type:'blue'},{text:'run <plugin-id> · plugins · help',type:'muted'}],
+    lines:[
+      {text:'NULLBYTE OS',type:'green'},
+      {text:'Secure. Minimal. Control.',type:'muted'},
+      {text:'Type help · plugins · run <plugin-id>',type:'muted'}
+    ],
     plugin:null,
     busy:false,
     scrollPin:true
@@ -1247,15 +1251,16 @@ function renderBlackWire(g) {
 }
 
 function terminalPrompt(term) {
+  const nick = (state.game?.player?.nickname || 'user').toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'user';
   if (state.game?.ops?.serverSession && !term?.plugin) {
-    return `shell@${state.game.ops.serverSession.domain}:~$`;
+    return `${nick}@${state.game.ops.serverSession.domain}:~$`;
   }
   if (term?.plugin) {
     const p = getPlugin(term.plugin);
-    const short = (p?.id || term.plugin).replace(/[^a-z0-9]/gi, '').slice(0, 10);
-    return `${short}>`;
+    const short = (p?.id || term.plugin).replace(/[^a-z0-9]/gi, '').slice(0, 12);
+    return `${nick}@nullbyte-os:${short}$`;
   }
-  return 'operator@nullbyte $';
+  return `${nick}@nullbyte-os:~ $`;
 }
 
 function scrollTerminalBottom(termId, force = false) {

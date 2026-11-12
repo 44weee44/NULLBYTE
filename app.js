@@ -14,7 +14,7 @@ import { loadSavedGame, saveGame } from './storage.js';
 const $ = id => document.getElementById(id);
 const svg = {
   profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21c.7-4.1 3.3-6.2 8-6.2s7.3 2.1 8 6.2"/>',
-  terminal:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/>',
+  terminal:'<path d="M12 3c2 2 3 4 3 6 0 1-.3 2-1 3l2 2c1-1 2.5-1 3.5 0s1 2.5 0 3.5l-2 2c.7.8 1 1.8 1 3 0 2-1.5 4-4 5-2.5-1-4-3-4-5 0-1.2.3-2.2 1-3l-2-2c-1 1-2.5 1-3.5 0s-1-2.5 0-3.5l2-2c-.7-.8-1-1.8-1-3 0-2 1-4 3-6z" fill="currentColor" opacity=".9"/><circle cx="10" cy="10" r="1" fill="#0a0c0f"/><circle cx="14" cy="10" r="1" fill="#0a0c0f"/>',
   darkshop:'<path d="M4 8h16l-1.5 13h-13L4 8Z"/><path d="M8 8V6a4 4 0 0 1 8 0v2"/>',
   browser:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
   forge:'<path d="M4 5h16v14H4zM8 9l3 3-3 3m6 0h3"/>',
@@ -292,16 +292,202 @@ function normalizeAllWindows() {
 function isTerminalId(id){return id==='terminal'||String(id).startsWith('term-');}
 function terminalIconId(id){return isTerminalId(id)?'terminal':id;}
 
+
+function hwName(part, level) {
+  const list = (typeof HARDWARE !== 'undefined' && HARDWARE[part]) || [];
+  const row = list.find(x => x.level === (level || 1)) || list[0];
+  return (row && row.name) || ('L' + (level || 1));
+}
+
+function buildNeofetchLines(g) {
+  const nick = ((g.player && g.player.nickname) || 'user').toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'user';
+  const c = g.computer || {};
+  const started = c.uptimeStartedAt || Date.now();
+  const mins = Math.max(1, Math.floor((Date.now() - started) / 60000));
+  const uptime = mins >= 60 ? (Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm') : (mins + 'm');
+  const ram = (HARDWARE.ram || []).find(x => x.level === (c.ram || 1)) || { gb: 4 };
+  let ramUsed = 1;
+  try { ramUsed = (getRamUsage(g).used) || 1; } catch (e) { ramUsed = 1; }
+  const plugs = (c.installedPlugins || []).length;
+  // Side-by-side feel: art lines + info lines (sequential in tty)
+  const art = [
+    "        ..=***=..        ",
+    "     .=*########*=.      ",
+    "   .*##*~'    '~*##*.    ",
+    "  *##*  .o    o.  *##*   ",
+    " *##*    '--'      *##*  ",
+    " *##*.   /\\/\\    .*##*  ",
+    "  *##*~..    ..~*##*    ",
+    "   '*##**=....=*##*'     ",
+    "      ~*########*~       ",
+    "         '****'          ",
+  ];
+  const lines = [];
+  art.forEach((row, i) => {
+    lines.push({ text: row, type: i < 2 ? 'green' : 'muted' });
+  });
+  lines.push({ text: '', type: 'muted' });
+  lines.push({ text: nick + '@nullbyte-os', type: 'green' });
+  lines.push({ text: '---------------------------', type: 'muted' });
+  lines.push({ text: 'OS: NULLBYTE OS ' + (c.os || 1) + '.0 x86_64', type: '' });
+  lines.push({ text: 'Host: Operator Workstation', type: '' });
+  lines.push({ text: 'Kernel: nbkernel ' + (c.os || 1) + '.0.0-nullbyte', type: '' });
+  lines.push({ text: 'Uptime: ' + uptime, type: '' });
+  lines.push({ text: 'Packages: ' + plugs + ' (plugins)', type: '' });
+  lines.push({ text: 'Shell: nbshell 1.0', type: '' });
+  lines.push({ text: 'DE: NULLBYTE Desktop', type: '' });
+  lines.push({ text: 'WM: nb-wm', type: '' });
+  lines.push({ text: 'Terminal: NULLBYTE tty', type: '' });
+  lines.push({ text: 'CPU: ' + hwName('cpu', c.cpu), type: '' });
+  lines.push({ text: 'GPU: ' + hwName('gpu', c.gpu), type: '' });
+  lines.push({ text: 'Memory: ' + ramUsed + ' / ' + (ram.gb || 4) + ' GB', type: '' });
+  lines.push({ text: 'Storage: ' + hwName('storage', c.storage), type: '' });
+  lines.push({ text: 'Level: ' + (g.player && g.player.level || 1) + '  XP ' + (g.player && g.player.xp || 0), type: 'blue' });
+  lines.push({ text: 'Credits: ' + (g.economy && g.economy.credits || 0) + ' CR', type: 'amber' });
+  lines.push({ text: '', type: 'muted' });
+  lines.push({ text: '███ ████ ████ ████ ████', type: 'green' });
+  return lines;
+}
+
+function printNeofetch(termId) {
+  const lines = buildNeofetchLines(state.game);
+  lines.forEach(l => termAdd(termId, l.text, l.type));
+}
+
+async function runTerminalCommand(termId, raw) {
+  const term = getTerm(termId);
+  if (!term) return;
+  const line = String(raw || '').trim();
+  if (!line) return;
+  termAdd(termId, terminalPrompt(term) + ' ' + line, 'prompt');
+  if (term.busy) {
+    termAdd(termId, 'busy…', 'error');
+    return;
+  }
+  const parts = line.split(/\s+/);
+  const cmd = (parts[0] || '').toLowerCase();
+  const arg1 = parts[1] || '';
+  const argRest = parts.slice(1).join(' ');
+
+  // Inside plugin shell
+  if (term.plugin) {
+    if (cmd === 'exit' || cmd === 'quit') {
+      term.plugin = null;
+      clearTerminalView(termId);
+      printNeofetch(termId);
+      termAdd(termId, 'Type help · plugins · run <plugin-id>', 'muted');
+      renderWindow(termId);
+      return;
+    }
+    term.busy = true;
+    try {
+      const result = await runPluginShellCommand(state.game, term.plugin, line, Date.now());
+      if (result && result.lines) {
+        result.lines.forEach(l => termAdd(termId, typeof l === 'string' ? l : (l.text || ''), (l && l.type) || ''));
+      }
+      if (result && result.clear) clearTerminalView(termId);
+      if (result && (result.closePhoneLab || result.clearPhone)) {
+        state._phoneTarget = null;
+        state.phoneUnlocked = null;
+        state.pinInput = '';
+        state.pinError = '';
+      }
+      if (result && result.progressUpdated) scheduleSave();
+      if (result && result.refresh) refreshOpenApps();
+    } catch (e) {
+      termAdd(termId, String(e.message || e), 'error');
+    } finally {
+      term.busy = false;
+      const pr = document.querySelector(`[data-window="${termId}"] .term-inline-prompt`);
+      if (pr) pr.textContent = terminalPrompt(term);
+    }
+    return;
+  }
+
+  // Root shell
+  if (cmd === 'neofetch' || cmd === 'fetch' || cmd === 'sysinfo') {
+    printNeofetch(termId);
+    return;
+  }
+  if (cmd === 'clear' || cmd === 'cls') {
+    clearTerminalView(termId);
+    return;
+  }
+  if (cmd === 'help') {
+    termAdd(termId, 'Commands:', 'green');
+    termAdd(termId, '  neofetch          system info', 'muted');
+    termAdd(termId, '  plugins           installed plugins', 'muted');
+    termAdd(termId, '  run <plugin-id>   enter plugin shell', 'muted');
+    termAdd(termId, '  status            short status', 'muted');
+    termAdd(termId, '  clear             clear screen', 'muted');
+    termAdd(termId, '  help              this list', 'muted');
+    return;
+  }
+  if (cmd === 'plugins' || cmd === 'plugin') {
+    const list = (state.game.computer && state.game.computer.installedPlugins) || [];
+    termAdd(termId, 'Installed plugins:', 'green');
+    list.forEach(id => {
+      const p = getPlugin(id);
+      termAdd(termId, '  ' + id + (p ? ' — ' + p.name : ''), 'muted');
+    });
+    if (!list.length) termAdd(termId, '  (none)', 'muted');
+    return;
+  }
+  if (cmd === 'status') {
+    const g = state.game;
+    termAdd(termId, 'operator: ' + (g.player && g.player.nickname || '—'), '');
+    termAdd(termId, 'level ' + (g.player && g.player.level) + ' · ' + (g.economy && g.economy.credits) + ' CR', '');
+    termAdd(termId, 'net: ' + (g.phoneWorld && g.phoneWorld.network ? g.phoneWorld.network.regionId : 'offline'), '');
+    return;
+  }
+  if (cmd === 'run' || cmd === 'exec') {
+    const pid = arg1;
+    if (!pid) {
+      termAdd(termId, 'usage: run <plugin-id>', 'error');
+      return;
+    }
+    const p = getPlugin(pid) || getInstalledPlugin(state.game, pid);
+    if (!p) {
+      termAdd(termId, 'plugin not found: ' + pid, 'error');
+      return;
+    }
+    if (typeof isPluginLocked === 'function' && isPluginLocked(pid)) {
+      termAdd(termId, 'plugin locked / in development: ' + pid, 'error');
+      return;
+    }
+    if (!getInstalledPlugin(state.game, pid) && p.id) {
+      // allow if installed by id
+      const installed = (state.game.computer.installedPlugins || []).includes(pid);
+      if (!installed) {
+        termAdd(termId, 'not installed: ' + pid, 'error');
+        return;
+      }
+    }
+    term.busy = true;
+    try {
+      term.plugin = pid;
+      await enterPluginWorkspace(termId, pid);
+    } catch (e) {
+      termAdd(termId, String(e.message || e), 'error');
+      term.plugin = null;
+    } finally {
+      term.busy = false;
+      const pr = document.querySelector(`[data-window="${termId}"] .term-inline-prompt`);
+      if (pr) pr.textContent = terminalPrompt(term);
+    }
+    return;
+  }
+  termAdd(termId, 'command not found: ' + cmd + ' (try help)', 'error');
+}
+
 function createTerminalSession(){
+  const lines = buildNeofetchLines(state.game || { player:{}, computer:{}, economy:{} });
+  lines.push({ text: 'Type help · plugins · run <plugin-id> · neofetch', type: 'muted' });
   return {
-    lines:[
-      {text:'NULLBYTE OS',type:'green'},
-      {text:'Secure. Minimal. Control.',type:'muted'},
-      {text:'Type help · plugins · run <plugin-id>',type:'muted'}
-    ],
-    plugin:null,
-    busy:false,
-    scrollPin:true
+    lines,
+    plugin: null,
+    busy: false,
+    scrollPin: true
   };
 }
 
@@ -1282,20 +1468,15 @@ function termAdd(termId, text, type = '') {
   const out = document.querySelector(`[data-window="${termId}"] .terminal-output`);
   if (out) {
     const row = document.createElement('div');
-    if (type) row.className = type;
+    row.className = 'term-line' + (type ? ' ' + type : '');
     row.textContent = text;
-    const form = out.querySelector('.term-inline-form');
-    if (form) out.insertBefore(row, form);
-    else out.appendChild(row);
-    // prune old lines but keep form
-    while (out.children.length > 201) {
-      const first = out.firstChild;
-      if (first && first.classList && first.classList.contains('term-inline-form')) break;
-      if (first) out.removeChild(first);
-    }
-    scrollTerminalBottom(termId, true);
+    out.appendChild(row);
+    const root = out.closest('.term-root') || out;
+    const pin = term.scrollPin !== false;
+    if (pin) out.scrollTop = out.scrollHeight;
   }
 }
+
 
 function pluginBanner(pluginId) {
   const skins = {
@@ -1371,15 +1552,9 @@ function clearTerminalView(termId) {
   if (!term) return;
   term.lines = [];
   const out = document.querySelector(`[data-window="${termId}"] .terminal-output`);
-  if (out) {
-    const form = out.querySelector('.term-inline-form');
-    out.innerHTML = '';
-    if (form) out.appendChild(form);
-    else {
-      // form will come on next full render
-    }
-  }
+  if (out) out.innerHTML = '';
 }
+
 
 
 async function showPluginDashboard(termId, pluginId) {
@@ -1745,345 +1920,22 @@ function renderTerminal(g, termId) {
   const term = getTerm(termId);
   const plug = term.plugin ? getPlugin(term.plugin) : null;
   const prompt = terminalPrompt(term);
-  return `<div class="term-root"><div class="terminal-shell terminal-shell-compact">
-    <div class="terminal-toolbar">
-      <span class="term-prompt-label">${esc(prompt)}</span>
+  const lines = (term.lines || []).map(l =>
+    `<div class="term-line ${esc(l.type || '')}">${esc(l.text)}</div>`
+  ).join('');
+  return `<div class="term-root" data-term="${esc(termId)}">
+  <div class="terminal-shell terminal-shell-compact terminal-grid">
+    <div class="terminal-toolbar" hidden>
       <span class="term-mode">${plug ? esc(plug.id) : 'tty'}</span>
-      <button type="button" class="term-kb-btn" data-action="term-hide-kb" data-term="${esc(termId)}" title="Свернуть клавиатуру">⌨↓</button>
     </div>
-    <div class="terminal-output" data-term-out="${esc(termId)}">
-      ${term.lines.map(l => `<div class="${esc(l.type || '')}">${esc(l.text)}</div>`).join('')}
-      <form class="term-inline-form terminal-form" data-term="${esc(termId)}">
-        <span class="term-inline-prompt">${esc(prompt)}</span>
-        <input class="term-inline-input term-cmd-input" name="command" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go" aria-label="Команда">
-      </form>
-    </div>
-  </div></div>`;
+    <div class="terminal-output" data-term-out="${esc(termId)}">${lines}</div>
+    <form class="term-inline-form terminal-form" data-term="${esc(termId)}">
+      <span class="term-inline-prompt">${esc(prompt)}</span>
+      <input class="term-inline-input term-cmd-input" name="command" type="text" autocomplete="off" spellcheck="false" autocapitalize="off" enterkeyhint="send" aria-label="Команда">
+    </form>
+  </div>
+</div>`;
 }
-
-async function runTerminalCommand(termId, raw) {
-  const term = getTerm(termId);
-  if (!term) return;
-  const cmd = String(raw || '').trim();
-  if (!cmd) return;
-  termAdd(termId, `${terminalPrompt(term)} ${cmd}`, 'prompt');
-  term.scrollPin = true;
-
-  // —— SERVER SHELL (when connected) —— locked while web ops WIP ——
-  if (state.game.ops?.serverSession && !term.plugin) {
-    termAdd(termId, 'Серверная сессия на доработке. exit server.', 'error');
-    if (cmd.toLowerCase().includes('exit')) {
-      const r = runPluginShellCommand(state.game, 'sim-exploit', 'exit server');
-      for (const line of (r.lines||[])) termAdd(termId, line.text, line.type||'');
-    }
-    return;
-  }
-  if (false && state.game.ops?.serverSession && !term.plugin) {
-    const sess = state.game.ops.serverSession;
-    const lower = cmd.toLowerCase();
-    const parts = cmd.split(/\s+/);
-    const one = (parts[0]||'').toLowerCase();
-    if (lower === 'exit server' || lower === 'exit' || lower === 'logout') {
-      const r = runPluginShellCommand(state.game, 'sim-exploit', 'exit server');
-      for (const line of (r.lines||[])) termAdd(termId, line.text, line.type||'');
-      scheduleSave();
-      return;
-    }
-    if (lower === 'help') {
-      termAdd(termId, 'SERVER SHELL — команды узла (не локальный ПК)', 'blue');
-      termAdd(termId, 'whoami | users | services | read <file> | set user <id> <field> <val>', 'muted');
-      termAdd(termId, 'delete user <id> | posts | ban <id> | exit server', 'muted');
-      return;
-    }
-    if (one === 'whoami') {
-      termAdd(termId, `shell@${sess.domain}  site=${sess.siteId}`, 'green');
-      return;
-    }
-    if (one === 'users') {
-      const users = Object.values(state.game.intel?.users||{}).slice(0, 15);
-      if (!users.length) termAdd(termId, 'Нет записей users в intel. server-index → decode.', 'muted');
-      users.forEach(u => termAdd(termId, `${u.id}  ${u.username}  role=${u.role}`));
-      return;
-    }
-    if (one === 'services') {
-      termAdd(termId, 'http 443  up', '');
-      termAdd(termId, 'ssh  22   filtered', '');
-      termAdd(termId, `domain ${sess.domain}`, 'muted');
-      return;
-    }
-    if (one === 'set' && parts[1] === 'user') {
-      const uid = parts[2]; const field = parts[3]; const val = parts.slice(4).join(' ');
-      const u = state.game.intel?.users?.[uid];
-      if (!u) { termAdd(termId, 'user not found', 'error'); return; }
-      if (field === 'username' || field === 'role') { u[field] = val; termAdd(termId, `updated ${uid}.${field}=${val}`, 'green'); }
-      else termAdd(termId, 'fields: username | role', 'error');
-      if (typeof markServerModified === 'function') markServerModified(state.game);
-      else if (state.game.ops?.serverSession) { state.game.ops.serverSession.modified = true; }
-      scheduleSave();
-      return;
-    }
-    if (one === 'delete' && parts[1] === 'user') {
-      const uid = parts[2];
-      if (state.game.intel?.users?.[uid]) { delete state.game.intel.users[uid]; termAdd(termId, `deleted ${uid}`, 'green'); }
-      else termAdd(termId, 'not found', 'error');
-      scheduleSave();
-      return;
-    }
-    if (one === 'posts') {
-      termAdd(termId, 'forum posts (sim): post_01 likes=12 | post_02 likes=3', 'muted');
-      return;
-    }
-    if (one === 'ban') {
-      termAdd(termId, `ban flag set for ${parts[1]||'?'} (sim)`, 'green');
-      scheduleSave();
-      return;
-    }
-    termAdd(termId, `server: неизвестная команда «${cmd}». help`, 'error');
-    return;
-  }
-
-
-  if (term.plugin) {
-    // net-analyzer scan → next line is filename
-    if (term.awaitFilename) {
-      const af = term.awaitFilename;
-      term.awaitFilename = null;
-      const nameRaw = cmd.trim().replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 48) || 'scan';
-      const name = nameRaw.endsWith('.txt') ? nameRaw : nameRaw + '.txt';
-      const content = String(af.content || '');
-      if (!state.game.computer.files) state.game.computer.files = [];
-      const file = {
-        id: 'file_scan_' + Date.now().toString(36),
-        name,
-        type: af.type || 'network-report',
-        content,
-        path: '/scan/',
-        createdAt: Date.now(),
-        size: Math.max(1, Math.ceil(content.length / 1024))
-      };
-      state.game.computer.files.unshift(file);
-      state.game.computer.files = state.game.computer.files.slice(0, 100);
-      termAdd(termId, `Сохранено: ${file.name} (${file.size} KB)`, 'green');
-      scheduleSave();
-      if (state.opened.has('ide')) renderWindow('ide');
-      return;
-    }
-    const lower = cmd.toLowerCase();
-    if (lower === 'exit' || lower === 'quit') {
-      runPluginShellCommand(state.game, term.plugin, 'exit');
-      term.plugin = null;
-      await leavePluginWorkspace(termId);
-      return;
-    }
-    if (lower === 'status' || lower === 'home' || lower === 'dashboard') {
-      clearTerminalView(termId);
-      await showPluginDashboard(termId, term.plugin);
-      return;
-    }
-    if (lower === 'help') {
-      for (const line of (runPluginShellCommand(state.game, term.plugin, 'help').lines || [])) termAdd(termId, line.text, line.type || '');
-      return;
-    }
-    if (lower === 'clear') {
-      term.lines = [];
-      const out = document.querySelector(`[data-window="${termId}"] .terminal-output`);
-      if (out) out.innerHTML = '';
-      return;
-    }
-    // save <name> after analyze / server-index
-    if (lower.startsWith('save ') || lower === 'save') {
-      const name = cmd.slice(4).trim() || term.pendingSave?.defaultName;
-      if (!term.pendingSave) {
-        termAdd(termId, 'Нечего сохранять. Сначала analyze / index.', 'error');
-        return;
-      }
-      if (!name) {
-        termAdd(termId, 'save <имя_файла>', 'error');
-        return;
-      }
-      const meta = {
-        siteId: term.pendingSave.siteId,
-        type: term.pendingSave.type || 'encrypted',
-        encrypted: true,
-        path: '/recon/',
-        ext: '.enc'
-      };
-      const r = savePlayerNamedFile(state.game, name, term.pendingSave.content, meta);
-      if (!r.ok) { termAdd(termId, r.reason, 'error'); return; }
-      term.pendingSave = null;
-      termAdd(termId, `Saved: ${r.file.name}`, 'green');
-      termAdd(termId, 'Файл сохранён в системе.', 'muted');
-      scheduleSave();
-      refreshOpenApps(['files','computer']);
-      return;
-    }
-    if (lower === 'exit server' || lower.startsWith('exit server')) {
-      const result = runPluginShellCommand(state.game, term.plugin || 'sim-exploit', 'exit server');
-      for (const line of result.lines || []) termAdd(termId, line.text, line.type || '');
-      scheduleSave();
-      return;
-    }
-    term.busy = true;
-    try {
-      const shellMeta = PLUGIN_SHELLS[term.plugin];
-      const cmd0 = (cmd.split(/\s+/)[0]||'').toLowerCase();
-      const allowed = shellMeta?.commands || [];
-      if (allowed.length && !allowed.includes(cmd0) && cmd0 !== 'save' && !(cmd0==='exit' && cmd.toLowerCase().includes('server'))) {
-        termAdd(termId, `Нет такой команды: ${cmd0}. Введи help`, 'error');
-      } else {
-        const cmd0h = (cmd.split(/\s+/)[0]||'').toLowerCase();
-        const heavyMap = {
-          'net-link': { cmds:['connect'], ms: 8000 },
-          'net-analyzer': { cmds:['scan','analyze'], ms: 9000 },
-          'phone-access': { cmds:['open'], ms: 3000 }
-        };
-        const hm = heavyMap[term.plugin];
-        if (term.plugin === 'phone-access' && cmd0h === 'attack') {
-          await animateWorkTimed(termId, 'phone-access', 13000, 'attack');
-        } else if (term.plugin === 'phone-access' && cmd0h === 'open') {
-          await animateWorkTimed(termId, 'phone-access', 3000, 'open');
-        } else if (hm && hm.cmds.includes(cmd0h)) {
-          // validate before long anim
-          if (term.plugin === 'net-analyzer' && !state.game.phoneWorld?.network) {
-            termAdd(termId, 'Сначала net-link → connect <region>', 'error');
-          } else if (term.plugin === 'net-link' && cmd0h === 'connect') {
-            const rid = (cmd.split(/\s+/)[1]||'').toLowerCase();
-            const okRegion = ['bayshore','midtown','ironreach','southgate','oakridge','shadowline'].includes(rid);
-            if (!okRegion) termAdd(termId, 'Неизвестный region_id. list', 'error');
-            else await animateWorkTimed(termId, term.plugin, hm.ms, cmd0h);
-          } else if (term.plugin === 'phone-access' && cmd0h === 'open') {
-            const pid = (cmd.split(/\s+/)[1]||'');
-            if (!/^PH-[A-Z0-9]{4}-\d{4}$/i.test(pid)) termAdd(termId, 'Формат: open PH-XXXX-0000', 'error');
-            else await animateWorkTimed(termId, term.plugin, hm.ms, cmd0h);
-          } else {
-            await animateWorkTimed(termId, term.plugin, hm.ms, cmd0h);
-          }
-        }
-        const result = runPluginShellCommand(state.game, term.plugin, cmd);
-        for (const line of result.lines || []) {
-          termAdd(termId, line.text, line.type || '');
-          await sleep(20);
-        }
-        if (result.pendingSave) term.pendingSave = result.pendingSave;
-        if (result.awaitFilename) term.awaitFilename = result.awaitFilename;
-        if (result.revealedPin) {
-          termAdd(termId, '→ PIN: ' + result.revealedPin + '  · открой Phone Lab сам и введи PIN', 'green');
-        }
-        if (term.plugin === 'phone-access' && result.ok && !result.revealedPin) {
-          if (state.opened.has('phone')) renderWindow('phone');
-        }
-        if (result.serverSession) {
-          term.plugin = null;
-          const win = document.querySelector(`[data-window="${termId}"]`);
-          if (win?.querySelector('.terminal-form .term-prompt')) win.querySelector('.terminal-form .term-prompt').textContent = terminalPrompt(term);
-          const tool = win?.querySelector('.terminal-toolbar .term-mode');
-          if (tool) tool.textContent = 'server';
-          termAdd(termId, 'Локальные команды ПК отключены. help — серверные.', 'muted');
-        }
-        if (result.exit) term.plugin = null;
-        if (result.progressUpdated || result.exportFile) scheduleSave();
-        if (result.exportFile) toast('Файл готов → N-Mail', 'success');
-        if (result.progressUpdated) refreshOpenApps(['browser', 'mail', 'blackwire', 'computer', 'files', 'phone', 'intel']);
-        if (result.closePhoneLab || result.clearPhone) {
-          state._phoneTarget = null;
-          state.phoneUnlocked = null;
-          state.pinInput = '';
-          state.pinError = '';
-          state.phoneLabTab = 'home';
-          if (state.opened.has('phone')) renderWindow('phone');
-          termAdd(termId, '→ Phone Lab: сессия закрыта.', 'muted');
-        } else if (result.progressUpdated && state.opened.has('phone')) {
-          renderWindow('phone');
-        }
-        if (result.progressUpdated && state.opened.has('phone') && !(result.closePhoneLab || result.clearPhone)) renderWindow('phone');
-      }
-    } finally {
-      term.busy = false;
-      const input = document.querySelector(`[data-window="${termId}"] .terminal-form input`);
-      if (input) { input.disabled = false; input.focus({ preventScroll: true }); }
-    }
-    return;
-  }
-
-  const lower = cmd.toLowerCase();
-  const parts = cmd.split(/\s+/);
-  const one = (parts[0] || '').toLowerCase();
-  if (lower === 'help') {
-    termAdd(termId, 'help | clear | plugins | run <plugin> | mission list', 'blue');
-    termAdd(termId, 'intel | ops | rm <file> — разведка / журнал / удаление файла', 'blue');
-  } else if (lower === 'clear') {
-    term.lines = [];
-    const out = document.querySelector(`[data-window="${termId}"] .terminal-output`);
-    if (out) out.innerHTML = '';
-  } else if (lower === 'whoami') termAdd(termId, state.game.player.nickname);
-  else if (lower === 'status' || lower === 'info') termAdd(termId, `LEVEL ${state.game.player.level} · XP ${state.game.player.xp}`);
-  else if (one === 'files' || lower === 'files' || lower.startsWith('files ')) {
-    const sub = (parts[1]||'open').toLowerCase();
-    if (sub === 'list') {
-      const files = state.game.computer.files||[];
-      if (!files.length) termAdd(termId, 'Нет файлов.', 'muted');
-      else files.slice(0,40).forEach(f=>termAdd(termId, `${f.name}  [${f.encrypted?'ENC':(f.type||'file')}]`));
-    } else {
-      openApp('files');
-      termAdd(termId, 'Files opened.', 'green');
-    }
-  } else if (lower === 'plugins' || lower === 'pkg list') {
-    termAdd(termId, PLUGINS.map(p => {
-      const locked = typeof isPluginLocked==='function' && isPluginLocked(p.id);
-      const on = !locked && state.game.computer.installedPlugins.includes(p.id);
-      return `${on?'[on]':'[  ]'} ${p.id}${locked?' (dev)':''}${(!locked && PLUGIN_SHELLS[p.id])?' [shell]':''}`;
-    }).join('\n'));
-  } else if (lower.startsWith('plugin info ')) {
-    const q = cmd.slice(12).trim().toLowerCase();
-    const p = PLUGINS.find(x => x.id === q || x.name.toLowerCase() === q);
-    if (!p) termAdd(termId, 'Не найден.', 'error');
-    else {
-      termAdd(termId, `${p.name}\n${p.description}`);
-      if (PLUGIN_SHELLS[p.id]) termAdd(termId, `SHELL: ${PLUGIN_SHELLS[p.id].help}`, 'blue');
-    }
-  } else if (one === 'run' || one === 'use') await enterPlugin(termId, parts.slice(1).join(' ').trim());
-  else if (lower === 'ls') {
-    const files = [...state.game.computer.files, ...state.game.editor.files];
-    termAdd(termId, files.length ? files.map(f => `${f.name} (${f.size} KB)`).join('\n') : 'Пусто.');
-  } else if (lower.startsWith('cat ')) {
-    const f = [...state.game.computer.files, ...state.game.editor.files].find(x => x.name === cmd.slice(4).trim());
-    termAdd(termId, f ? String(f.content) : 'Нет файла.', f ? '' : 'error');
-  } else if (lower === 'mission list') {
-    termAdd(termId, state.game.missions.items.filter(m => ['accepted','submitted','available'].includes(m.status) && isMissionVisible(m)).map(m => `${m.id} | ${m.status} | ${m.title}`).join('\n') || 'Контракты на доработке (сайты/телефоны).');
-  } else if (lower === 'map') termAdd(termId, LOCATIONS.map(l => `${l.name}`).join('\n'));
-  else if (lower === 'intel') {
-    const intel = state.game.intel;
-    if (!intel) termAdd(termId, 'intel empty', 'muted');
-    else {
-      const doms = Object.values(intel.domains || {}).filter(d => d.discovered || d.analyzed);
-      const srvs = Object.values(intel.servers || {}).filter(s => s.discovered);
-      const users = Object.values(intel.users || {}).filter(u => u.discovered);
-      const phones = Object.values(intel.devices || {}).filter(d => d.discovered);
-      termAdd(termId, `INTEL · dom ${doms.length} · srv ${srvs.length} · users ${users.length} · phones ${phones.length} · art ${Object.keys(intel.artifacts||{}).length}`, 'blue');
-      for (const d of doms.slice(0, 8)) termAdd(termId, `  ${d.domain} · ${d.kind} · sec ${d.security}`);
-      for (const s of srvs.slice(0, 6)) termAdd(termId, `  ${s.hostname} · access=${s.accessLevel} · ${s.ip}`, 'muted');
-      for (const u of users.slice(0, 6)) termAdd(termId, `  user ${u.username} (${u.id})`, 'muted');
-      for (const p of phones.slice(0, 4)) termAdd(termId, `  phone ${p.id} · ${p.model} · ${p.network}`, 'muted');
-    }
-  } else if (lower === 'ops' || lower === 'history') {
-    const ops = state.game.intel?.operations || [];
-    if (!ops.length) termAdd(termId, 'Нет операций.', 'muted');
-    else for (const o of ops.slice(0, 12)) termAdd(termId, `${o.pluginId} · ${o.summary || o.targetId} · ${o.status}`);
-  } else if (lower.startsWith('rm ') || lower.startsWith('delete ')) {
-    const name = cmd.split(/\s+/).slice(1).join(' ').trim().split('/').pop();
-    const files = state.game.computer.files;
-    const idx = files.findIndex(f => f.name === name || f.id === name);
-    if (idx < 0) termAdd(termId, 'FILE_NOT_FOUND', 'error');
-    else {
-      const f = files[idx];
-      if (state.game.missions.items.some(m => m.status === 'accepted' && m.resultFileId === f.id))
-        termAdd(termId, 'FILE_IN_USE — активный контракт', 'error');
-      else { files.splice(idx, 1); termAdd(termId, `Deleted: ${f.name}`, 'green'); scheduleSave(); }
-    }
-  }
-  else termAdd(termId, 'unknown — help', 'error');
-}
-
 
 function renderMail(g) {
   const msgs = (g.mail?.messages || []).slice(0, 80);

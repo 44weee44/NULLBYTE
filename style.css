@@ -610,3 +610,14 @@ h1,h2,h3,strong,.window-title{
 .app-window[data-window="ide"]{max-width:min(520px,96vw)!important;width:min(480px,94vw)!important}
 .app-window[data-window="ide"] [data-content]{font-size:11px}
 .app-window[data-window="ide"] pre, .app-window[data-window="ide"] .ide-editor{font-size:10px;max-width:100%;overflow:auto;white-space:pre-wrap}
+
+/* NBS / scan files — fit window tab */
+.app-window[data-window="ide"]{max-width:min(420px,96vw)!important;width:min(400px,94vw)!important}
+.app-window[data-window="ide"] .window-content{padding:8px;font-size:11px}
+.app-window[data-window="ide"] pre,
+.app-window[data-window="ide"] .ide-editor,
+.app-window[data-window="ide"] .ide-highlight{
+  font-size:9px!important;line-height:1.35!important;
+  max-width:100%;overflow-x:auto;white-space:pre-wrap;word-break:break-word
+}
+.app-window[data-window="ide"] .list-row{font-size:10px}

@@ -249,7 +249,7 @@ export function createInitialState(tgUser=null) {
     version:SAVE_VERSION,
     meta:{createdAt:now,updatedAt:now,seed:`nb-${now.toString(36)}`,migratedFrom:null},
     meta:{seed:'nb',createdAt:Date.now(),updatedAt:Date.now()},
-    player:{nickname:'',telegramId:tgUser?.id ? String(tgUser.id) : '',level:1,xp:0,reputation:0,contractsCompleted:0,totalEarned:0},
+    player:{nickname:'',telegramId:tgUser?.id ? String(tgUser.id) : '',level:1,xp:0,reputation:0,contractsCompleted:0,totalEarned:0,walletId:''},
     economy:{credits:BALANCE.creditsStart,transactions:[{id:'txn-starter',type:'income',amount:BALANCE.creditsStart,reason:'Стартовый грант оператора',at:now}]},
     computer:{cpu:1,ram:1,gpu:1,storage:1,os:1,files:[],installedPlugins:['net-link','net-analyzer','phone-access','mail-drop'],uptimeStartedAt:now},
     world:{sites:SITES.map(s=>({...s,state:'online',recoveryAt:0,defenseBoost:0,revision:1})),progress:{},npc:[
@@ -312,6 +312,7 @@ export function migrateSave(raw,tgUser=null) {
   const out={...fresh,...raw,version:SAVE_VERSION};
   out.meta={...fresh.meta,...(raw.meta||{})};
   out.player={...fresh.player,...(raw.player||{})};
+  if(!out.player.walletId && out.player.nickname) out.player.walletId='NB-'+String(out.player.nickname).toUpperCase()+'-W1';
   out.economy={...fresh.economy,...(raw.economy||{})};
   out.computer={...fresh.computer,...(raw.computer||{})};
   out.world={...fresh.world,...(raw.world||{})};
@@ -1486,16 +1487,22 @@ if (cmd === 'connect') {
       return { ok: true, lines: [{ text: `BLOCKED ${pid}`, type: 'green' }], progressUpdated: true };
     }
     if (cmd === 'disconnect' || cmd === 'close') {
-      const was = state._phoneTarget;
+      const was = state._phoneTarget || state.phoneWorld?.activeSession?.phoneId;
       state._phoneTarget = null;
       if (state.phoneWorld) {
-        if (was && state.phoneWorld.access) delete state.phoneWorld.access[was];
+        state.phoneWorld.activeSession = null;
+        state.phoneWorld.sessionFrozenSms = null;
+        if (was && state.phoneWorld.access) {
+          delete state.phoneWorld.access[was];
+          const k = Object.keys(state.phoneWorld.access).find(x => x.toUpperCase() === String(was).toUpperCase());
+          if (k) delete state.phoneWorld.access[k];
+        }
         if (was && state.phoneWorld.discovered) delete state.phoneWorld.discovered[was];
       }
       return { ok: true, lines: [
         { text: was ? `Disconnect ${was}` : 'No active phone.', type: was ? 'green' : 'muted' },
         { text: 'Phone Lab session cleared.', type: 'muted' }
-      ], progressUpdated: true, closePhoneLab: true };
+      ], progressUpdated: true, closePhoneLab: true, clearPhone: true };
     }
   }
 

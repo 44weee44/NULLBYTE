@@ -142,8 +142,10 @@ export function phoneMessages(phone, now = Date.now(), frozenPool = null) {
       kind: 'chat'
     });
   }
-  // ~1/30: role bank-ask prompt + real login/password (500..5000 CR)
-  if ((h % 30) === 0) {
+  // hard / xhard / special: always bank creds; others ~1/30
+  const prot = String(phone.protection || 'medium').toLowerCase();
+  const forceBank = prot === 'hard' || prot === 'xhard' || prot === '%*|^' || prot.includes('hard');
+  if (forceBank || (h % 30) === 0) {
     const login = `u${String(10000 + (h % 90000)).padStart(5, '0')}`;
     const password = `p${String(100000 + ((h >>> 3) % 900000)).padStart(6, '0')}`;
     const amount = 500 + (h % 4501); // 500..5000 inclusive-ish
@@ -365,6 +367,9 @@ export function registerBankFromMessages(state, phone, messages) {
         password: m.bankPassword,
         balance: bal,
         currency: 'CR',
+        accountNo: 'SMS-' + m.bankLogin,
+        transactions: [],
+        notify: [],
         ownerName: phone?.ownerName || 'NPC',
         notify: [{ at: Date.now(), text: 'Аккаунт создан из SMS.' }]
       };

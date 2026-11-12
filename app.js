@@ -10,7 +10,6 @@ import { findPhone, phoneMessages, phoneGallery, phoneCallLog, phoneContacts, lo
 import { bankLogin, bankTransfer, getBankSession, searchNpcs, pluginDocs, touchNpc, NPC_POOL_SIZE } from './npc.js';
 import { extendedPluginDocs } from './operations.js';
 import { loadSavedGame, saveGame } from './storage.js';
-import { runServerDevTest, serverlessAvailable } from './serverless.js';
 
 const $ = id => document.getElementById(id);
 const svg = {
@@ -246,10 +245,6 @@ async function finishBoot() {
   } else {
     scheduleSave();
   }
-  // DEV: test Telegram Serverless (owner). Disable: window.__NB_SERVER_TEST = false before boot.
-  setTimeout(() => {
-    runServerDevTest().catch((e) => console.warn('[NULLBYTE] server test', e));
-  }, 1200);
 }
 function showNicknameModal() {
   const tgId=state.game.player.telegramId;
@@ -259,7 +254,7 @@ function showNicknameModal() {
     const input=$('nicknameInput');const value=input?.value?.trim()||'';
     if(!validNickname(value)){const err=$('nicknameError');if(err){err.textContent='Ник должен содержать 2–12 латинских букв или цифр.';err.hidden=false;}return false;}
     if(state.saveBlocked&&!$('confirmNewSave')?.checked){const err=$('nicknameError');if(err){err.textContent='Подтверди запуск новой игры, чтобы продолжить.';err.hidden=false;}return false;}
-    state.saveBlocked=false;state.game.player.nickname=value;refreshSystem();toast(`Профиль ${value} создан. Сохраняю…`,'success');persist().then(()=>{toast(state.provider==='TELEGRAM CLOUD'?'Сохранено в Telegram Cloud.':'Локальное сохранение.','success');refreshSystem();});
+    state.saveBlocked=false;state.game.player.nickname=value;if(!state.game.player.walletId)state.game.player.walletId='NB-'+value.toUpperCase()+'-'+Math.random().toString(36).slice(2,6).toUpperCase();refreshSystem();toast(`Профиль ${value} создан. Сохраняю…`,'success');persist().then(()=>{toast(state.provider==='TELEGRAM CLOUD'?'Сохранено в Telegram Cloud.':'Локальное сохранение.','success');refreshSystem();});
   }});
   const input=$('nicknameInput');input?.addEventListener('keydown',e=>{if(e.key==='Enter')finishModal();});
 }
@@ -2076,25 +2071,59 @@ function renderMail(g) {
 }
 
 function renderBank(g) {
-  const status=bankStatus(g),risk=bankRisk(g),tx=g.economy.transactions.slice(0,30);
-  const missing=risk.missing.map(id=>getPlugin(id)?.name||id);
-  return `<div class="app-heading"><div><div class="eyebrow">ASTER UNION / GAME BANK</div><h2>Aster Bank</h2><p>Игровые кредиты и история экономики.</p></div><span class="badge amber">FICTIONAL BANK</span></div>
-  <div class="bank-balance"><span>AVAILABLE CREDITS</span><strong>${fmt(g.economy.credits)} CR</strong><small>Виртуальный счёт оператора · никакого реального платежа</small></div>
-  <div class="panel section-gap"><div class="panel-title"><span>КОШЕЛЁК ОПЕРАТОРА</span><small>WALLET</small></div>
-  <div class="kv"><span>Номер</span><b id="playerWallet">${esc(g.player.walletId||'—')}</b></div>
-  <button type="button" class="btn tiny" data-action="copy-text" data-text="${esc(g.player.walletId||'')}">КОПИРОВАТЬ НОМЕР</button>
-  <p class="muted small">NPC переводят на этот номер · только внутриигровые CR</p></div>
-  ${status.locked?`<div class="notice danger section-gap"><b>БАНК ЗАБЛОКИРОВАН</b><br>Осталось <b data-bank-until="${g.bank.lockUntil}">${humanLeft(status.remaining)}</b>. Банковские операции недоступны. Другие приложения и контракты продолжают работать; награды по контрактам во время блокировки конфискуются.</div>`:''}
-  <div class="panel section-gap"><div class="panel-title"><span>ЭНДГЕЙМ / РИСКОВАЯ СИМУЛЯЦИЯ</span><small>LEVEL ${BALANCE.bankUnlockLevel}+</small></div><p class="muted small">Только игровая проверка. Нужны Vault Decoder, Identity Veil и Trace Obfuscator. При виртуальной трассировке все кредиты конфискуются, а банк блокируется на 24 реальных часа.</p><div class="kv"><span>Требуемый уровень</span><b>${BALANCE.bankUnlockLevel}</b></div><div class="kv"><span>Вероятность трассировки</span><b class="text-red">${Math.round(risk.traceChance*100)}%</b></div><div class="kv"><span>Вероятность успеха</span><b class="text-green">${Math.round(risk.successChance*100)}%</b></div><div class="kv"><span>Награда при успехе</span><b class="text-green">+${fmt(BALANCE.bankReward)} CR</b></div>
-  ${missing.length?`<div class="notice warning section-gap">Не установлены: ${missing.map(esc).join(', ')}.</div>`:''}
-  ${g.computer.os<4?`<div class="notice warning section-gap">Для двух финальных плагинов требуется NULLBYTE OS 4.0. Текущая версия: ${g.computer.os}.0.</div>`:''}
-  <div class="btn-row section-gap"><button class="btn danger" data-action="bank-attempt" ${status.locked||!risk.unlocked||missing.length?'disabled':''}>ЗАПУСТИТЬ СИМУЛЯЦИЮ</button></div></div>
-  <div class="panel section-gap"><div class="panel-title"><span>ИСТОРИЯ ТРАНЗАКЦИЙ</span><small>${tx.length} RECORDS</small></div>${tx.length?tx.map(t=>`<div class="transaction-row"><div><strong>${esc(t.reason)}</strong><small>${formatDate(t.at)} · ${formatTime(t.at)}</small></div><b class="${t.type==='income'?'income':t.type==='confiscated'?'confiscated':'expense'}">${t.type==='income'?'+':'−'}${fmt(t.amount)} CR</b></div>`).join(''):'<div class="empty-state"><b>Нет транзакций</b><p>История появится после получения наград и покупок.</p></div>'}</div>`;
+  const status = bankStatus(g);
+  const risk = bankRisk(g);
+  const tx = (g.economy.transactions || []).slice(0, 30);
+  const missing = (risk.missing || []).map(id => getPlugin(id)?.name || id);
+  const sess = getBankSession(g, g.bank?.sessionId);
+  let sessAcc = null;
+  if (sess && g.npcWorld?.bankAccounts) {
+    sessAcc = g.npcWorld.bankAccounts[sess.accountId] || null;
+  }
+  const known = Object.values(g.npcWorld?.bankAccounts || {}).slice(0, 12);
+
+  const loginPanel = sessAcc ? `
+    <div class="panel section-gap">
+      <div class="panel-title"><span>СЕССИЯ NPC-СЧЁТА</span><small>ACTIVE</small></div>
+      <div class="kv"><span>Логин</span><b>${esc(sessAcc.login)}</b></div>
+      <div class="kv"><span>Баланс</span><b class="text-green">${fmt(sessAcc.balance)} CR</b></div>
+      <div class="kv"><span>Владелец</span><b>${esc(sessAcc.ownerName || '—')}</b></div>
+      <label class="field"><span>Номер счёта получателя</span><input id="bankTransferTo" placeholder="NB-… или wallet ID"></label>
+      <label class="field"><span>Сумма CR</span><input id="bankTransferAmt" type="number" min="1" placeholder="100"></label>
+      <div class="btn-row section-gap">
+        <button type="button" class="btn primary" data-action="bank-npc-transfer">Перевести</button>
+        <button type="button" class="btn ghost" data-action="bank-logout">Выйти</button>
+      </div>
+      <p class="muted small">Перевод на кошелёк игрока или другой известный счёт (игровые CR).</p>
+    </div>` : `
+    <div class="panel section-gap">
+      <div class="panel-title"><span>ВХОД В СЧЁТ (SMS / NPC)</span><small>ASTER</small></div>
+      <p class="muted small">Логин и пароль из SMS взломанного телефона (hard+ — всегда в переписке).</p>
+      <label class="field"><span>Логин</span><input id="bankNpcLogin" placeholder="u10000" autocomplete="off"></label>
+      <label class="field"><span>Пароль</span><input id="bankNpcPass" placeholder="p100000" autocomplete="off"></label>
+      <button type="button" class="btn primary section-gap" data-action="bank-npc-login">Войти</button>
+      ${known.length ? `<div class="muted small section-gap">Известные счета в сессии: ${known.length}</div>` : ''}
+    </div>`;
+
+  return `<div class="app-heading"><div><div class="eyebrow">ASTER UNION / GAME BANK</div><h2>Aster Bank</h2><p>Игровые кредиты · вход по данным из SMS</p></div><span class="badge amber">FICTIONAL</span></div>
+  <div class="bank-balance"><span>КОШЕЛЁК ОПЕРАТОРА</span><strong>${fmt(g.economy.credits)} CR</strong>
+  <small>wallet: ${esc(g.player.walletId || '—')}</small></div>
+  <div class="panel section-gap">
+    <div class="kv"><span>Номер кошелька</span><b>${esc(g.player.walletId || '—')}</b></div>
+    <button type="button" class="btn tiny" data-action="copy-text" data-text="${esc(g.player.walletId || '')}">КОПИРОВАТЬ</button>
+  </div>
+  ${status.locked ? `<div class="notice danger section-gap"><b>БАНК ЗАБЛОКИРОВАН</b> · ${humanLeft(status.remaining)}</div>` : ''}
+  ${loginPanel}
+  <div class="panel section-gap"><div class="panel-title"><span>ЭНДГЕЙМ</span></div>
+    <p class="muted small">Рисковая симуляция L${BALANCE.bankUnlockLevel}+. Трассировка конфискует кредиты.</p>
+    <div class="kv"><span>Trace</span><b class="text-red">${Math.round(risk.traceChance * 100)}%</b></div>
+    ${missing.length ? `<div class="notice warning">Нужны плагины: ${missing.map(esc).join(', ')}</div>` : ''}
+    <button type="button" class="btn danger" data-action="bank-attempt" ${status.locked ? 'disabled' : ''}>РИСКОВАЯ ОПЕРАЦИЯ</button>
+  </div>
+  <div class="panel section-gap"><div class="panel-title"><span>ИСТОРИЯ</span></div>
+    ${tx.map(t => `<div class="list-row"><div class="list-main"><strong>${esc(t.note || t.reason || t.type || 'tx')}</strong><small>${new Date(t.at || 0).toLocaleString('ru-RU')}</small></div><span class="${(t.amount||0)>=0?'text-green':'text-red'}">${fmt(t.amount)} CR</span></div>`).join('') || '<div class="muted">пусто</div>'}
+  </div>`;
 }
-
-
-
-
 
 function renderFbi() {
   return `<div class="app-heading"><div><div class="eyebrow">FEDERAL BUREAU OF INVESTIGATION</div><h2>FBI</h2><p>Закрытый операционный канал</p></div><span class="badge">LOCKED</span></div>
@@ -2138,8 +2167,8 @@ function renderPhoneLab(g) {
   if (!phone) {
     return `<div class="nb-phone-shell idle">
       <div class="nb-phone-top">NULLBYTE</div>
-      <div class="nb-phone-idle"><div class="nb-lock-hex"><span class="nb-lock-icon">📱</span></div><p>Нет сессии</p><small>phone-access → open → attack → PIN</small></div>
-      <div class="nb-phone-footer">NET: ${esc(net.regionId)}</div>
+      <div class="nb-phone-idle"><div class="nb-lock-hex"><span class="nb-lock-icon">📱</span></div><p>Устройство не подключено</p><small>phone-access → open &lt;PHONE_ID&gt; → attack</small></div>
+      <div class="nb-phone-footer">NET: ${esc(net.regionId||'—')}</div>
     </div>`;
   }
   let acc = pw.access?.[phone.id] || {};
@@ -2391,7 +2420,40 @@ function runNbsAction(action) {
 function handleAction(action,el) {
   const id=el.dataset.id,app=el.dataset.app,site=el.dataset.site,part=el.dataset.part;
   switch(action){
-    case 'bank-logout':state.bankSessionId=null;toast('Сессия закрыта');refreshOpenApps();break;
+    case 'bank-npc-login':{
+      const login = (document.getElementById('bankNpcLogin')?.value || '').trim();
+      const password = (document.getElementById('bankNpcPass')?.value || '').trim();
+      if (!login || !password) { toast('Введи логин и пароль', 'error'); break; }
+      const r = bankLogin(state.game, login, password);
+      if (!r.ok) { toast(r.reason || 'Ошибка входа', 'error'); break; }
+      if (!state.game.bank) state.game.bank = {};
+      state.game.bank.sessionId = r.sessionId || r.session?.id || r.id;
+      // normalize session id from various return shapes
+      if (r.session && r.session.id) state.game.bank.sessionId = r.session.id;
+      if (r.sessionId) state.game.bank.sessionId = r.sessionId;
+      toast('Вход выполнен', 'success');
+      scheduleSave();
+      renderWindow('bank');
+      break;
+    }
+    case 'bank-npc-transfer':{
+      const to = (document.getElementById('bankTransferTo')?.value || '').trim();
+      const amt = Number(document.getElementById('bankTransferAmt')?.value || 0);
+      const sid = state.game.bank?.sessionId;
+      if (!sid) { toast('Нет сессии', 'error'); break; }
+      if (!to) { toast('Укажи номер счёта', 'error'); break; }
+      const r = bankTransfer(state.game, sid, to, amt);
+      if (!r.ok) { toast(r.reason || 'Ошибка перевода', 'error'); break; }
+      // credit player wallet if transfer to self
+      if (r.creditedToPlayer || r.toPlayer || (state.game.player.walletId && to === state.game.player.walletId)) {
+        /* bankTransfer should handle */
+      }
+      toast(r.message || ('Переведено ' + amt + ' CR'), 'success');
+      scheduleSave();
+      renderWindow('bank');
+      break;
+    }
+    case 'bank-logout-skip':state.bankSessionId=null;toast('Сессия закрыта');refreshOpenApps();break;
     case 'plugin-docs':{
       const docs={...pluginDocs(),...extendedPluginDocs()}[id]||{...pluginDocs(),...extendedPluginDocs()}[el.dataset.plugin];
       const p=docs||{title:id,role:'Нет описания',steps:[],inputs:'—',outputs:'—',next:[]};

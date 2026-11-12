@@ -236,22 +236,41 @@ export function bankTransfer(state, sessionId, toAccountNo, amount) {
       }
     }
   }
-  if (!to) return { ok: false, reason: 'Счёт получателя не найден.' };
-  if (to.id === from.id) return { ok: false, reason: 'Нельзя перевести на тот же счёт.' };
+  // Player operator wallet
+  const playerWallet = String(state.player?.walletId || '').trim();
+  const toPlayer = playerWallet && (toAccountNo === playerWallet || toAccountNo === 'player' || toAccountNo === state.player?.nickname);
 
+  if (!to && !toPlayer) return { ok: false, reason: 'Счёт получателя не найден. Укажи wallet игрока или accountNo.' };
+  if (to && to.id === from.id) return { ok: false, reason: 'Нельзя перевести на тот же счёт.' };
+
+  if (!state.npcWorld.nextTxn) state.npcWorld.nextTxn = 1;
   const txnId = `txn_${state.npcWorld.nextTxn++}`;
   const at = Date.now();
   from.balance -= amount;
+  if (!from.transactions) from.transactions = [];
+
+  if (toPlayer) {
+    if (!state.economy) state.economy = { credits: 0, transactions: [] };
+    state.economy.credits = (Number(state.economy.credits) || 0) + amount;
+    state.economy.transactions = state.economy.transactions || [];
+    state.economy.transactions.unshift({
+      id: txnId, type: 'income', amount, reason: 'Перевод с NPC-счёта ' + (from.login || ''), at, note: 'Aster transfer'
+    });
+    from.transactions.unshift({ id: txnId, type: 'out', amount, to: playerWallet || 'player', at, status: 'ok' });
+    from.transactions = from.transactions.slice(0, 40);
+    return { ok: true, txnId, fromBalance: from.balance, toPlayer: true, message: `+${amount} CR на кошелёк оператора` };
+  }
+
   to.balance += amount;
+  if (!to.transactions) to.transactions = [];
   from.transactions.unshift({ id: txnId, type: 'out', amount, to: to.accountNo, at, status: 'ok' });
   to.transactions.unshift({ id: txnId, type: 'in', amount, from: from.accountNo, at, status: 'ok' });
   from.transactions = from.transactions.slice(0, 40);
   to.transactions = to.transactions.slice(0, 40);
-  // mirror npc balance field
   const npcFrom = state.npcWorld.instances[from.npcId] || {};
   npcFrom.balance = from.balance;
   state.npcWorld.instances[from.npcId] = { ...npcFrom, id: from.npcId };
-  return { ok: true, txnId, fromBalance: from.balance, toBalance: to.balance };
+  return { ok: true, txnId, fromBalance: from.balance, toBalance: to.balance, message: 'Перевод выполнен' };
 }
 
 /** Player receives credits from NPC via phone request */

@@ -10,6 +10,7 @@ import { findPhone, phoneMessages, phoneGallery, phoneCallLog, phoneContacts, lo
 import { bankLogin, bankTransfer, getBankSession, searchNpcs, pluginDocs, touchNpc, NPC_POOL_SIZE } from './npc.js';
 import { extendedPluginDocs } from './operations.js';
 import { loadSavedGame, saveGame } from './storage.js';
+import { runServerDevTest, serverlessAvailable } from './serverless.js';
 
 const $ = id => document.getElementById(id);
 const svg = {
@@ -245,6 +246,10 @@ async function finishBoot() {
   } else {
     scheduleSave();
   }
+  // DEV: test Telegram Serverless (owner). Disable: window.__NB_SERVER_TEST = false before boot.
+  setTimeout(() => {
+    runServerDevTest().catch((e) => console.warn('[NULLBYTE] server test', e));
+  }, 1200);
 }
 function showNicknameModal() {
   const tgId=state.game.player.telegramId;

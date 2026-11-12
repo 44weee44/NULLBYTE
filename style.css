@@ -621,3 +621,20 @@ h1,h2,h3,strong,.window-title{
   max-width:100%;overflow-x:auto;white-space:pre-wrap;word-break:break-word
 }
 .app-window[data-window="ide"] .list-row{font-size:10px}
+
+.mail-app{display:flex;flex-direction:column;gap:10px;min-height:0}
+.mail-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.mail-toolbar-title{font:600 13px var(--mono)}
+.mail-list{display:flex;flex-direction:column;gap:6px}
+.mail-item{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;text-align:left;padding:10px 12px;border:1px solid #2a3f4d;border-radius:8px;background:#0e1820;color:inherit;cursor:pointer}
+.mail-item.unread{border-color:#3d6c85}
+.mail-item-main{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
+.mail-item-main strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mail-item-main small{color:#7a90a0;font-size:10px}
+.mail-compose .field,.mail-read .field{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
+.mail-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.mail-actions .btn{flex:0 0 auto}
+.mail-body{white-space:pre-wrap;line-height:1.45;margin:12px 0;padding:10px;border-radius:6px;background:#0a1218;border:1px solid #243644}
+.mail-attach-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.mail-attach-chip{padding:4px 8px;border-radius:4px;background:#173142;font:10px var(--mono)}
+select#mailAttach,select.field{width:100%;padding:8px 10px;border:1px solid #2d4553;border-radius:6px;background:#0c151d;color:#d5e8f2}

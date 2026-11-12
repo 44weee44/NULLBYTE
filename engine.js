@@ -266,7 +266,7 @@ export function createInitialState(tgUser=null) {
     ops:{keys:[]},
     intel:null,
     processedEvents:[],
-    stats:{operations:0,successfulOperations:0,failedOperations:0,bytesExported:0}
+    stats:{operations:0,successfulOperations:0,failedOperations:0,bytesExported:0,phonesHacked:0,successfulPhoneHacks:0}
   };
   state0.intel = seedIntelFromSites(state0.world.sites, createEmptyIntel());
   state0.npcWorld = createEmptyNpcWorld();

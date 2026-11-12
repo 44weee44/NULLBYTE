@@ -518,6 +518,39 @@ function wireAppContent(id,el) {
   if(isBrowserId(id)){
     const form=el.querySelector('#browserForm')||el.querySelector('.chrome-form');
     form?.addEventListener('submit',e=>{e.preventDefault();e.stopPropagation();const v=form.elements.address?.value||form.querySelector('input')?.value||'';navigateBrowser(v,id);});
+    el.querySelectorAll('form[data-action-form]').forEach(f=>{
+      f.addEventListener('submit',e=>{
+        e.preventDefault();
+        e.stopPropagation();
+        const kind=f.getAttribute('data-action-form');
+        if(kind==='bank-login'){
+          const login=(f.elements.login?.value||'').trim();
+          const password=(f.elements.password?.value||'').trim();
+          if(!login||!password){toast('Введи логин и пароль','error');return;}
+          const r=bankLogin(state.game,login,password);
+          if(!r.ok){toast(r.reason||'Ошибка входа','error');return;}
+          state.bankSessionId=r.sessionId;
+          if(!state.game.bank) state.game.bank={};
+          state.game.bank.sessionId=r.sessionId;
+          toast('Вход в Aster Bank','success');
+          scheduleSave();
+          renderWindow(id);
+          return;
+        }
+        if(kind==='bank-transfer'){
+          const to=(f.elements.to?.value||'').trim();
+          const amount=Number(f.elements.amount?.value||0);
+          const sid=state.bankSessionId||state.game.bank?.sessionId;
+          if(!sid){toast('Нет сессии','error');return;}
+          if(!to){toast('Укажи счёт получателя','error');return;}
+          const r=bankTransfer(state.game,sid,to,amount);
+          if(!r.ok){toast(r.reason||'Ошибка перевода','error');return;}
+          toast(r.message||'Перевод выполнен','success');
+          scheduleSave();
+          renderWindow(id);
+        }
+      });
+    });
   }
   if(id==='ide'){
     const editor=el.querySelector('#nbsEditor');
@@ -551,15 +584,41 @@ function renderApp(id) {
   }
 }
 function renderProfile(g) {
-  const p=g.player,need=currentLevelNeed(),limit=(typeof xpThresholdForLevel==='function'?xpThresholdForLevel(p.level):BALANCE.xpToLevel[p.level])||p.xp,base=(typeof xpThresholdForLevel==='function'?xpThresholdForLevel(Math.max(1,p.level-1)):BALANCE.xpToLevel[Math.max(0,p.level-1)])||0,progress=p.level>=BALANCE.maxLevel?100:Math.max(0,Math.min(100,(p.xp-base)/Math.max(1,limit-base)*100));
-  const ram=HARDWARE.ram.find(x=>x.level===g.computer.ram),cpu=HARDWARE.cpu.find(x=>x.level===g.computer.cpu),storage=getHardwareUsage(g);
-  return `<div class="app-heading"><div><div class="eyebrow">OPERATOR ACCOUNT</div><h2>Профиль</h2><p>Личная карточка и прогресс оператора.</p></div><span class="badge green">ACTIVE</span></div>
-  <section class="profile-hero"><div class="profile-ident"><div class="avatar">${esc(p.nickname.slice(0,2).toUpperCase())}</div><div><h3>${esc(p.nickname)}</h3><small>TELEGRAM ID: ${esc(p.telegramId||'НЕ ДОСТУПЕН')}</small></div></div><div class="profile-rank"><b>LVL ${p.level}</b><small>OPERATOR</small></div></section>
-  <div class="panel section-gap"><div class="panel-title"><span>ОПЫТ И УРОВЕНЬ</span><small>${fmt(p.xp)} XP</small></div><div class="progress"><i style="width:${progress}%"></i></div><div class="kv"><span>До следующего уровня</span><b>${p.level>=BALANCE.maxLevel?'МАКСИМУМ':`${fmt(need)} XP`}</b></div><div class="kv"><span>Репутация</span><b>${fmt(p.reputation)}</b></div></div>
-  <div class="grid-3 section-gap"><div class="stat-box"><span>КОНТРАКТЫ</span><strong>${fmt(p.contractsCompleted)}</strong><small>успешно закрыто</small></div><div class="stat-box"><span>ЗАРАБОТАНО</span><strong>${fmt(p.totalEarned)}</strong><small>всего кредитов</small></div><div class="stat-box"><span>ОПЕРАЦИИ</span><strong>${fmt(g.stats.successfulOperations)}</strong><small>успешные симуляции</small></div></div>
-  <div class="panel section-gap"><div class="panel-title"><span>КОМПЬЮТЕР</span><button class="btn tiny ghost" data-action="open-app" data-app="computer">МОЙ ПК</button></div><div class="hardware-grid"><div class="hardware-card"><span>CPU</span><b>${esc(cpu.name)}</b><small>${cpu.compute} compute units</small></div><div class="hardware-card"><span>RAM</span><b>${esc(ram.name)}</b><small>${ram.gb} GB</small></div><div class="hardware-card"><span>NULLBYTE OS</span><b>VERSION ${g.computer.os}.0</b><small>Уровень ${g.computer.os}</small></div><div class="hardware-card"><span>STORAGE</span><b>${fmt(storage.used/1024)} / ${storage.total/1024} GB</b><small>виртуальный накопитель</small></div></div></div>
-  <div class="notice section-gap">Все цели, устройства и данные в NULLBYTE вымышлены. Telegram ID отображается как справочная информация и не считается подтверждённой сервером авторизацией.</div>`;
+  const p = g.player;
+  const need = currentLevelNeed();
+  const limit = (typeof xpThresholdForLevel==='function'?xpThresholdForLevel(p.level):BALANCE.xpToLevel[p.level])||p.xp;
+  const base = (typeof xpThresholdForLevel==='function'?xpThresholdForLevel(Math.max(1,p.level-1)):BALANCE.xpToLevel[Math.max(0,p.level-1)])||0;
+  const progress = p.level>=(BALANCE.maxLevel||999)?100:Math.max(0,Math.min(100,(p.xp-base)/Math.max(1,limit-base)*100));
+  const st = g.stats || {};
+  const phonesTotal = Number(st.phonesHacked || st.hackedPhones || 0);
+  const phonesOk = Number(st.successfulPhoneHacks || st.successfulOperations || 0);
+  const earned = Number(p.totalEarned || 0);
+  return `<div class="app-heading"><div><div class="eyebrow">OPERATOR</div><h2>Профиль</h2></div><span class="badge green">ACTIVE</span></div>
+  <section class="profile-hero">
+    <div class="profile-ident">
+      <div class="avatar">${esc((p.nickname||'OP').slice(0,2).toUpperCase())}</div>
+      <div><h3>${esc(p.nickname||'operator')}</h3>
+      <small>TG: ${esc(p.telegramId||'—')}</small></div>
+    </div>
+    <div class="profile-rank"><b>LVL ${p.level}</b><small>OPERATOR</small></div>
+  </section>
+  <div class="panel section-gap">
+    <div class="panel-title"><span>ОПЫТ</span><small>${fmt(p.xp)} XP</small></div>
+    <div class="progress"><i style="width:${progress}%"></i></div>
+    <div class="kv"><span>До след. уровня</span><b>${p.level>=(BALANCE.maxLevel||999)?'MAX':fmt(need)+' XP'}</b></div>
+  </div>
+  <div class="grid-2 section-gap">
+    <div class="stat-box"><span>УРОВЕНЬ</span><strong>${p.level}</strong><small>level</small></div>
+    <div class="stat-box"><span>ОПЫТ</span><strong>${fmt(p.xp)}</strong><small>XP</small></div>
+    <div class="stat-box"><span>ЗАРАБОТАНО</span><strong>${fmt(earned)}</strong><small>всего CR</small></div>
+    <div class="stat-box"><span>БАЛАНС</span><strong>${fmt(g.economy?.credits||0)}</strong><small>сейчас</small></div>
+    <div class="stat-box"><span>ТЕЛЕФОНЫ</span><strong>${fmt(phonesTotal)}</strong><small>взломано всего</small></div>
+    <div class="stat-box"><span>УДАЧНЫЕ</span><strong>${fmt(phonesOk)}</strong><small>успешные взломы</small></div>
+  </div>
+  <div class="kv section-gap"><span>Контракты</span><b>${fmt(p.contractsCompleted||0)}</b></div>
+  <div class="kv"><span>Кошелёк</span><b>${esc(p.walletId||'—')}</b></div>`;
 }
+
 function hardwareDetail(part,item) {
   if(!item)return '';
   if(part==='cpu')return `${item.compute} compute units`;
@@ -574,29 +633,30 @@ function renderHardwareUpgrade(g,part,label) {
   return `<div class="list-row hardware-upgrade"><div class="list-main"><strong>${label}: ${esc(current.name)}</strong><small>СЕЙЧАС: ${esc(hardwareDetail(part,current))}</small>${next?`<small>СЛЕДУЮЩИЙ: ${esc(next.name)} · ${esc(hardwareDetail(part,next))} · ${fmt(next.price)} CR</small>`:'<small>Достигнут максимальный уровень.</small>'}</div><div class="list-actions">${next?bankLocked?'<span class="badge red">BANK LOCK</span>':`<button class="btn tiny" data-action="upgrade-hardware" data-part="${part}">УЛУЧШИТЬ</button>`:'<span class="badge green">MAX</span>'}</div></div>`;
 }
 function renderComputer(g) {
-  const plugs = (g.computer.installedPlugins||[]).filter(id => !(typeof isPluginLocked==='function' && isPluginLocked(id)));
+  const hw = (part, lvl) => {
+    const list = HARDWARE[part] || [];
+    const row = list.find(x => x.level === lvl) || list[Math.max(0, (lvl||1)-1)] || {};
+    return row.name || (`L${lvl}`);
+  };
+  const c = g.computer || {};
+  const plugs = (c.installedPlugins||[]).filter(id => !(typeof isPluginLocked==='function' && isPluginLocked(id)));
   const list = plugs.map(id => {
     const p = getPlugin(id);
-    return `<div class="list-row"><div class="list-main"><strong>${esc(p?.name||id)}</strong><small>${esc(p?.category||'plugin')} · v${esc(String(p?.version||'1'))}</small></div><span class="badge green">ON</span></div>`;
+    return `<div class="list-row"><div class="list-main"><strong>${esc(p?.name||id)}</strong><small>${esc(p?.category||'plugin')}</small></div><span class="badge green">ON</span></div>`;
   }).join('') || '<div class="muted">Нет плагинов</div>';
-  const files = (g.computer.files||[]).length;
+  const files = (c.files||[]).length;
   const net = g.phoneWorld?.network;
-  const lvl = g.player?.level ?? 1;
-  const xp = g.player?.xp ?? 0;
-  const nick = g.player?.nickname || 'operator';
-  const hw = g.computer?.hardware || {};
-  return `<div class="app-heading"><div><div class="eyebrow">MY COMPUTER</div><h2>Система</h2><p>Актуальные данные ПК</p></div><span class="badge">OS ${esc(String(g.computer?.os||'1.0'))}</span></div>
+  return `<div class="app-heading"><div><div class="eyebrow">MY COMPUTER</div><h2>Система</h2><p>Комплектующие и плагины</p></div><span class="badge">OS</span></div>
   <div class="panel">
-    <div class="kv"><span>Оператор</span><b>${esc(nick)}</b></div>
-    <div class="kv"><span>Уровень / XP</span><b>L${lvl} · ${xp} XP</b></div>
-    <div class="kv"><span>OS</span><b>NULLBYTE OS ${esc(String(g.computer?.os||'1.0'))}</b></div>
-    <div class="kv"><span>CPU</span><b>${esc(String(hw.cpu||g.computer?.cpu||'NullCore'))}</b></div>
-    <div class="kv"><span>RAM</span><b>${esc(String(hw.ram||g.computer?.ram||'8 GB'))}</b></div>
-    <div class="kv"><span>GPU</span><b>${esc(String(hw.gpu||g.computer?.gpu||'—'))}</b></div>
-    <div class="kv"><span>Storage</span><b>${esc(String(hw.storage||g.computer?.storage||'—'))} · files ${files}</b></div>
-    <div class="kv"><span>Сеть</span><b>${net ? esc(net.regionId)+' / '+esc(net.netKey||'') : 'OFFLINE'}</b></div>
+    <div class="kv"><span>ОС</span><b>${esc(hw('os', c.os||1))}</b></div>
+    <div class="kv"><span>CPU</span><b>${esc(hw('cpu', c.cpu||1))}</b></div>
+    <div class="kv"><span>RAM</span><b>${esc(hw('ram', c.ram||1))}</b></div>
+    <div class="kv"><span>GPU</span><b>${esc(hw('gpu', c.gpu||1))}</b></div>
+    <div class="kv"><span>Storage</span><b>${esc(hw('storage', c.storage||1))}</b></div>
+    <div class="kv"><span>Файлы</span><b>${files}</b></div>
+    <div class="kv"><span>Сеть</span><b>${net ? esc(net.regionId) : 'OFFLINE'}</b></div>
   </div>
-  <h3 class="section-gap">Установленные плагины</h3>
+  <h3 class="section-gap">Плагины</h3>
   <div class="list">${list}</div>`;
 }
 
@@ -893,7 +953,8 @@ function renderSitePage(g, site, page, progress) {
   }
 
   if (site.kind === 'bank') {
-    const sess = state.bankSessionId ? getBankSession(state.game, state.bankSessionId) : null;
+    const sessId = state.bankSessionId || state.game.bank?.sessionId;
+    const sess = sessId ? getBankSession(state.game, sessId) : null;
     const acc = sess ? state.game.npcWorld?.bankAccounts?.[sess.accountId] : null;
     if (p === 'login' || (!acc && p === 'cabinet')) {
       return `<div class="site-page site-bank"><header class="site-hero bank"><div class="site-brand">ASTER <span>UNION</span></div>${nav([['home','Обзор'],['login','Вход'],['security','Безопасность']])}</header>
@@ -908,7 +969,7 @@ function renderSitePage(g, site, page, progress) {
       return `<div class="site-page site-bank"><header class="site-hero bank"><div class="site-brand">ASTER <span>UNION</span></div>${nav([['home','Обзор'],['cabinet','Кабинет'],['transfer','Перевод']])}</header>
         <div class="site-body"><h2>Кабинет</h2>
         <div class="bank-dash"><div class="bank-tile"><span>Счёт</span><strong>${esc(acc.accountNo)}</strong></div><div class="bank-tile"><span>Баланс</span><strong>${fmt(acc.balance)} CR</strong></div><div class="bank-tile"><span>Сессия</span><strong>ACTIVE</strong></div></div>
-        ${p==='transfer'?`<form class="bank-login-form" data-action-form="bank-transfer"><label>Счёт получателя<input class="field" name="to" placeholder="AST-########"></label><label>Сумма<input class="field" name="amount" type="number" min="1"></label><button class="btn primary" type="submit">ПЕРЕВЕСТИ</button></form>`:''}
+        ${p==='transfer'?`<form class="bank-login-form" data-action-form="bank-transfer"><label>Счёт получателя<input class="field" name="to" placeholder="NB-… wallet или AST-…"></label><label>Сумма<input class="field" name="amount" type="number" min="1"></label><button class="btn primary" type="submit">ПЕРЕВЕСТИ</button></form>`:''}
         <h3>История</h3>
         ${tx.map(t=>`<div class="forum-row"><strong>${t.type} ${t.amount}</strong><small>${t.to||t.from||''} · ${formatTime(t.at)}</small></div>`).join('')}
         <div class="btn-row section-gap"><button class="btn tiny" data-action="bank-logout">ВЫЙТИ</button></div>
@@ -2021,53 +2082,87 @@ async function runTerminalCommand(termId, raw) {
 
 function renderMail(g) {
   const msgs = (g.mail?.messages || []).slice(0, 80);
-  const view = state.mailView; // id of open letter
-  const compose = state.mailCompose; // {to,subject,body,attachmentId} or null
+  const view = state.mailView;
+  const compose = state.mailCompose;
+  const files = (g.computer?.files || []);
+
   if (compose) {
-    return `<div class="app-heading"><div><div class="eyebrow">N-MAIL</div><h2>Новое письмо</h2></div>
-      <button type="button" class="btn tiny ghost" data-action="mail-compose-cancel">← Назад</button></div>
-      <div class="panel">
-        <label class="field"><span>Кому (Имя Фамилия NPC)</span><input id="mailTo" value="${esc(compose.to||'')}" placeholder="Ivan Petrov"></label>
-        <label class="field"><span>Тема</span><input id="mailSubject" value="${esc(compose.subject||'')}" placeholder="Тема"></label>
-        <label class="field"><span>Текст</span><textarea id="mailBody" rows="5" placeholder="Сообщение…">${esc(compose.body||'')}</textarea></label>
-        <label class="field"><span>Вложение (id файла с ПК, опционально)</span><input id="mailAttach" value="${esc(compose.attachmentId||'')}" placeholder="file_scan_…"></label>
-        <div class="btn-row section-gap">
+    const fileOpts = files.map(f =>
+      `<option value="${esc(f.id)}" ${compose.attachmentId===f.id?'selected':''}>${esc(f.name)} (${esc(f.type||'file')})</option>`
+    ).join('');
+    return `<div class="mail-app">
+      <div class="mail-toolbar">
+        <button type="button" class="btn tiny ghost" data-action="mail-compose-cancel">← Назад</button>
+        <strong class="mail-toolbar-title">Новое письмо</strong>
+      </div>
+      <div class="mail-compose panel">
+        <label class="field"><span>Кому (Имя Фамилия)</span>
+          <input id="mailTo" value="${esc(compose.to||'')}" placeholder="Ivan Petrov" autocomplete="off">
+        </label>
+        <label class="field"><span>Тема</span>
+          <input id="mailSubject" value="${esc(compose.subject||'')}" placeholder="Тема">
+        </label>
+        <label class="field"><span>Текст</span>
+          <textarea id="mailBody" rows="6" placeholder="Сообщение…">${esc(compose.body||'')}</textarea>
+        </label>
+        <label class="field"><span>Вложение</span>
+          <select id="mailAttach" class="field">
+            <option value="">— без файла —</option>
+            ${fileOpts}
+          </select>
+        </label>
+        <div class="mail-actions">
           <button type="button" class="btn primary" data-action="mail-send">Отправить</button>
           <button type="button" class="btn ghost" data-action="mail-compose-cancel">Отмена</button>
         </div>
-        <div class="muted small" id="mailSendStatus"></div>
-      </div>`;
+      </div>
+    </div>`;
   }
+
   if (view) {
-    const m = msgs.find(x => x.id === view);
-    if (!m) { state.mailView = null; }
+    const mmsg = msgs.find(x => x.id === view);
+    if (!mmsg) { state.mailView = null; }
     else {
-      const atts = (m.attachments||[]).map(aid => {
-        const f = (g.computer?.files||[]).find(x => x.id === aid);
-        return f ? `<div class="list-row"><span>${esc(f.name)}</span><small>${esc(f.type||'')}</small></div>` : `<div class="muted">${esc(aid)}</div>`;
-      }).join('') || '<div class="muted">нет</div>';
-      return `<div class="app-heading"><div><div class="eyebrow">N-MAIL</div><h2>${esc(m.subject||'Письмо')}</h2></div>
-        <button type="button" class="btn tiny ghost" data-action="mail-close-view">← Входящие</button></div>
-        <div class="panel mail-letter">
-          <div class="kv"><span>От</span><b>${esc(m.from)}</b></div>
-          <div class="kv"><span>Кому</span><b>${esc(m.to)}</b></div>
-          <div class="kv"><span>Тема</span><b>${esc(m.subject)}</b></div>
-          <div class="mail-body section-gap">${esc(m.body||'')}</div>
-          <div class="section-gap"><strong>Вложения</strong>${atts}</div>
-          <div class="btn-row section-gap">
-            <button type="button" class="btn" data-action="mail-reply" data-id="${esc(m.id)}">Ответить</button>
-            <button type="button" class="btn danger" data-action="mail-delete" data-id="${esc(m.id)}">Удалить письмо</button>
+      const atts = (mmsg.attachments||[]).map(aid => {
+        const f = files.find(x => x.id === aid);
+        return f
+          ? `<div class="mail-attach-chip">${esc(f.name)}</div>`
+          : `<div class="mail-attach-chip muted">${esc(aid)}</div>`;
+      }).join('') || '<span class="muted small">нет вложений</span>';
+      return `<div class="mail-app">
+        <div class="mail-toolbar">
+          <button type="button" class="btn tiny ghost" data-action="mail-close-view">← Входящие</button>
+        </div>
+        <div class="mail-read panel">
+          <div class="kv"><span>От</span><b>${esc(mmsg.from)}</b></div>
+          <div class="kv"><span>Кому</span><b>${esc(mmsg.to)}</b></div>
+          <div class="kv"><span>Тема</span><b>${esc(mmsg.subject)}</b></div>
+          <div class="mail-body">${esc(mmsg.body||'')}</div>
+          <div class="section-gap"><strong>Вложения</strong><div class="mail-attach-list">${atts}</div></div>
+          <div class="mail-actions">
+            <button type="button" class="btn" data-action="mail-reply" data-id="${esc(mmsg.id)}">Ответить</button>
+            <button type="button" class="btn danger" data-action="mail-delete" data-id="${esc(mmsg.id)}">Удалить</button>
           </div>
-        </div>`;
+        </div>
+      </div>`;
     }
   }
-  const list = msgs.map(m => `<button type="button" class="list-row mail-row ${m.status==='unread'?'unread':''}" data-action="mail-open" data-id="${esc(m.id)}">
-    <div class="list-main"><strong>${esc(m.subject||'(без темы)')}</strong><small>${esc(m.from)} · ${new Date(m.at||0).toLocaleString('ru-RU')}</small></div>
-    <span class="badge ${m.direction==='in'?'blue':'gray'}">${m.direction==='in'?'IN':'OUT'}</span>
-  </button>`).join('') || '<div class="empty-state"><b>Пусто</b><p>Писем нет</p></div>';
-  return `<div class="app-heading"><div><div class="eyebrow">N-MAIL</div><h2>Почта</h2></div>
-    <button type="button" class="btn primary tiny" data-action="mail-compose">Отправить письмо</button></div>
-    <div class="list section-gap">${list}</div>`;
+
+  const list = msgs.map(m => `<button type="button" class="mail-item ${m.status==='unread'?'unread':''}" data-action="mail-open" data-id="${esc(m.id)}">
+      <div class="mail-item-main">
+        <strong>${esc(m.subject||'(без темы)')}</strong>
+        <small>${esc(m.from)} · ${new Date(m.at||0).toLocaleString('ru-RU')}</small>
+      </div>
+      <span class="badge ${m.direction==='in'?'blue':'gray'}">${m.direction==='in'?'IN':'OUT'}</span>
+    </button>`).join('') || '<div class="empty-state"><b>Пусто</b><p>Писем нет</p></div>';
+
+  return `<div class="mail-app">
+    <div class="mail-toolbar">
+      <div><div class="eyebrow">N-MAIL</div><strong>Почта</strong></div>
+      <button type="button" class="btn primary tiny" data-action="mail-compose">Написать</button>
+    </div>
+    <div class="mail-list">${list}</div>
+  </div>`;
 }
 
 function renderBank(g) {
@@ -2075,53 +2170,22 @@ function renderBank(g) {
   const risk = bankRisk(g);
   const tx = (g.economy.transactions || []).slice(0, 30);
   const missing = (risk.missing || []).map(id => getPlugin(id)?.name || id);
-  const sess = getBankSession(g, g.bank?.sessionId);
-  let sessAcc = null;
-  if (sess && g.npcWorld?.bankAccounts) {
-    sessAcc = g.npcWorld.bankAccounts[sess.accountId] || null;
-  }
-  const known = Object.values(g.npcWorld?.bankAccounts || {}).slice(0, 12);
-
-  const loginPanel = sessAcc ? `
-    <div class="panel section-gap">
-      <div class="panel-title"><span>СЕССИЯ NPC-СЧЁТА</span><small>ACTIVE</small></div>
-      <div class="kv"><span>Логин</span><b>${esc(sessAcc.login)}</b></div>
-      <div class="kv"><span>Баланс</span><b class="text-green">${fmt(sessAcc.balance)} CR</b></div>
-      <div class="kv"><span>Владелец</span><b>${esc(sessAcc.ownerName || '—')}</b></div>
-      <label class="field"><span>Номер счёта получателя</span><input id="bankTransferTo" placeholder="NB-… или wallet ID"></label>
-      <label class="field"><span>Сумма CR</span><input id="bankTransferAmt" type="number" min="1" placeholder="100"></label>
-      <div class="btn-row section-gap">
-        <button type="button" class="btn primary" data-action="bank-npc-transfer">Перевести</button>
-        <button type="button" class="btn ghost" data-action="bank-logout">Выйти</button>
-      </div>
-      <p class="muted small">Перевод на кошелёк игрока или другой известный счёт (игровые CR).</p>
-    </div>` : `
-    <div class="panel section-gap">
-      <div class="panel-title"><span>ВХОД В СЧЁТ (SMS / NPC)</span><small>ASTER</small></div>
-      <p class="muted small">Логин и пароль из SMS взломанного телефона (hard+ — всегда в переписке).</p>
-      <label class="field"><span>Логин</span><input id="bankNpcLogin" placeholder="u10000" autocomplete="off"></label>
-      <label class="field"><span>Пароль</span><input id="bankNpcPass" placeholder="p100000" autocomplete="off"></label>
-      <button type="button" class="btn primary section-gap" data-action="bank-npc-login">Войти</button>
-      ${known.length ? `<div class="muted small section-gap">Известные счета в сессии: ${known.length}</div>` : ''}
-    </div>`;
-
-  return `<div class="app-heading"><div><div class="eyebrow">ASTER UNION / GAME BANK</div><h2>Aster Bank</h2><p>Игровые кредиты · вход по данным из SMS</p></div><span class="badge amber">FICTIONAL</span></div>
-  <div class="bank-balance"><span>КОШЕЛЁК ОПЕРАТОРА</span><strong>${fmt(g.economy.credits)} CR</strong>
-  <small>wallet: ${esc(g.player.walletId || '—')}</small></div>
+  return `<div class="app-heading"><div><div class="eyebrow">ASTER UNION</div><h2>Кошелёк оператора</h2><p>Личные CR. Вход в чужие счета — на сайте asterbank.null</p></div><span class="badge">WALLET</span></div>
+  <div class="bank-balance"><span>AVAILABLE CREDITS</span><strong>${fmt(g.economy.credits)} CR</strong>
+  <small>wallet ${esc(g.player.walletId||'—')}</small></div>
   <div class="panel section-gap">
-    <div class="kv"><span>Номер кошелька</span><b>${esc(g.player.walletId || '—')}</b></div>
-    <button type="button" class="btn tiny" data-action="copy-text" data-text="${esc(g.player.walletId || '')}">КОПИРОВАТЬ</button>
+    <div class="kv"><span>Номер кошелька</span><b>${esc(g.player.walletId||'—')}</b></div>
+    <button type="button" class="btn tiny" data-action="copy-text" data-text="${esc(g.player.walletId||'')}">КОПИРОВАТЬ</button>
+    <p class="muted small section-gap">Чтобы войти в счёт NPC: Browser → asterbank.null → Вход (логин/пароль из SMS).</p>
   </div>
-  ${status.locked ? `<div class="notice danger section-gap"><b>БАНК ЗАБЛОКИРОВАН</b> · ${humanLeft(status.remaining)}</div>` : ''}
-  ${loginPanel}
+  ${status.locked?`<div class="notice danger section-gap"><b>БЛОКИРОВКА</b> ${humanLeft(status.remaining)}</div>`:''}
   <div class="panel section-gap"><div class="panel-title"><span>ЭНДГЕЙМ</span></div>
-    <p class="muted small">Рисковая симуляция L${BALANCE.bankUnlockLevel}+. Трассировка конфискует кредиты.</p>
-    <div class="kv"><span>Trace</span><b class="text-red">${Math.round(risk.traceChance * 100)}%</b></div>
-    ${missing.length ? `<div class="notice warning">Нужны плагины: ${missing.map(esc).join(', ')}</div>` : ''}
-    <button type="button" class="btn danger" data-action="bank-attempt" ${status.locked ? 'disabled' : ''}>РИСКОВАЯ ОПЕРАЦИЯ</button>
+    <div class="kv"><span>Trace risk</span><b class="text-red">${Math.round(risk.traceChance*100)}%</b></div>
+    ${missing.length?`<div class="notice warning">${missing.map(esc).join(', ')}</div>`:''}
+    <button type="button" class="btn danger" data-action="bank-attempt" ${status.locked?'disabled':''}>РИСКОВАЯ ОПЕРАЦИЯ</button>
   </div>
   <div class="panel section-gap"><div class="panel-title"><span>ИСТОРИЯ</span></div>
-    ${tx.map(t => `<div class="list-row"><div class="list-main"><strong>${esc(t.note || t.reason || t.type || 'tx')}</strong><small>${new Date(t.at || 0).toLocaleString('ru-RU')}</small></div><span class="${(t.amount||0)>=0?'text-green':'text-red'}">${fmt(t.amount)} CR</span></div>`).join('') || '<div class="muted">пусто</div>'}
+    ${tx.map(t=>`<div class="list-row"><div class="list-main"><strong>${esc(t.note||t.reason||t.type||'tx')}</strong><small>${new Date(t.at||0).toLocaleString('ru-RU')}</small></div><span>${fmt(t.amount)} CR</span></div>`).join('')||'<div class="muted">пусто</div>'}
   </div>`;
 }
 

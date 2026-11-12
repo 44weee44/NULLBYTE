@@ -333,6 +333,10 @@ export function unlockWithPin(state, phoneId, pin) {
       registerBankFromMessages(state, phone, state.phoneWorld.sessionFrozenSms);
     } catch (e) {}
   }
+  if (!state.stats) state.stats = { operations:0, successfulOperations:0, failedOperations:0, bytesExported:0, phonesHacked:0, successfulPhoneHacks:0 };
+  state.stats.phonesHacked = (state.stats.phonesHacked || 0) + 1;
+  state.stats.successfulPhoneHacks = (state.stats.successfulPhoneHacks || 0) + 1;
+  state.stats.successfulOperations = (state.stats.successfulOperations || 0) + 1;
   return { ok: true, phoneId: key, pin: usedPin };
 }
 

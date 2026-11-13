@@ -2092,17 +2092,43 @@ export function queueMailDropOpens(state, now = Date.now()) {
 
 /** Player N-Mail send. Validates NPC name against phone registry. */
 export function sendPlayerMail(state, { to, subject, body, attachmentId }) {
-  const name = String(to || '').trim();
+  const name = String(to || '').trim().replace(/\s+/g, ' ');
   if (!name) return { ok: false, reason: 'Укажи имя' };
+  const nameL = name.toLowerCase();
 
   let found = null;
+  const all = [];
   for (const r of PHONE_REGIONS) {
-    for (const p of listAllRegionPhones(r.id)) {
-      if (String(p.ownerName || '').toLowerCase() === name.toLowerCase()) { found = p; break; }
-    }
-    if (found) break;
+    for (const ph of listAllRegionPhones(r.id)) all.push(ph);
   }
-  if (!found) return { ok: false, reason: 'NPC не найден в базах сети' };
+  // 1) exact ownerName
+  found = all.find(ph => String(ph.ownerName || '').toLowerCase() === nameL) || null;
+  // 2) "Name Surname" partial / includes
+  if (!found) {
+    found = all.find(ph => {
+      const on = String(ph.ownerName || '').toLowerCase();
+      return on.includes(nameL) || nameL.includes(on);
+    }) || null;
+  }
+  // 3) first + last tokens match any order
+  if (!found) {
+    const tokens = nameL.split(' ').filter(Boolean);
+    if (tokens.length >= 1) {
+      found = all.find(ph => {
+        const on = String(ph.ownerName || '').toLowerCase();
+        return tokens.every(t => on.includes(t));
+      }) || null;
+    }
+  }
+  // 4) from currently connected region visible list
+  if (!found && state.phoneWorld?.network?.regionId) {
+    const vis = listRegionPhones(state.phoneWorld.network.regionId, state.meta?.seed || 'nb') || [];
+    found = vis.find(ph => {
+      const on = String(ph.ownerName || '').toLowerCase();
+      return on === nameL || on.includes(nameL) || nameL.includes(on);
+    }) || null;
+  }
+  if (!found) return { ok: false, reason: 'NPC не найден. Укажи точное «Имя Фамилия» из сети/скана.' };
 
   if (!state.mail) state.mail = { messages: [], pendingDelivery: [] };
   if (!state.mail.messages) state.mail.messages = [];

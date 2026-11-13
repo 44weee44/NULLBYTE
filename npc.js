@@ -172,8 +172,9 @@ export function bankLogin(state, login, password) {
       }
     }
   }
-  if (!found) return { ok: false, reason: 'Неверный логин или пароль.' };
+  if (!found) return { ok: false, reason: 'Неверный логин или пароль. Проверь SMS с hard-телефона или что телефон был разблокирован.' };
 
+  if (!state.npcWorld.bankSessions) state.npcWorld.bankSessions = {};
   const sessionId = `bs_${found.id}_${Date.now().toString(36)}`;
   const expiresAt = Date.now() + 20 * 60 * 1000; // hidden 20 min
   state.npcWorld.bankSessions[sessionId] = {

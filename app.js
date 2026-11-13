@@ -2,11 +2,11 @@ import {
   BALANCE, PLUGINS, HARDWARE, SITES, LOCATIONS, createInitialState, validNickname, escapeText as esc,
   getInstalledPlugin, getPlugin, getHardwareUsage, getRamUsage, purchasePlugin, buyHardware, uninstallPlugin,
   acceptMission, cancelMission, missionBoardTimer, rotateMissionBoard, getSite, getSiteProgress, operateSite, exportMissionResult, submitMission,
-  processTimedEvents, bankStatus, bankRisk, attemptBankSimulation, saveEditorFile, validateNbs, runNbs,
+  processTimedEvents, bankStatus, bankRisk, attemptBankSimulation, saveEditorFile, validateNbs, runNbs, grantXp,
   recordHistory, addBookmark, idempotencyKey,
   PLUGIN_SHELLS, PLUGIN_ANIM, runPluginShellCommand, pluginShellBootLines, resolveSiteRef, savePlayerNamedFile, findFileByName, markServerModified,
   isPluginLocked, isMissionVisible, xpThresholdForLevel, bindPhoneMissionTarget, ensureTrading, TRADING_TICKERS, tradingSparkline, listRegionPhones, scheduleMailDrop, processMailDrops, sendPlayerMail, processMailDeliveries } from './engine.js';
-import { findPhone, phoneMessages, phoneGallery, phoneCallLog, phoneContacts, lockPhone, unlockWithPin, isNetworkBanned, PROTECTION_RULES, registerBankFromMessages, PHONE_REGIONS, buildNetworkReport } from './phones.js';
+import { findPhone, phoneMessages, phoneGallery, phoneCallLog, phoneContacts, phoneFiles, lockPhone, unlockWithPin, isNetworkBanned, PROTECTION_RULES, registerBankFromMessages, PHONE_REGIONS, buildNetworkReport } from './phones.js';
 import { bankLogin, bankTransfer, getBankSession, searchNpcs, pluginDocs, touchNpc, NPC_POOL_SIZE } from './npc.js';
 import { extendedPluginDocs } from './operations.js';
 import { loadSavedGame, saveGame } from './storage.js';
@@ -528,8 +528,9 @@ function wireAppContent(id,el) {
         e.stopPropagation();
         const kind=f.getAttribute('data-action-form');
         if(kind==='bank-login'){
-          const login=(f.elements.login?.value||'').trim();
-          const password=(f.elements.password?.value||'').trim();
+          const fd=new FormData(f);
+          const login=String(fd.get('login')||f.elements.login?.value||'').trim();
+          const password=String(fd.get('password')||f.elements.password?.value||'').trim();
           if(!login||!password){toast('Введи логин и пароль','error');return;}
           const r=bankLogin(state.game,login,password);
           if(!r.ok){toast(r.reason||'Ошибка входа','error');return;}
@@ -538,6 +539,15 @@ function wireAppContent(id,el) {
           state.game.bank.sessionId=r.sessionId;
           toast('Вход в Aster Bank','success');
           scheduleSave();
+          // open cabinet page on current browser tab
+          try {
+            const sess = state.browserSessions?.get(id);
+            if (sess && sess.tabs && sess.tabs[sess.active] != null) {
+              const tab = sess.tabs[sess.active];
+              tab.page = 'cabinet';
+              tab.title = 'Aster Bank · Кабинет';
+            }
+          } catch (e) {}
           renderWindow(id);
           return;
         }
@@ -960,13 +970,20 @@ function renderSitePage(g, site, page, progress) {
     const sessId = state.bankSessionId || state.game.bank?.sessionId;
     const sess = sessId ? getBankSession(state.game, sessId) : null;
     const acc = sess ? state.game.npcWorld?.bankAccounts?.[sess.accountId] : null;
-    if (p === 'login' || (!acc && p === 'cabinet')) {
+    // If already logged in, never stick on login form
+    if (acc && (p === 'login' || p === 'home')) {
+      p = 'cabinet';
+    }
+    if (!acc && (p === 'login' || p === 'cabinet' || p === 'transfer')) {
       return `<div class="site-page site-bank"><header class="site-hero bank"><div class="site-brand">ASTER <span>UNION</span></div>${nav([['home','Обзор'],['login','Вход'],['security','Безопасность']])}</header>
         <div class="site-body"><h2>Вход в кабинет</h2>
-        <p class="muted">Только игровые счета NPC. Данные можно найти через телефон / разведку.</p>
-        <form class="bank-login-form" data-action-form="bank-login"><label>Логин<input class="field" name="login" autocomplete="off"></label><label>Пароль<input class="field" name="password" type="password" autocomplete="off"></label>
-        <button class="btn primary" type="submit">ВОЙТИ</button></form>
-        <p class="site-note">Сессия скрыто ограничена (~20 мин).</p></div></div>`;
+        <p class="muted">Логин и пароль из SMS взломанного телефона (hard+ — всегда в переписке).</p>
+        <form class="bank-login-form" data-action-form="bank-login">
+          <label class="field"><span>Логин</span><input class="field" name="login" autocomplete="off" required></label>
+          <label class="field"><span>Пароль</span><input class="field" name="password" type="password" autocomplete="off" required></label>
+          <button class="btn primary" type="submit">ВОЙТИ</button>
+        </form>
+        <p class="site-note">Сессия ~20 мин · только игровые CR</p></div></div>`;
     }
     if (acc) {
       const tx = (acc.transactions||[]).slice(0,8);
@@ -2279,10 +2296,13 @@ function renderPhoneLab(g) {
   try { calls = phoneCallLog(phone, now) || []; } catch (e) {}
   try { contacts = phoneContacts(phone, now) || []; } catch (e) {}
   const tab = state.phoneLabTab || 'home';
+  let files = [];
+  try { files = phoneFiles(phone, now) || []; } catch (e) { files = []; }
   const tabs = `<div class="nb-tabs">
       <button type="button" class="nb-tab ${tab==='msgs'||tab==='home'?'on':''}" data-action="phone-lab-tab" data-tab="msgs">MESSAGES</button>
       <button type="button" class="nb-tab ${tab==='calls'?'on':''}" data-action="phone-lab-tab" data-tab="calls">CALLS</button>
       <button type="button" class="nb-tab ${tab==='gallery'?'on':''}" data-action="phone-lab-tab" data-tab="gallery">GALLERY</button>
+      <button type="button" class="nb-tab ${tab==='files'?'on':''}" data-action="phone-lab-tab" data-tab="files">FILES</button>
     </div>`;
   let body = '';
   if (tab === 'msgs') {
@@ -2296,11 +2316,18 @@ function renderPhoneLab(g) {
   } else if (tab === 'gallery') {
     body = `<div class="nb-gal">${gal.map(x=>`<div class="nb-thumb"><span>${esc(x.title||'')}</span></div>`).join('')}</div>
       <button type="button" class="nb-action" data-action="phone-lab-export" data-kind="gallery" data-id="${esc(phone.id)}">SAVE GALLERY</button>`;
+  } else if (tab === 'files') {
+    body = `<div class="nb-list">${files.map(f => `<div class="nb-card">
+        <div class="nb-card-top"><span class="nb-cyan">${esc(f.name)}</span><span class="nb-muted">${esc(f.kind)} · ${f.size}b</span></div>
+        <div class="nb-card-body">${esc((f.body||'').slice(0,120))}${(f.body||'').length>120?'…':''}</div>
+        <button type="button" class="nb-action tiny" data-action="phone-file-download" data-phone="${esc(phone.id)}" data-file="${esc(f.id)}">СКАЧАТЬ</button>
+      </div>`).join('')||'<div class="nb-empty">нет файлов</div>'}</div>`;
   } else {
     body = `<div class="nb-app-grid">
       <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="msgs"><span class="nb-app-ico nb-cyan">💬</span><label>MESSAGES</label></button>
       <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="calls"><span class="nb-app-ico nb-pink">📞</span><label>CALLS</label></button>
       <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="gallery"><span class="nb-app-ico nb-cyan">🖼</span><label>GALLERY</label></button>
+      <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="files"><span class="nb-app-ico nb-pink">📁</span><label>FILES</label></button>
       <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="contacts"><span class="nb-app-ico nb-pink">👥</span><label>CONTACTS</label></button>
     </div>`;
   }
@@ -2664,6 +2691,8 @@ function handleAction(action,el) {
           state.pinError = '';
           state.phoneLabTab = 'home';
           state.phoneUnlocked = r.phoneId || pid;
+          if (r.xpGain) toast('+' + r.xpGain + ' XP за взлом телефона' + (r.leveled ? ' · LEVEL UP!' : ''), 'success');
+          scheduleSave();
           // force access unlocked
           try {
             const id = r.phoneId || pid;
@@ -2688,6 +2717,29 @@ function handleAction(action,el) {
     case 'phone-lab-tab':{
       state.phoneLabTab = el.dataset.tab || 'msgs';
       renderWindow('phone'); break;
+    }
+    case 'phone-file-download': {
+      const phoneId = target.getAttribute('data-phone');
+      const fileId = target.getAttribute('data-file');
+      const phone = findPhone(phoneId);
+      const list = phone ? phoneFiles(phone) : [];
+      const file = list.find(f => f.id === fileId);
+      if (!file) { toast('Файл не найден', 'error'); break; }
+      if (!state.game.computer.files) state.game.computer.files = [];
+      const id = 'dl_' + file.id + '_' + Date.now().toString(36);
+      state.game.computer.files.unshift({
+        id,
+        name: file.name,
+        type: file.kind || 'file',
+        content: file.body || '',
+        body: file.body || '',
+        source: 'phone:' + phoneId,
+        at: Date.now()
+      });
+      state.game.computer.files = state.game.computer.files.slice(0, 80);
+      toast('Скачано: ' + file.name, 'success');
+      scheduleSave();
+      break;
     }
     case 'phone-lab-export':{
       const kind = el.dataset.kind || 'msgs';
@@ -2904,22 +2956,23 @@ function handleAction(action,el) {
       state.mailView=null; renderWindow('mail'); break;
     }
     case 'mail-send':{
-      const to=(document.getElementById('mailTo')?.value||'').trim();
-      const subject=(document.getElementById('mailSubject')?.value||'').trim();
-      const body=(document.getElementById('mailBody')?.value||'').trim();
-      const att=(document.getElementById('mailAttach')?.value||'').trim();
+      const root = document.querySelector('.mail-compose') || document;
+      const to=(root.querySelector('#mailTo')?.value||document.getElementById('mailTo')?.value||'').trim();
+      const subject=(root.querySelector('#mailSubject')?.value||document.getElementById('mailSubject')?.value||'').trim();
+      const body=(root.querySelector('#mailBody')?.value||document.getElementById('mailBody')?.value||'').trim();
+      const attSel=root.querySelector('#mailAttach')||document.getElementById('mailAttach');
+      const att=(attSel?.value||'').trim();
       if(!to){ toast('Укажи Имя Фамилия NPC','error'); break; }
-      toast('Проверка получателя…','info');
-      setTimeout(()=>{
-        try {
-          const r = sendPlayerMail(state.game, { to, subject, body, attachmentId: att });
-          if(!r.ok){ toast(r.reason||'Ошибка','error'); return; }
-          toast('Письмо отправлено','success');
-          state.mailCompose=null;
-          scheduleSave();
-          renderWindow('mail');
-        } catch(err){ toast(String(err.message||err),'error'); }
-      }, 600);
+      try {
+        const r = sendPlayerMail(state.game, { to, subject, body, attachmentId: att || undefined });
+        if(!r.ok){ toast(r.reason||'Ошибка отправки','error'); break; }
+        toast(r.hasAttachment ? 'Письмо с вложением отправлено' : 'Письмо отправлено','success');
+        state.mailCompose=null;
+        state.mailView=null;
+        scheduleSave();
+        renderWindow('mail');
+        refreshOpenApps(['mail']);
+      } catch(err){ console.error(err); toast(String(err.message||err),'error'); }
       break;
     }
 

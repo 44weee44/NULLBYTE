@@ -85,7 +85,7 @@ function getLocal() {
 
 function setLocal(state) {
   try {
-    const raw = JSON.stringify(state);
+    const raw = JSON.stringify(state, (k,v) => (k === "__proto__" || k === "constructor" ? undefined : v));
     localStorage.setItem(LOCAL_KEY, raw);
     try { localStorage.setItem(LEGACY_CLOUD_KEY, raw); } catch {}
     return true;
@@ -178,7 +178,7 @@ export async function saveGame(state) {
   // Always try local first — works as backup even inside Telegram.
   const localSaved = setLocal(state);
   const api = cloudApi();
-  const snapshot = JSON.stringify(state);
+  const snapshot = JSON.stringify(state, (k,v) => (k === "__proto__" || k === "constructor" ? undefined : v));
 
   if (!api) {
     return {

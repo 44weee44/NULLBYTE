@@ -11,12 +11,12 @@ export const PHONES_PER_REGION = 550;
 export const VISIBLE_PER_REGION = 250;
 export const ROTATION_MS = 4 * 60 * 60 * 1000;
 export const PROTECTION_RULES = {
-  low:    { chance: 0.55, kickAfter: 0, errors: 'few' },
-  medium: { chance: 0.85, kickAfter: 0, errors: 'some' },
-  high:   { chance: 0.75, kickAfter: 0, errors: 'some' },
-  hard:   { chance: 0.25, kickAfter: 3, errors: 'many' },
-  xhard:  { chance: 0.15, kickAfter: 3, errors: 'flood' },
-  '%*|^': { chance: 0.0066, kickAfter: 2, errors: 'flood' },
+  low:    { chance: 0.78, kickAfter: 0, errors: 'few' },
+  medium: { chance: 0.68, kickAfter: 0, errors: 'some' },
+  high:   { chance: 0.55, kickAfter: 1, errors: 'some' },
+  hard:   { chance: 0.40, kickAfter: 2, errors: 'many' },
+  xhard:  { chance: 0.28, kickAfter: 3, errors: 'flood' },
+  '%*|^': { chance: 0.12, kickAfter: 2, errors: 'flood' },
 };
 /** @type {Record<string, Array<{id:string,ownerName:string,number:string,role:string,protection:string,model:string,index:number}>>} */
 export const PHONE_DB = {

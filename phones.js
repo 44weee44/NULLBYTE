@@ -4,6 +4,7 @@
 import {
   PHONE_REGIONS, PHONE_DB, SMS_BY_ROLE, VISIBLE_PER_REGION, ROTATION_MS, PROTECTION_RULES, PHONES_PER_REGION
 } from './phone_registry.js';
+import { catalogTemplatesForRole, fillFilePlaceholders } from './phone_file_catalog.js';
 
 export { PHONE_REGIONS, PHONES_PER_REGION, VISIBLE_PER_REGION, ROTATION_MS, PROTECTION_RULES, SMS_BY_ROLE };
 
@@ -17,7 +18,7 @@ function hash32(str) {
 export function createEmptyPhoneWorld() {
   return {
     version: 2, network: null, analyzed: {}, access: {}, purchases: {}, reputation: 0,
-    discovered: {}, pendingDrops: [], failCounts: {}, networkBanUntil: {},
+    discovered: {}, pendingDrops: [], failCounts: {}, networkBanUntil: {}, fileInstances: {},
     rotationEpoch: 0, activeSession: null, sessionFrozenSms: null
   };
 }
@@ -36,10 +37,12 @@ export function rotationEpoch(now = Date.now()) {
 export function visiblePhones(regionId, epoch) {
   const all = PHONE_DB[regionId] || [];
   if (!all.length) return [];
-  const n = Math.min(VISIBLE_PER_REGION, all.length);
-  // shuffle indices by epoch
+  // 200–300 from real PHONE_DB list (deterministic per region+epoch)
+  let h0 = hash32(String(regionId) + ':vis:' + String(epoch));
+  const nWant = 200 + (h0 % 101); // 200..300
+  const n = Math.min(all.length, nWant);
   const idxs = all.map((_, i) => i);
-  let h = hash32(regionId + ':' + epoch);
+  let h = h0;
   for (let i = idxs.length - 1; i > 0; i--) {
     h = (Math.imul(h, 1664525) + 1013904223) >>> 0;
     const j = h % (i + 1);
@@ -113,7 +116,6 @@ export function buildNetworkReport(regionId, now = Date.now()) {
       `  ROLE     ${p.role || '—'}`,
       `  NUMBER   ${p.number}`,
       `  MODEL    ${p.model}`,
-      `  DEFENSE  ${p.protection}`,
       ''
     ].join('\n');
   });
@@ -208,110 +210,63 @@ export function phoneCallLog(phone, now = Date.now()) {
 }
 
 
-/** Role-based phone filesystem: 1–7 files with lore content */
-export function phoneFiles(phone, now = Date.now()) {
+/** Phone filesystem from role catalog (3–6 files, persistent) */
+export function phoneFiles(phone, now = Date.now(), game = null) {
   if (!phone) return [];
+  const phoneId = String(phone.id || '');
+  if (game && game.phoneWorld) {
+    if (!game.phoneWorld.fileInstances) game.phoneWorld.fileInstances = {};
+    const cached = game.phoneWorld.fileInstances[phoneId];
+    if (Array.isArray(cached) && cached.length) return cached;
+  }
   const role = String(phone.role || 'civilian').toLowerCase();
-  const h = hash32(String(phone.id) + ':files:' + role);
-  const count = 1 + (h % 7); // 1..7
-  const owner = phone.ownerName || 'Unknown';
-  const pools = {
-    student: [
-      { kind: 'notes', name: 'konspekt_algebra.txt', body: 'Лекция 12. Матрицы.\nФормула: det(A) для 2x2.\nНе забыть лабу до пятницы.\n— ' + owner },
-      { kind: 'docs', name: 'raspisanie_semestr.md', body: '# Расписание\nПн: мат.анализ\nСр: сети\nПт: зачёт по крипте (вымышленный курс NULLBYTE U).' },
-      { kind: 'report', name: 'otchet_laba3.txt', body: 'Отчёт лаб.3\nТема: сканирование портов (учебный стенд).\nВывод: всё в пределах симуляции.' },
-      { kind: 'data', name: 'contacts_backup.csv', body: 'name,phone\nЛена,+7-900-100-11-22\nКирилл,+7-900-100-33-44' },
-      { kind: 'corrupt', name: 'photo_vacation.raw', body: '<<BINARY CORRUPT 0xDEAD>>\nне удалось восстановить заголовок JPEG' },
-      { kind: 'encrypted', name: 'notes.enc', body: 'NBENC1:8f3a91c0e2b7d4...\n(нужен ключ с mail-drop / artifact)' },
-      { kind: 'script', name: 'homework.py', body: '# учебный скрипт\nprint("hello nullbyte")\n# TODO: сдать до дедлайна' },
-    ],
-    developer: [
-      { kind: 'script', name: 'deploy.sh', body: '#!/bin/bash\n# staging only\nnpm run build && rsync -a dist/ staging:/var/www/' },
-      { kind: 'docs', name: 'API_SPEC.md', body: '# Internal API (fiction)\nPOST /v1/session\nAuth: Bearer <token>\nDo not commit production keys.' },
-      { kind: 'data', name: 'env.sample', body: 'DB_HOST=127.0.0.1\nAPI_KEY=changeme\nNODE_ENV=development' },
-      { kind: 'report', name: 'bug_report_882.txt', body: 'Bug #882: race on save\nSteps: open two tabs, spam save\nStatus: investigating' },
-      { kind: 'encrypted', name: 'secrets.vault', body: 'VAULT::AES\nblob=9a2f... (игровой контейнер)' },
-      { kind: 'corrupt', name: 'core.dump', body: 'ELF core dump truncated\nstack: 0x7fff....' },
-      { kind: 'notes', name: 'todo.txt', body: '- refactor auth\n- fix phone sync\n- не пушить на main без review' },
-    ],
-    manager: [
-      { kind: 'report', name: 'Q3_report.pdf.txt', body: 'Q3 summary (fiction)\nRevenue: stable\nRisks: vendor lock\nNext: cut cloud spend 8%' },
-      { kind: 'docs', name: 'org_chart.txt', body: 'CEO → COO → Team leads\nHR: closed channel\nAccess: managers only' },
-      { kind: 'dossier', name: 'employee_notes.md', body: '# Notes\n' + owner + ' meeting notes.\nAction items: 1) budget 2) hiring freeze' },
-      { kind: 'data', name: 'payroll_stub.csv', body: 'id,role,amount\n12,dev,4500\n15,ops,3900\n(внутриигровые цифры)' },
-      { kind: 'encrypted', name: 'board_minutes.enc', body: 'ENCRYPTED BOARD MINUTES\nkey required' },
-      { kind: 'notes', name: 'meeting_12.txt', body: 'Стендап 12:00\nБлокер: лицензии\nРешение: перенос релиза' },
-      { kind: 'corrupt', name: 'scan_contract.tif', body: 'TIFF header invalid / partial scan' },
-    ],
-    courier: [
-      { kind: 'data', name: 'routes_today.txt', body: '1. Dock 4\n2. Midtown locker\n3. Southgate pickup\nETA only in sim' },
-      { kind: 'notes', name: 'client_codes.txt', body: 'BOX-19A / code 4412\nBOX-19B / code 0091' },
-      { kind: 'report', name: 'delivery_log.txt', body: '09:12 delivered\n11:40 delay traffic\n15:02 signed' },
-      { kind: 'corrupt', name: 'map_cache.bin', body: 'MAPCACHE corrupt sector' },
-      { kind: 'encrypted', name: 'vip_list.enc', body: 'ENC VIP addresses' },
-    ],
-    medic: [
-      { kind: 'docs', name: 'protocol_triage.md', body: '# Triage protocol (fiction)\nABC → stabilize → transfer' },
-      { kind: 'report', name: 'shift_report.txt', body: 'Shift 08-20\nCases: 14\nCritical: 1 (stabilized)' },
-      { kind: 'notes', name: 'pharma_list.txt', body: 'Inventory check:\n- saline\n- bandages\n(игровой список)' },
-      { kind: 'dossier', name: 'patient_anon.txt', body: 'ID: ANON-204\nStatus: discharged\nNo real PII' },
-      { kind: 'encrypted', name: 'records.enc', body: 'MED-ENC v2' },
-      { kind: 'corrupt', name: 'ultrasound.dat', body: 'data stream interrupted' },
-    ],
-    guard: [
-      { kind: 'report', name: 'patrol_log.txt', body: 'Sector A clear\nSector B camera 3 offline\nReport filed' },
-      { kind: 'docs', name: 'sop_entry.txt', body: 'SOP: visitor badge, metal check, logbook' },
-      { kind: 'data', name: 'badge_ids.txt', body: 'BADGE-1001\nBADGE-1002\nBADGE-1044' },
-      { kind: 'notes', name: 'incident_04.txt', body: 'Incident: perimeter alarm false positive' },
-      { kind: 'encrypted', name: 'cam_export.enc', body: 'CAMEXPORT locked' },
-      { kind: 'corrupt', name: 'dvr_chunk.bin', body: 'DVR chunk CRC fail' },
-    ],
-    trader: [
-      { kind: 'data', name: 'prices_today.csv', body: 'item,bid,ask\nNULLBYTE,12.4,12.6\n44weee,3.1,3.2\ntunnel,8.0,8.3' },
-      { kind: 'report', name: 'pnl_week.txt', body: 'PnL week: +2.4% (sim)\nMax DD: -1.1%' },
-      { kind: 'notes', name: 'signals.txt', body: 'Long NULLBYTE on dip\nAvoid leverage >2x' },
-      { kind: 'script', name: 'bot_config.json', body: '{\n  "pair": "NULLBYTE/CR",\n  "mode": "paper"\n}' },
-      { kind: 'encrypted', name: 'wallet.seed.enc', body: 'SEED ENC — do not share' },
-      { kind: 'corrupt', name: 'orderbook.snap', body: 'snapshot truncated' },
-      { kind: 'docs', name: 'risk_policy.md', body: '# Risk\nMax position 15%\nStop -3%' },
-    ],
-    journalist: [
-      { kind: 'dossier', name: 'source_A.md', body: '# Source A\nClaim: port expansion\nStatus: unverified\n(fiction)' },
-      { kind: 'docs', name: 'draft_article.txt', body: 'Title: Mesh networks of Midtown\nLead: ...\nNeed second source' },
-      { kind: 'notes', name: 'interview_q.txt', body: '1. Who funds mesh?\n2. Outages frequency?' },
-      { kind: 'data', name: 'foia_stub.txt', body: 'Request ID FOIA-SIM-19\nPending' },
-      { kind: 'encrypted', name: 'whistle.enc', body: 'WHISTLEBLOB' },
-      { kind: 'corrupt', name: 'audio_interview.wav', body: 'RIFF.... corrupt' },
-      { kind: 'report', name: 'factcheck.txt', body: 'Claim X: false\nClaim Y: partial' },
-    ],
-  };
-  // fallbacks
-  const generic = [
-    { kind: 'notes', name: 'notes.txt', body: 'Личные заметки ' + owner + '\n— встреча\n— не забыть оплату' },
-    { kind: 'docs', name: 'readme.txt', body: 'Файлы устройства (симуляция NULLBYTE).' },
-    { kind: 'data', name: 'backup.json', body: '{\n  "owner": "' + owner + '",\n  "device": "' + (phone.device || 'phone') + '"\n}' },
-    { kind: 'corrupt', name: 'unknown.dat', body: '???? unreadable block' },
-    { kind: 'encrypted', name: 'safe.enc', body: 'SAFEBOX encrypted' },
-    { kind: 'report', name: 'summary.txt', body: 'Краткий отчёт за неделю. Без деталей.' },
-    { kind: 'script', name: 'util.js', body: '// snippet\nexport const ok = true;' },
-    { kind: 'dossier', name: 'profile.txt', body: 'Имя: ' + owner + '\nРоль: ' + role + '\nРайон: ' + (phone.regionId || '—') },
-  ];
-  const pool = pools[role] || pools.civilian || generic;
-  const base = pool.length ? pool : generic;
-  const out = [];
-  for (let i = 0; i < count; i++) {
-    const src = base[(h + i * 17) % base.length];
-    const id = 'pf_' + phone.id + '_' + i;
-    out.push({
-      id,
-      name: src.name,
-      kind: src.kind,
-      body: src.body,
-      size: 200 + ((h >> (i % 8)) % 8000),
-      at: now - i * 86400000,
+  let templates = [];
+  try { templates = catalogTemplatesForRole(role) || []; } catch (e) { templates = []; }
+  if (!templates.length) {
+    return [{
+      id: 'FI-' + phoneId + '-empty', instance_id: 'FI-' + phoneId + '-empty',
+      name: 'empty.txt', file_name: 'empty.txt', kind: 'ordinary', file_type: 'ordinary',
+      body: 'Нет файлов.', rarity: 'trash', base_price_cr: 0, size: '1 KB'
+    }];
+  }
+  const h = hash32(phoneId + ':files:v2:' + role);
+  let count = 3 + (h % 4);
+  if (phoneId === 'PH-6666-6666' || role === 'developer') count = 4 + (h % 3);
+  const pool = templates.slice();
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = hash32(phoneId + ':' + i) % (i + 1);
+    const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+  }
+  const picked = [];
+  let hasCorrupt = false, hasEnc = false;
+  for (const t of pool) {
+    if (picked.length >= count) break;
+    const typ = String(t.type || 'ordinary');
+    if (typ === 'corrupted' && hasCorrupt) continue;
+    if (typ === 'encrypted' && hasEnc) continue;
+    if (typ === 'corrupted') hasCorrupt = true;
+    if (typ === 'encrypted') hasEnc = true;
+    const regionName = phone.regionId || '';
+    const content = fillFilePlaceholders(t.content || t.preview || '', phone, regionName);
+    const preview = fillFilePlaceholders(t.preview || t.name || '', phone, regionName);
+    const iid = 'FI-' + phoneId + '-' + String(t.id).replace(/[^a-zA-Z0-9._-]/g, '_');
+    const locked = typ === 'encrypted';
+    picked.push({
+      instance_id: iid, template_id: t.id, phone_id: phoneId,
+      owner_name: phone.ownerName || '', owner_role: role, region: regionName,
+      file_name: t.name || t.id, file_type: typ, rarity: t.rarity || 'common',
+      base_price_cr: Number(t.price) || 0, content_preview: preview,
+      plaintext_payload: content,
+      encryption_state: locked ? 'locked' : 'none',
+      integrity_state: typ === 'corrupted' ? 'corrupted' : 'full',
+      generated_seed: phoneId + ':' + t.id, links: [], sale_state: 'on_phone',
+      discovery_state: 'found', id: iid, name: t.name || t.id, kind: typ,
+      body: locked ? '[LOCKED] Зашифрованный контейнер. Расшифровка — позже.' : content,
+      size: Math.max(1, Math.floor((content.length || 40) / 12)) + ' KB'
     });
   }
-  return out;
+  if (game && game.phoneWorld) game.phoneWorld.fileInstances[phoneId] = picked;
+  return picked;
 }
 
 
@@ -354,7 +309,11 @@ export function accessPhone(state, phoneId) {
     ...(state.phoneWorld.access[phone.id] || {}),
     openedAt: Date.now(),
     unlocked: false,
-    blocked: state.phoneWorld.access[phone.id]?.blocked || false
+    blocked: state.phoneWorld.access[phone.id]?.blocked || false,
+    protection: phone.protection,
+    ownerName: phone.ownerName,
+    number: phone.number,
+    role: phone.role
   };
   if (state.phoneWorld.access[phone.id].blocked) {
     return { ok: false, reason: 'Телефон заблокирован навсегда (block)' };

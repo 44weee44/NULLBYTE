@@ -5,19 +5,41 @@ import {
   processTimedEvents, bankStatus, bankRisk, attemptBankSimulation, saveEditorFile, validateNbs, runNbs, grantXp,
   recordHistory, addBookmark, idempotencyKey,
   PLUGIN_SHELLS, PLUGIN_ANIM, runPluginShellCommand, pluginShellBootLines, resolveSiteRef, savePlayerNamedFile, findFileByName, markServerModified,
-  isPluginLocked, isMissionVisible, xpThresholdForLevel, bindPhoneMissionTarget, ensureTrading, TRADING_TICKERS, tradingSparkline, listRegionPhones, scheduleMailDrop, processMailDrops, sendPlayerMail, processMailDeliveries } from './engine.js';
+  isPluginLocked, isMissionVisible, xpThresholdForLevel, bindPhoneMissionTarget, ensureTrading, TRADING_TICKERS, tradingSparkline, listRegionPhones, scheduleMailDrop, processMailDrops, sendPlayerMail, processMailDeliveries, tryCompleteLockMissions, ensureDarkshop, refreshDarkshopListings, buyDarkshopListing, sellFileToDarkshop, appraiseFileInstance, rarityLabel } from './engine.js';
 import { findPhone, phoneMessages, phoneGallery, phoneCallLog, phoneContacts, phoneFiles, lockPhone, unlockWithPin, isNetworkBanned, PROTECTION_RULES, registerBankFromMessages, PHONE_REGIONS, buildNetworkReport } from './phones.js';
 import { bankLogin, bankTransfer, getBankSession, searchNpcs, pluginDocs, touchNpc, NPC_POOL_SIZE } from './npc.js';
 import { extendedPluginDocs } from './operations.js';
 import { loadSavedGame, saveGame } from './storage.js';
 
-const $ = id => document.getElementById(id);
+const $ = id => { try { return document.getElementById(id); } catch { return null; } };
+const _rateLimit = Object.create(null);
+function hashStr(s) {
+  let h = 2166136261;
+  const str = String(s || '');
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+function applyWallpaper(css) {
+  const desk = $('desktopWorkspace') || document.querySelector('.desktop-workspace') || document.getElementById('desktop');
+  if (desk) desk.style.background = css || '';
+  const root = document.getElementById('osRoot') || document.body;
+  if (root && css) root.style.setProperty('--desktop-bg', css);
+}
+
+function rateOk(key, ms = 400) {
+  const now = Date.now();
+  if (_rateLimit[key] && now - _rateLimit[key] < ms) return false;
+  _rateLimit[key] = now;
+  return true;
+}
+
 const svg = {
   profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21c.7-4.1 3.3-6.2 8-6.2s7.3 2.1 8 6.2"/>',
-  terminal:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3m6 0h4"/>',
+  'phone-term':'<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 5h6M8 9h8v7H8zM10 19h4"/>',
+  terminal:'<rect x="3" y="4" width="18" height="14" rx="2"/><path d="M7 9l2.5 2.5L7 14M12 14h5"/>',
   darkshop:'<path d="M4 8h16l-1.5 13h-13L4 8Z"/><path d="M8 8V6a4 4 0 0 1 8 0v2"/>',
   browser:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
-  forge:'<path d="M4 5h16v14H4zM8 9l3 3-3 3m6 0h3"/>',
+  forge:'<path d="M12 2.5L3.5 7v10L12 21.5 20.5 17V7L12 2.5z"/><path d="M12 12v9.5M3.5 7L12 12l8.5-5"/><path d="M8.5 9.5l3.5-2 3.5 2"/>',
   map:'<path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Z"/><path d="M9 3v15m6-12v15"/>',
   mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/>',
   blackwire:'<path d="M4 5h16v12H9l-5 4V5Z"/><path d="M8 9h8m-8 4h5"/>',
@@ -26,28 +48,36 @@ const svg = {
   bank:'<path d="m3 9 9-6 9 6M5 10v9m5-9v9m4-9v9m5-9v9M3 21h18"/>',
   phone:'<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M10 18h4"/>',
   intel:'<circle cx="12" cy="12" r="3"/><path d="M12 3v3m0 12v3M3 12h3m12 0h3"/>',
-  computer:'<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/>'
+  computer:'<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/>',
+  fbi:'<circle cx="12" cy="12" r="10" fill="none"/><circle cx="12" cy="12" r="7.2" fill="none"/><path d="M12 3.8v1.6M12 18.6v1.6M3.8 12h1.6M18.6 12h1.6M6.2 6.2l1.1 1.1M16.7 16.7l1.1 1.1M6.2 17.8l1.1-1.1M16.7 7.3l1.1-1.1"/><path d="M9 16.2L12 6.8l3 9.4H9z"/><path d="M9.4 13.6h5.2"/>'
 };
 const APPS = [
   {id:'bank',title:'Aster Bank',path:'bank://account',ram:1,description:'Игровые кредиты'},
-  {id:'terminal',title:'Терминал',path:'terminal://nbshell',ram:1,description:'Командный интерфейс'},
-  {id:'darkshop',title:'DarkShop',path:'shop://hardware',ram:1,description:'Комплектующие ПК'},
+  {id:'terminal',title:'Terminal',path:'terminal://shell',ram:1,description:'Обычный терминал (без плагинов)'},
+  {id:'phone-term',title:'Phone Term',path:'terminal://phone',ram:1,description:'Терминал взлома телефонов'},
+  {id:'server-term',title:'Server Term',path:'terminal://server',ram:1,description:'Терминал серверов (скоро)'},
+  {id:'darkshop',title:'DarkShop',path:'shop://market',ram:1,description:'Рынок данных'},
   {id:'browser',title:'Browser',path:'net://fictional-web',ram:2,description:'Вымышленный интернет'},
-  {id:'forge',title:'NULForge',path:'repo://plugins',ram:1,description:'Каталог игровых плагинов'},
-  {id:'map',title:'NullAtlas',path:'atlas://world',ram:2,description:'Карта игрового мира'},
-  {id:'mail',title:'N-Mail',path:'mail://inbox',ram:1,description:'Внутриигровая почта'},
-  {id:'blackwire',title:'BlackWire',path:'board://contracts',ram:1,description:'Биржа контрактов NPC'},
-  {id:'help',title:'Help / Docs',path:'docs://manual',ram:1,description:'Справка по игре'},
-  {id:'ide',title:'NBS IDE',path:'ide://workspace',ram:2,description:'Редактор игровых скриптов'},
-  {id:'phone',title:'Phone Lab',path:'phone://lab',ram:2,description:'Визуальное исследование телефонов'},
-  {id:'intel',title:'Intel',path:'intel://feed',ram:1,description:'Разведка, события, discovered'},
-  {id:'fbi',title:'FBI',path:'agency://fbi',ram:1,description:'Закрытый раздел'},
-  {id:'profile',title:'Профиль',path:'user://operator',ram:1,description:'Оператор и прогресс'},
-  {id:'computer',title:'My Computer',path:'system://hardware',ram:1,description:'Компьютер и файлы'}
+  {id:'forge',title:'NULForge',path:'repo://plugins',ram:1,description:'Каталог плагинов'},
+  {id:'map',title:'NullAtlas',path:'atlas://world',ram:2,description:'Карта сетей'},
+  {id:'mail',title:'N-Mail',path:'mail://inbox',ram:1,description:'Почта'},
+  {id:'blackwire',title:'BlackWire',path:'board://contracts',ram:1,description:'Контракты'},
+  {id:'help',title:'Help',path:'docs://manual',ram:1,description:'Справка'},
+  {id:'ide',title:'NBS IDE',path:'ide://workspace',ram:2,description:'Редактор'},
+  {id:'phone',title:'Phone Lab',path:'phone://lab',ram:2,description:'Исследование телефонов'},
+  {id:'intel',title:'Intel',path:'intel://feed',ram:1,description:'Разведка'},
+  {id:'fbi',title:'FBI',path:'gov://fbi',ram:1,description:'Закрытый канал'},
+  {id:'profile',title:'Профиль',path:'user://profile',ram:1,description:'Оператор'},
+  {id:'computer',title:'My Computer',path:'sys://pc',ram:1,description:'Система'},
 ];
 const state = {opened:new Map(),z:20,drag:null,active:null,game:null,provider:'LOCAL SAVE',saveWarning:'',saveTimer:null,terminals:new Map(),termSeq:0,browserTabs:[],selectedMail:null,selectedFileId:null,selectedMissionId:null,editorText:'',editorName:'mission_report',nbsOutput:'Поддерживается только фиксированный список игровых деклараций.',modalConfirm:null,bootDone:false,persisting:false,persistPending:false,saveBlocked:false};
 
-function icon(id,cls='') { return `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${svg[id]||svg.help}</svg>`; }
+function icon(id,cls='') {
+  if (id === 'fbi') {
+    return `<img class="app-icon-img ${cls}" src="fbi.png" alt="" draggable="false" style="width:22px;height:22px;object-fit:contain;filter:grayscale(1) brightness(1.1);">`;
+  }
+  return `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${svg[id]||svg.help}</svg>`;
+}
 function appInfo(id) { return APPS.find(a=>a.id===id); }
 function fmt(n) { return new Intl.NumberFormat('ru-RU').format(Math.floor(Number(n)||0)); }
 function formatDate(ts) { return new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'short',year:'numeric'}).format(new Date(ts)); }
@@ -60,11 +90,22 @@ function tickMailDeliveries() {
   try {
     if (state.game && typeof processMailDeliveries === 'function') {
       const done = processMailDeliveries(state.game);
-      if (done && done.length) { scheduleSave(); if (state.opened.has('mail')) renderWindow('mail'); }
+      if (done && done.length) {
+        scheduleSave();
+        if (state.opened.has('mail')) renderWindow('mail');
+        refreshEconomyUi();
+      }
     }
   } catch (e) {}
 }
 setInterval(tickMailDeliveries, 3000);
+function refreshEconomyUi() {
+  try {
+    for (const id of ['bank','profile','darkshop','computer','blackwire']) {
+      if (state.opened?.has(id)) renderWindow(id);
+    }
+  } catch(e) {}
+}
 function scheduleSave() { clearTimeout(state.saveTimer);state.saveTimer=setTimeout(persist,250); }
 async function persist() {
   if(!state.game||state.saveBlocked)return;
@@ -106,13 +147,7 @@ function updateClock() {
 }
 function renderDesktopIcons() {
   const icons = $('desktopIcons');
-  icons.hidden = false;
-  icons.innerHTML = APPS.map(a => `
-    <button class="desktop-icon" type="button" data-action="open-app" data-app="${a.id}" title="${esc(a.title)}">
-      <span class="desktop-icon-symbol">${icon(a.id)}</span>
-      <span>${esc(a.title)}</span>
-    </button>
-  `).join('');
+  if (icons) { icons.hidden = true; icons.innerHTML = ''; }
   $('startMenuApps').innerHTML = APPS.map(a => `
     <button class="start-app" type="button" data-action="open-app" data-app="${a.id}">
       <span class="start-app-icon">${icon(a.id)}</span>
@@ -128,14 +163,49 @@ function renderTaskbar() {
   refreshSystem();
 }
 function showModal({title,eyebrow='NULLBYTE SYSTEM',body='',fields='',confirm='ПРОДОЛЖИТЬ',cancel='ОТМЕНА',danger=false,onConfirm=null}) {
-  const modal=$('modalCard');state.modalConfirm=onConfirm;
-  modal.innerHTML=`<div class="modal-eyebrow">${esc(eyebrow)}</div><h2 id="modalTitle">${esc(title)}</h2>${body?`<p>${body}</p>`:''}${fields}<div class="modal-actions">${cancel?`<button type="button" class="btn ghost" data-action="modal-cancel">${esc(cancel)}</button>`:''}<button type="button" class="btn ${danger?'danger':'primary'}" data-action="modal-confirm">${esc(confirm)}</button></div>`;
-  $('modalBackdrop').hidden=false;
-  const first=modal.querySelector('input,button');first?.focus();
+  const modal=$('modalCard');
+  const backdrop=$('modalBackdrop');
+  if (!modal || !backdrop) {
+    console.error('[NULLBYTE] modal DOM missing');
+    toast(String(title||'info'), 'info');
+    return;
+  }
+  state.modalConfirm = onConfirm;
+  modal.innerHTML = `
+    <div class="modal-eyebrow">${esc(eyebrow)}</div>
+    <h2 id="modalTitle">${esc(title)}</h2>
+    ${body ? `<div class="modal-body">${body}</div>` : ''}
+    ${fields || ''}
+    <div class="modal-actions">
+      ${cancel ? `<button type="button" class="btn ghost" data-action="modal-cancel">${esc(cancel)}</button>` : ''}
+      <button type="button" class="btn ${danger?'danger':'primary'}" data-action="modal-confirm">${esc(confirm)}</button>
+    </div>`;
+  backdrop.hidden = false;
+  backdrop.removeAttribute('hidden');
+  backdrop.style.display = 'grid';
+  backdrop.style.zIndex = '500';
+  try { modal.querySelector('button,input')?.focus(); } catch (e) {}
 }
-function closeModal(){ $('modalBackdrop').hidden=true;state.modalConfirm=null; }
+function closeModal(){
+  const backdrop=$('modalBackdrop');
+  if (backdrop) {
+    backdrop.hidden = true;
+    backdrop.setAttribute('hidden','');
+    backdrop.style.display = '';
+  }
+  state.modalConfirm=null;
+}
 function confirm(title,body,onConfirm,{danger=false,confirmText='ПОДТВЕРДИТЬ'}={}) {showModal({title,body,confirm:confirmText,danger,onConfirm});}
-function finishModal() {const fn=state.modalConfirm;if(fn){const result=fn();if(result===false)return;}closeModal();}
+function finishModal() {
+  try {
+    const fn = state.modalConfirm;
+    if (typeof fn === 'function') {
+      const result = fn();
+      if (result === false) return;
+    }
+  } catch (e) { console.error(e); }
+  closeModal();
+}
 
 function boot() {
   const lines = [
@@ -193,10 +263,11 @@ function boot() {
       .replace(/(BOOT_IMAGE=\/boot\/vmlinuz|root=UUID=nullbyte)/g, '<span class="boot-hi">$1</span>')
       .replace(/(player save|NULLBYTE Simulation Environment|nullbyte|nullnet|phone-lab|nbs-ide)/g, '<span class="boot-hi">$1</span>');
     row.innerHTML = html;
-    log.append(row);
-    log.scrollTop = log.scrollHeight;
+    if (log) { log.append(row); log.scrollTop = log.scrollHeight; }
     setTimeout(run, 220 + Math.random() * 180);
   };
+  // failsafe: never stuck on boot
+  setTimeout(() => { try { if (!bootFinished) finishBoot(); } catch (e) { console.error(e); } }, 9000);
   run();
 }
 
@@ -208,8 +279,14 @@ async function finishBoot() {
     if(tg){
       tg.ready?.();
       tg.expand?.();
+      try { tg.disableVerticalSwipes?.(); } catch(e) {}
+      try { if (typeof tg.enableClosingConfirmation === 'function') tg.enableClosingConfirmation(); } catch(e) {}
       tg.setHeaderColor?.('#0c151d');
       tg.setBackgroundColor?.('#0b1219');
+      // keep expanded if user gesture collapses
+      try {
+        tg.onEvent?.('viewportChanged', () => { try { tg.expand?.(); } catch(e) {} });
+      } catch(e) {}
       console.log('[NULLBYTE] CloudStorage', tg.CloudStorage ? 'YES' : 'NO');
     } else {
       console.warn('[NULLBYTE] Telegram.WebApp missing — local only');
@@ -217,33 +294,98 @@ async function finishBoot() {
   } catch(e) {
     console.warn('[NULLBYTE] Telegram init error', e);
   }
-  await new Promise(r => setTimeout(r, 400));
+  await new Promise(r => setTimeout(r, 200));
   const tgUser=window.Telegram?.WebApp?.initDataUnsafe?.user||null;
-  let loaded=await loadSavedGame(tgUser);
-  // Second attempt if cloud failed and no nickname (common Telegram race).
-  if(!loaded.state?.player?.nickname && window.Telegram?.WebApp?.CloudStorage){
-    await new Promise(r => setTimeout(r, 500));
-    const retry=await loadSavedGame(tgUser);
-    if(retry.state?.player?.nickname) loaded=retry;
+  let loaded;
+  try {
+    loaded = await loadSavedGame(tgUser);
+    if(!loaded?.state?.player?.nickname && window.Telegram?.WebApp?.CloudStorage){
+      await new Promise(r => setTimeout(r, 400));
+      try {
+        const retry = await loadSavedGame(tgUser);
+        if(retry?.state?.player?.nickname) loaded = retry;
+      } catch (e2) { console.warn(e2); }
+    }
+  } catch (e) {
+    console.error('[loadSavedGame]', e);
+    loaded = { state: createInitialState(), provider: 'NEW GAME', warning: 'Сохранение недоступно', blocked: false };
   }
-  state.game=loaded.state;state.provider=loaded.provider;state.saveWarning=loaded.warning;state.saveBlocked=Boolean(loaded.blocked);
-  $('bootScreen').hidden=true;$('desktopShell').hidden=false;
-  renderDesktopIcons();renderTaskbar();updateClock();
-  processTimedEvents(state.game);
-  $('saveStatus').textContent=state.provider;
-  const nick = String(state.game.player.nickname||'').trim();
-  state.game.player.nickname = nick;
-  if(!nick) {
-    showNicknameModal();
-    if(loaded.warning) toast(loaded.warning,'error');
-  } else {
-    toast(`С возвращением, ${nick}.`, 'success');
-    if(loaded.warning) toast(loaded.warning,'error');
+  try {
+    state.game = loaded?.state || createInitialState();
+    state.provider = loaded?.provider || 'NEW GAME';
+    state.saveWarning = loaded?.warning || '';
+    state.saveBlocked = Boolean(loaded?.blocked);
+  } catch (e) {
+    state.game = createInitialState();
+    state.provider = 'NEW GAME';
   }
-  if(state.game.player.nickname && !state.saveBlocked) {
-    await persist();
-  } else {
-    scheduleSave();
+  try { const bs=$('bootScreen'); if(bs){ bs.hidden=true; bs.style.display='none'; bs.style.pointerEvents='none'; } } catch{}
+  try { const ds=$('desktopShell'); if(ds) ds.hidden=false; } catch{}
+  try { closeModal(); } catch{}
+  try { const mb=$('modalBackdrop'); if(mb){ mb.hidden=true; mb.setAttribute('hidden',''); mb.style.display='none'; mb.style.pointerEvents='none'; } } catch{}
+  try { renderDesktopIcons(); } catch(e){ console.error(e); }
+  try { renderTaskbar(); } catch(e){ console.error(e); }
+  try { updateClock(); } catch{}
+  try { processTimedEvents(state.game); } catch{}
+  try {
+    if (state.game?.computer?.wallpaperCss) applyWallpaper(state.game.computer.wallpaperCss);
+  } catch(e){}
+  try {
+    const u = window.Telegram?.WebApp?.initDataUnsafe?.user;
+    if (u?.photo_url && state.game?.player) {
+      state.game.player.photoUrl = String(u.photo_url);
+    }
+    if (u?.id && state.game?.player && !state.game.player.telegramId) {
+      state.game.player.telegramId = String(u.id);
+    }
+  } catch(e){}
+  try {
+    if (state.game?.player?.nickname) {
+      state.game.player.nickname = String(state.game.player.nickname).replace(/[\u0000-\u001F\u007F]/g,'').slice(0,24);
+    }
+    if (state.game?.economy) {
+      const c = Number(state.game.economy.credits);
+      state.game.economy.credits = Number.isFinite(c) && c > 0 ? Math.min(c, 1e12) : 0;
+    }
+  } catch(e){}
+  try {
+    // sync legacy player.credits ↔ economy.credits
+    if (state.game.economy && state.game.player) {
+      if (state.game.economy.credits == null && state.game.player.credits != null)
+        state.game.economy.credits = Number(state.game.player.credits)||0;
+      state.game.player.credits = Number(state.game.economy.credits)||0;
+    }
+    if (state.game.darkshop && state.game.darkshop.version !== 2) {
+      state.game.darkshop.version = 2;
+      state.game.darkshop.listings = [];
+      state.game.darkshop.lastRefresh = 0;
+    }
+  } catch(e){}
+  try {
+    // refresh phone mission targets + protection rewards
+    (state.game.missions?.items||[]).forEach(m => {
+      if (String(m.id||'').startsWith('phone-') && typeof bindPhoneMissionTarget==='function') {
+        // reset base if already compounded from old bug
+        if (m.baseReward != null) m.reward = m.baseReward;
+        bindPhoneMissionTarget(m);
+      }
+    });
+  } catch(e){ console.warn(e); }
+  try { const ss=$('saveStatus'); if(ss) ss.textContent=state.provider||''; } catch{}
+  try {
+    const nick = String(state.game?.player?.nickname||'').trim();
+    if (state.game?.player) state.game.player.nickname = nick;
+    if(!nick) {
+      showNicknameModal();
+      if(loaded?.warning) toast(loaded.warning,'error');
+    } else {
+      toast('С возвращением, ' + nick + '.', 'success');
+      if(loaded?.warning) toast(loaded.warning,'error');
+    }
+    if(nick && !state.saveBlocked) await persist();
+    else scheduleSave();
+  } catch (e) {
+    console.error('[finishBoot ui]', e);
   }
 }
 function showNicknameModal() {
@@ -292,34 +434,236 @@ function normalizeAllWindows() {
 function isTerminalId(id){return id==='terminal'||String(id).startsWith('term-');}
 function terminalIconId(id){return isTerminalId(id)?'terminal':id;}
 
-function createTerminalSession(){
-  return {
-    lines:[
-      {text:'NULLBYTE OS',type:'green'},
-      {text:'Secure. Minimal. Control.',type:'muted'},
-      {text:'Type help · plugins · run <plugin-id>',type:'muted'}
-    ],
-    plugin:null,
-    busy:false,
-    scrollPin:true
-  };
+
+
+function hwName(part, level) {
+  const list = (typeof HARDWARE !== 'undefined' && HARDWARE[part]) || [];
+  const row = list.find(x => x.level === (level || 1)) || list[0];
+  return (row && row.name) || ('L' + (level || 1));
 }
+
+function buildNeofetchHtml(g) {
+  g = g || state.game || {};
+  const nick = ((g.player && g.player.nickname) || 'user').toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'user';
+  const c = g.computer || {};
+  const started = c.uptimeStartedAt || Date.now();
+  const mins = Math.max(1, Math.floor((Date.now() - started) / 60000));
+  const uptime = mins >= 60 ? (Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm') : (mins + 'm');
+  const ram = ((typeof HARDWARE !== 'undefined' && HARDWARE.ram) || []).find(x => x.level === (c.ram || 1)) || { gb: 4 };
+  let ramUsed = 1;
+  try { ramUsed = (getRamUsage(g).used) || 1; } catch (e) {}
+  const plugs = (c.installedPlugins || []).length;
+  const memStr = (ramUsed * 1024) + 'MiB / ' + ((ram.gb || 4) * 1024) + 'MiB';
+  const lines = [
+    ['OS', 'NULLBYTE OS ' + (c.os || 1) + '.0 x86_64'],
+    ['Kernel', 'nbkernel-' + (c.os || 1) + '.0.0-nullbyte'],
+    ['Uptime', uptime],
+    ['Packages', plugs + ' (plugins)'],
+    ['Shell', 'nbshell 1.0'],
+    ['Resolution', 'desktop'],
+    ['DE', 'NULLBYTE Desktop'],
+    ['WM', 'nb-wm'],
+    ['Terminal', 'alacritty'],
+    ['CPU', hwName('cpu', c.cpu)],
+    ['GPU', hwName('gpu', c.gpu)],
+    ['Memory', memStr],
+    ['Storage', hwName('storage', c.storage)],
+    ['Level', ((g.player && g.player.level) || 1) + ' · XP ' + ((g.player && g.player.xp) || 0)],
+    ['Credits', ((g.economy && g.economy.credits) || 0) + ' CR'],
+  ];
+  const info = lines.map(([k, v]) =>
+    `<div class="info-line"><span class="key">${k}:</span> ${esc(String(v))}</div>`
+  ).join('');
+  return `<div class="neofetch">
+    <div class="dragonbox"><img class="dragon" src="dragon.png" alt="NULLBYTE" draggable="false"></div>
+    <div class="info">
+      <div class="infohead">NULLBYTE OS</div>
+      ${info}
+      <div class="progress" aria-hidden="true"></div>
+    </div>
+  </div>`;
+}
+
+/** Lines for plain-text fallback / session storage */
+function buildNeofetchLines(g) {
+  return [{ text: '__NEOFETCH__', type: 'html', html: buildNeofetchHtml(g) }];
+}
+
+function printNeofetch(termId) {
+  const term = getTerm(termId);
+  if (!term) return;
+  const html = buildNeofetchHtml(state.game);
+  term.lines.push({ text: '__NEOFETCH__', type: 'html', html });
+  term.lines = term.lines.slice(-200);
+  const out = document.querySelector(`[data-window="${termId}"] .terminal-output`);
+  if (out) {
+    const wrap = document.createElement('div');
+    wrap.className = 'term-block';
+    wrap.innerHTML = html;
+    const form = out.querySelector('.term-inline-form');
+    if (form) out.insertBefore(wrap, form);
+    else out.appendChild(wrap);
+    if (term.scrollPin !== false) out.scrollTop = out.scrollHeight;
+  }
+}
+
+
+async function startTerminalBoot(termId) {
+  const term = getTerm(termId);
+  if (!term || !term.booting) return;
+  const mode = term.mode || 'vanilla';
+  const steps = [
+    { t: '▸ mount /dev/nullbyte', ms: 280 },
+    { t: '▸ link tty session', ms: 320 },
+    { t: mode === 'phone' ? '▸ load phone-ops toolkit' : mode === 'server' ? '▸ load server toolkit' : '▸ load shell profile', ms: 400 },
+    { t: '▸ check auth token… ok', ms: 350 },
+    { t: '▸ sync clock ' + new Date().toISOString().slice(11,19) + 'Z', ms: 300 },
+    { t: '▸ ready.', ms: 250 }
+  ];
+  for (const s of steps) {
+    if (!getTerm(termId)) return;
+    termAdd(termId, s.t, 'muted');
+    await new Promise(r => setTimeout(r, s.ms + (Math.random()*120|0)));
+  }
+  term.busy = false;
+  term.booting = false;
+  term.bootDone = true;
+  const html = typeof buildNeofetchHtml === 'function' ? buildNeofetchHtml(state.game) : '';
+  if (html) {
+    const term2 = getTerm(termId);
+    if (term2) term2.lines.push({ text: '__NEOFETCH__', type: 'html', html });
+  }
+  const hint = mode === 'phone'
+    ? 'Phone Term · help · plugins · run net link'
+    : mode === 'server'
+      ? 'Server Term · серверные плагины скоро'
+      : 'Terminal · wallpaper · status · help';
+  termAdd(termId, hint, 'muted');
+  renderWindow(termId);
+}
+
+function createTerminalSession(mode){
+  if (!mode) mode = 'vanilla';
+  const bootLines = [
+    { text: 'NULLBYTE tty — init', type: 'muted' },
+    { text: 'loading modules…', type: 'muted' }
+  ];
+  return { mode: mode, lines: bootLines, plugin: null, busy: true, scrollPin: true, booting: true, bootStarted: Date.now() };
+}
+
 
 function getTerm(id){
   if(!isTerminalId(id))return null;
-  if(!state.terminals.has(id))state.terminals.set(id,createTerminalSession());
-  return state.terminals.get(id);
+  if(!state.terminals.has(id))state.terminals.set(id,createTerminalSession('vanilla'));
+  const t = state.terminals.get(id);
+  if (t && !t.mode) t.mode = 'vanilla';
+  return t;
 }
 
 function isBrowserId(id){return id==='browser'||String(id).startsWith('browser-');}
 function browserIconId(id){return isBrowserId(id)?'browser':id;}
 
+
+function wireWindowResize(element, winId) {
+  const handle = element.querySelector('.window-resize-handle');
+  if (!handle || handle._nbResize) return;
+  handle._nbResize = true;
+  let startY = 0, startH = 0, startX = 0, startW = 0, active = false;
+  const onDown = (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    active = true;
+    const t = ev.touches ? ev.touches[0] : ev;
+    startY = t.clientY;
+    startX = t.clientX;
+    startH = element.offsetHeight;
+    startW = element.offsetWidth;
+    element.classList.add('is-resizing');
+  };
+  const onMove = (ev) => {
+    if (!active) return;
+    const t = ev.touches ? ev.touches[0] : ev;
+    if (!t) return;
+    const dy = t.clientY - startY;
+    const dx = t.clientX - startX;
+    const area = $('desktopWorkspace');
+    const maxH = (area?.clientHeight || window.innerHeight) - 20;
+    const maxW = (area?.clientWidth || window.innerWidth) - 16;
+    const nh = Math.max(160, Math.min(maxH, startH + dy));
+    const nw = Math.max(220, Math.min(maxW, startW + dx));
+    element.style.height = nh + 'px';
+    element.style.width = nw + 'px';
+    const win = state.opened.get(winId);
+    if (win) { win.height = nh; win.width = nw; }
+  };
+  const onUp = () => {
+    if (!active) return;
+    active = false;
+    element.classList.remove('is-resizing');
+  };
+  handle.addEventListener('pointerdown', onDown);
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  handle.addEventListener('touchstart', onDown, { passive: false });
+  window.addEventListener('touchmove', onMove, { passive: false });
+  window.addEventListener('touchend', onUp);
+}
+
+
+/** Place new window in free workspace (prefer under topmost reduced window). */
+function layoutNewWindow(area, width, height) {
+  const pad = 8;
+  const aw = area.clientWidth;
+  const ah = area.clientHeight;
+  // Collect existing visible windows
+  const boxes = [];
+  for (const [wid, win] of state.opened) {
+    if (win.minimized || win.maximized) continue;
+    const el = document.querySelector(`[data-window="${wid}"]`);
+    if (!el) continue;
+    boxes.push({
+      id: wid,
+      left: el.offsetLeft,
+      top: el.offsetTop,
+      width: el.offsetWidth,
+      height: el.offsetHeight,
+      bottom: el.offsetTop + el.offsetHeight,
+      right: el.offsetLeft + el.offsetWidth
+    });
+  }
+  // Prefer space under the lowest bottom edge of windows that leave room below
+  let best = null;
+  for (const b of boxes) {
+    const spaceBelow = ah - b.bottom - pad;
+    if (spaceBelow >= Math.min(height, 160)) {
+      const top = b.bottom + pad;
+      const left = Math.max(pad, Math.min(b.left, aw - width - pad));
+      const h = Math.min(height, Math.max(150, spaceBelow - pad));
+      const w = Math.min(width, aw - left - pad);
+      best = { left, top, width: w, height: h };
+      break;
+    }
+  }
+  if (best) return best;
+  // Fallback: cascade from top-left
+  const offset = (state.opened.size % 5) * 18;
+  return {
+    left: Math.max(pad, offset + pad),
+    top: Math.max(pad, offset + pad),
+    width: Math.min(width, aw - pad * 2),
+    height: Math.min(height, ah - pad * 2)
+  };
+}
+
 function openApp(id) {
   // Each Terminal / Browser launch creates a NEW independent window.
-  if(id==='terminal'){
+  if(id==='terminal' || id==='phone-term' || id==='server-term'){
+    const mode = id==='phone-term' ? 'phone' : id==='server-term' ? 'server' : 'vanilla';
     state.termSeq+=1;
-    id=`term-${state.termSeq}`;
-    state.terminals.set(id,createTerminalSession());
+    const newId=`term-${state.termSeq}`;
+    state.terminals.set(newId, createTerminalSession(mode));
+    id = newId;
+    setTimeout(() => startTerminalBoot(newId), 40);
   }
   if(id==='browser'){
     state.browserSeq=(state.browserSeq||0)+1;
@@ -327,7 +671,11 @@ function openApp(id) {
     if(!state.browserSessions) state.browserSessions=new Map();
     state.browserSessions.set(id,{tabs:[{id:'tab_start',siteId:'',page:'start',title:'Новая вкладка',history:[{page:'start'}],histIdx:0}],active:0});
   }
-  const baseId=isTerminalId(id)?'terminal':(isBrowserId(id)?'browser':id);
+  const baseId=isTerminalId(id)
+    ? (state.terminals.get(id)?.mode === 'phone' ? 'phone-term'
+      : state.terminals.get(id)?.mode === 'server' ? 'server-term'
+      : 'terminal')
+    : (isBrowserId(id)?'browser':id);
   const app=appInfo(baseId);if(!app)return;
   const existing=state.opened.get(id);
   if(existing){existing.minimized=false;focusWindow(id);return;}
@@ -336,37 +684,51 @@ function openApp(id) {
   const isTerm=isTerminalId(id);
   // Compact terminal like a real OS console; other apps keep previous sizing.
   const isPhone = baseId === 'phone';
-  const width=isTerm
-    ? Math.min(560, Math.max(340, Math.floor(area.clientWidth*0.42)))
+  let width=isTerm
+    ? Math.min(560, Math.max(300, Math.floor(area.clientWidth*0.42)))
     : isPhone
-      ? Math.max(280, area.clientWidth - 16)
+      ? Math.min(360, Math.max(280, Math.floor(area.clientWidth * 0.55)))
       : Math.min(880,Math.max(Math.min(320,area.clientWidth-12),area.clientWidth-42));
-  const height=isTerm
-    ? Math.min(360, Math.max(240, Math.floor(area.clientHeight*0.42)))
+  let height=isTerm
+    ? Math.min(360, Math.max(220, Math.floor(area.clientHeight*0.42)))
     : isPhone
-      ? Math.max(400, area.clientHeight - 56)
+      ? Math.min(560, Math.max(380, Math.floor(area.clientHeight * 0.62)))
       : Math.min(650,Math.max(Math.min(290,area.clientHeight-12),area.clientHeight-42));
-  const offset=(state.opened.size%5)*22;
-  const title=isTerm?`Terminal ${id.replace('term-','#')}`:(isBrowserId(id)?`Browser ${id.replace('browser-','#')}`:app.title);
+    const termMode = isTerm ? (state.terminals.get(id)?.mode || 'vanilla') : '';
+  const title=isTerm
+    ? (termMode==='phone' ? `Phone Term #${id.replace('term-','')}`
+      : termMode==='server' ? `Server Term #${id.replace('term-','')}`
+      : `Terminal #${id.replace('term-','')}`)
+    : (isBrowserId(id)?`Browser ${id.replace('browser-','#')}`:app.title);
   const path=isTerm?`tty://${id}`:(isBrowserId(id)?`net://${id}`:app.path);
-  const win={id,title,path,ram:app.ram,minimized:false,maximized:false,alwaysOnTop:false,left:Math.max(8,(area.clientWidth-width)/2+offset-45),top:Math.max(8,(area.clientHeight-height)/2+offset-40),oldRect:null,baseApp:baseId};
+  const place = layoutNewWindow(area, width, height);
+  width = place.width; height = place.height;
+  const win={id,title,path,ram:app.ram,minimized:false,maximized:false,alwaysOnTop:false,left:place.left,top:place.top,oldRect:null,baseApp:baseId};
   state.opened.set(id,win);
+  // element attached below
   const element=document.createElement('section');
-  element.className=`app-window${isTerm?' app-window-terminal':''}${isBrowserId(id)?' app-window-browser':''}`;
+  element.className=`app-window is-opening${isTerm?' app-window-terminal':''}${isBrowserId(id)?' app-window-browser':''}`;
   element.dataset.window=id;
   element.setAttribute('role','dialog');
+  element.classList.add('is-resizable','window-enter');
   element.setAttribute('aria-label',title);
   element.style.width=`${width}px`;
   element.style.height=`${height}px`;
-  element.style.left=`${Math.min(win.left,Math.max(8,area.clientWidth-width-8))}px`;
-  element.style.top=`${Math.min(win.top,Math.max(8,area.clientHeight-height-8))}px`;
+  element.style.left=`${place.left}px`;
+  element.style.top=`${place.top}px`;
+
   element.innerHTML=`<header class="window-bar"><span class="window-app-mark">${icon(terminalIconId(id))}</span><strong class="window-title">${esc(title)}</strong><span class="window-path">${esc(path)}</span><div class="window-controls"><button type="button" data-action="toggle-pin-window" class="pin-btn" title="Поверх остальных (Always on Top)" aria-label="Поверх остальных"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M14 2l1.5 1.5-1 1L16 6l2.5-.5L20 7l-6 6-1.5-1.5L14 10l-1.5 1.5L4 20l-.5-3.5L12 9.5 10.5 8 14 2z"/></svg></button><button type="button" data-action="minimize-window" title="Свернуть" aria-label="Свернуть">—</button><button type="button" data-action="maximize-window" title="Развернуть" aria-label="Развернуть">□</button><button type="button" data-action="close-window" title="Закрыть" aria-label="Закрыть">×</button></div></header><div class="window-content" data-content></div><div class="window-resize" data-resize></div>`;
-  $('windowLayer').append(element);wireWindow(id,element);renderWindow(id);focusWindow(id);renderTaskbar();
+  $('windowLayer').append(element);wireWindow(id,element);
+  requestAnimationFrame(() => {
+    setTimeout(() => { try { element.classList.remove('is-opening'); } catch(e){} }, 220);
+  });renderWindow(id);focusWindow(id);renderTaskbar();
+  setTimeout(()=>element.classList.remove('window-enter'),280);
   if(isTerm)requestAnimationFrame(()=>element.querySelector('.terminal-form input')?.focus({preventScroll:true}));
 }
 
 function onGlobalPointerMove(e){
   const d=state.drag;if(!d)return;
+  try { e.preventDefault(); } catch(err) {}
   const element=document.querySelector(`[data-window="${d.id}"]`);
   if(!element)return;
   if(d.resize){
@@ -385,62 +747,102 @@ function onGlobalPointerMove(e){
   const win=state.opened.get(d.id);if(win){win.left=x;win.top=y;}
 }
 function onGlobalPointerUp(e){
-  if(state.drag&&(e.pointerId===undefined||e.pointerId===state.drag.pointerId)) state.drag=null;
+  try {
+    document.querySelectorAll('.app-window.is-dragging,.app-window.is-resizing').forEach(w=>{
+      w.classList.remove('is-dragging');
+      w.classList.remove('is-resizing');
+    });
+  } catch(err) {}
+  state.drag = null;
 }
 if(!window.__nbDragGlobal){
   window.__nbDragGlobal=true;
   document.addEventListener('pointermove',onGlobalPointerMove,{passive:false});
   document.addEventListener('pointerup',onGlobalPointerUp);
   document.addEventListener('pointercancel',onGlobalPointerUp);
+  // Prevent Telegram WebView from swallowing vertical swipe while dragging windows
+  document.addEventListener('touchmove', function(e){
+    if (state.drag && state.drag.id) {
+      try { e.preventDefault(); } catch(err) {}
+    }
+  }, { passive: false });
 }
 
 function wireWindow(id,element) {
   element.addEventListener('pointerdown',e=>{
     if(e.target.closest('.window-controls')||e.target.closest('[data-resize]'))return;
+    if(e.target.closest('input,textarea,select,.term-inline-input,.terminal-output')) {
+      focusWindow(id);
+      return;
+    }
     focusWindow(id);
   });
   const bar=element.querySelector('.window-bar');
   bar.addEventListener('pointerdown',e=>{
-    if(e.target.closest('.window-controls')||state.opened.get(id)?.maximized||e.button!==0)return;
-    if(e.target.closest('input,textarea,button'))return;
+    if(e.target.closest('.window-controls')||state.opened.get(id)?.maximized)return;
+    if(e.button!=null && e.button!==0)return;
+    if(e.target.closest('input,textarea,button,select'))return;
     const rect=element.getBoundingClientRect(),workspace=$('desktopWorkspace').getBoundingClientRect();
     state.drag={id,pointerId:e.pointerId,dx:e.clientX-rect.left,dy:e.clientY-rect.top,workspace};
-    try{bar.setPointerCapture(e.pointerId);}catch{}focusWindow(id);e.preventDefault();
-  });
+    element.classList.add('is-dragging');
+    try{bar.setPointerCapture(e.pointerId);}catch{}
+    focusWindow(id);
+    e.preventDefault();
+    e.stopPropagation();
+  }, { passive: false });
   bar.addEventListener('pointermove',e=>{
     const d=state.drag;if(!d||d.id!==id||d.pointerId!==e.pointerId||d.resize)return;
     const area=$('desktopWorkspace');const ww=element.offsetWidth,wh=element.offsetHeight;const x=Math.max(-ww+80,Math.min(area.clientWidth-60,e.clientX-d.workspace.left-d.dx)),y=Math.max(0,Math.min(area.clientHeight-40,e.clientY-d.workspace.top-d.dy));
     element.style.left=`${x}px`;element.style.top=`${y}px`;const w=state.opened.get(id);if(w){w.left=x;w.top=y;}
   });
-  const stop=e=>{if(state.drag?.id===id&&state.drag.pointerId===e.pointerId)state.drag=null;};
+  const stop=e=>{if(state.drag?.id===id&&state.drag.pointerId===e.pointerId)document.querySelectorAll('.app-window.is-dragging').forEach(w=>w.classList.remove('is-dragging'));
+    state.drag=null;};
   bar.addEventListener('pointerup',stop);bar.addEventListener('pointercancel',stop);bar.addEventListener('lostpointercapture',stop);
 
   // Resize from bottom-right handle
   const rz=element.querySelector('[data-resize]');
   if(rz){
     rz.addEventListener('pointerdown',e=>{
-      if(state.opened.get(id)?.maximized||e.button!==0)return;
+      if(state.opened.get(id)?.maximized) return;
+      if(e.pointerType === 'mouse' && e.button !== 0) return;
       e.stopPropagation();
       const rect=element.getBoundingClientRect();
       state.drag={id,pointerId:e.pointerId,resize:true,startW:rect.width,startH:rect.height,sx:e.clientX,sy:e.clientY};
+      element.classList.add('is-resizing');
       try{rz.setPointerCapture(e.pointerId);}catch{}
       focusWindow(id);e.preventDefault();
     });
     rz.addEventListener('pointermove',e=>{
       const d=state.drag;if(!d||d.id!==id||!d.resize||d.pointerId!==e.pointerId)return;
       const area=$('desktopWorkspace');
-      const w=Math.max(300,Math.min(area.clientWidth-8,d.startW+(e.clientX-d.sx)));
-      const h=Math.max(200,Math.min(area.clientHeight-8,d.startH+(e.clientY-d.sy)));
+      const maxW = Math.max(200, (area?.clientWidth || window.innerWidth) - 8);
+      const maxH = Math.max(160, (area?.clientHeight || window.innerHeight) - 8);
+      const w=Math.max(200,Math.min(maxW,d.startW+(e.clientX-d.sx)));
+      const h=Math.max(150,Math.min(maxH,d.startH+(e.clientY-d.sy)));
       element.style.width=`${w}px`;element.style.height=`${h}px`;
-      const win=state.opened.get(id);if(win){win.width=w;win.height=h;}clampWindowRect(element,win);
+      const win=state.opened.get(id);if(win){win.width=w;win.height=h;}
+      try{clampWindowRect(element,win);}catch{}
     });
-    rz.addEventListener('pointerup',stop);rz.addEventListener('pointercancel',stop);rz.addEventListener('lostpointercapture',stop);
+    const endRz=(e)=>{
+      if(state.drag?.id===id && state.drag?.resize) {
+        document.querySelectorAll('.app-window.is-dragging').forEach(w=>w.classList.remove('is-dragging'));
+    state.drag=null;
+        element.classList.remove('is-resizing');
+      }
+      try{stop(e);}catch{}
+    };
+    rz.addEventListener('pointerup',endRz);
+    rz.addEventListener('pointercancel',endRz);
+    rz.addEventListener('lostpointercapture',endRz);
   }
 }
 function focusWindow(id) {
-  const win=state.opened.get(id);if(!win)return;win.minimized=false;state.active=id;state.z++;
+  const win=state.opened.get(id);if(!win)return;win.minimized=false;
+  const already = state.active === id;
+  state.active=id;state.z++;
   // Normal windows: z 20–999; always-on-top: 10000+
   const base = win.alwaysOnTop ? 10000 : 20;
+  document.querySelectorAll('.app-window').forEach(w => w.classList.toggle('is-focused', w.getAttribute('data-window') === String(id)));
   const el=document.querySelector(`[data-window="${id}"]`);
   if(el){
     el.classList.remove('is-minimized');
@@ -475,7 +877,32 @@ function togglePinWindow(id) {
   toast(win.alwaysOnTop ? 'Окно поверх остальных' : 'Обычный порядок окон', 'success');
 }
 function minimizeWindow(id) {const win=state.opened.get(id);if(!win)return;win.minimized=true;document.querySelector(`[data-window="${id}"]`)?.classList.add('is-minimized');document.querySelector(`[data-window="${id}"]`)?.classList.remove('is-active');if(state.active===id)state.active=null;const next=[...state.opened.keys()].reverse().find(k=>!state.opened.get(k).minimized);if(next)focusWindow(next);else renderTaskbar();}
-function closeWindow(id) {state.opened.delete(id);if(isTerminalId(id))state.terminals.delete(id);document.querySelector(`[data-window="${id}"]`)?.remove();if(state.active===id)state.active=null;const next=[...state.opened.keys()].reverse().find(k=>!state.opened.get(k).minimized);if(next)focusWindow(next);else renderTaskbar();}
+function closeWindow(id) {
+  const win = state.opened.get(id);
+  const el = (win && win.el) || document.querySelector('.app-window[data-window="' + String(id).replace(/"/g,'') + '"]');
+  const finish = () => {
+    try {
+      state.opened.delete(id);
+      if (isTerminalId(id)) state.terminals.delete(id);
+      if (isBrowserId(id) && state.browserSessions) state.browserSessions.delete(id);
+      if (el) el.remove();
+      if (state.active === id) {
+        state.active = null;
+        const rest = [...state.opened.keys()];
+        if (rest.length) focusWindow(rest[rest.length - 1]);
+      }
+      renderTaskbar();
+      scheduleSave();
+    } catch (e) { console.warn(e); }
+  };
+  if (el && !el.classList.contains('is-closing')) {
+    el.classList.add('is-closing');
+    setTimeout(finish, 160);
+    return;
+  }
+  finish();
+}
+
 function maximizeWindow(id) {
   const win=state.opened.get(id),el=document.querySelector(`[data-window="${id}"]`);if(!win||!el)return;
   if(!win.maximized){win.oldRect={left:el.style.left,top:el.style.top,width:el.style.width,height:el.style.height};win.maximized=true;el.classList.add('is-maximized');}
@@ -488,24 +915,114 @@ function refreshPhoneLab() {
     /* keep closed until user opens */
   }
 }
-function renderWindow(id) {const el=document.querySelector(`[data-window="${id}"] [data-content]`);if(!el)return;el.innerHTML=renderApp(id);wireAppContent(id,el);}
-function refreshOpenApps(ids=null) {for(const id of (ids||[...state.opened.keys()]))if(state.opened.has(id))renderWindow(id);renderTaskbar();}
+function captureWindowUi(id, el) {
+  const snap = { scroll: {}, focus: null, termCmd: null };
+  try {
+    // scroll positions
+    el.querySelectorAll('.terminal-output, .window-content, [data-content], .nb-list, .list, .ide-body, .mail-list').forEach((node, i) => {
+      if (node.scrollHeight > node.clientHeight + 2) {
+        snap.scroll[i + ':' + (node.className || node.tagName)] = node.scrollTop;
+      }
+    });
+    snap.contentScroll = el.scrollTop;
+    const active = document.activeElement;
+    if (active && el.contains(active) && (active.matches('input,textarea,select') || active.isContentEditable)) {
+      snap.focus = {
+        name: active.getAttribute('name') || '',
+        cls: active.className || '',
+        tag: active.tagName,
+        start: active.selectionStart,
+        end: active.selectionEnd,
+        value: active.value
+      };
+      if (active.classList.contains('term-inline-input') || active.name === 'command') {
+        snap.termCmd = active.value;
+      }
+    }
+  } catch (e) {}
+  return snap;
+}
+function restoreWindowUi(id, el, snap) {
+  if (!snap || !el) return;
+  try {
+    if (typeof snap.contentScroll === 'number') el.scrollTop = snap.contentScroll;
+    el.querySelectorAll('.terminal-output, .window-content, [data-content], .nb-list, .list, .ide-body, .mail-list').forEach((node, i) => {
+      const key = i + ':' + (node.className || node.tagName);
+      if (snap.scroll && snap.scroll[key] != null) node.scrollTop = snap.scroll[key];
+    });
+    // restore terminal command draft
+    if (snap.termCmd != null) {
+      const inp = el.querySelector('.term-inline-input, input[name="command"]');
+      if (inp) inp.value = snap.termCmd;
+    }
+    if (snap.focus) {
+      let target = null;
+      if (snap.focus.name) target = el.querySelector(`${snap.focus.tag.toLowerCase()}[name="${CSS.escape(snap.focus.name)}"]`);
+      if (!target && snap.focus.cls) {
+        const cls = String(snap.focus.cls).split(/\s+/).filter(Boolean)[0];
+        if (cls) target = el.querySelector('.' + CSS.escape(cls));
+      }
+      if (!target && snap.termCmd != null) target = el.querySelector('.term-inline-input, input[name="command"]');
+      if (target) {
+        target.focus({ preventScroll: true });
+        try {
+          if (typeof snap.focus.start === 'number' && target.setSelectionRange) {
+            const len = (target.value || '').length;
+            target.setSelectionRange(Math.min(snap.focus.start, len), Math.min(snap.focus.end ?? snap.focus.start, len));
+          }
+        } catch (e) {}
+      }
+    }
+  } catch (e) {}
+}
+
+function isUserTypingIn(id) {
+  const active = document.activeElement;
+  if (!active) return false;
+  if (!(active.matches?.('input,textarea,select') || active.isContentEditable)) return false;
+  const win = active.closest?.('.app-window');
+  return !!(win && win.getAttribute('data-window') === String(id));
+}
+
+function renderWindow(id, opts = {}) {
+  const el = document.querySelector(`[data-window="${id}"] [data-content]`);
+  if (!el) return;
+  // Soft background refresh only: skip if user is typing in THIS window
+  if (opts.soft && isUserTypingIn(id)) return;
+  const snap = captureWindowUi(id, el);
+  el.innerHTML = renderApp(id);
+  wireAppContent(id, el);
+  restoreWindowUi(id, el, snap);
+}
+
+function refreshOpenApps(ids = null, opts = {}) {
+  const list = ids || [...state.opened.keys()];
+  for (const id of list) {
+    if (!state.opened.has(id)) continue;
+    // never wipe the window the user is typing in during background ticks
+    if (!opts.force && isUserTypingIn(id)) continue;
+    renderWindow(id, opts);
+  }
+  try { renderTaskbar(); } catch (e) {}
+}
 function wireAppContent(id,el) {
   if(isTerminalId(id)){
     const term=getTerm(id);
     const out=el.querySelector('.terminal-output');
     if(out){
       out.addEventListener('scroll',()=>{
-        const nearBottom=(out.scrollHeight-out.scrollTop-out.clientHeight)<48;
-        if(term) term.scrollPin=nearBottom;
+        const dist = out.scrollHeight - out.scrollTop - out.clientHeight;
+        if (term) term.scrollPin = dist < 80;
       },{passive:true});
       scrollTerminalBottom(id, true);
     }
-    const form=el.querySelector('.terminal-form');
-    form?.addEventListener('submit',async e=>{
+    const form=el.querySelector('.terminal-form, form.term-inline-form');
+    if (!form) return;
+    form.addEventListener('submit',async e=>{
       e.preventDefault();
       e.stopPropagation();
       const termNow=getTerm(id);
+      if (termNow?.booting) return;
       // Allow typing/queue only when not mid-animation hard-lock — still accept commands
       const input=form.elements.command;
       const val=input?.value||'';
@@ -552,16 +1069,21 @@ function wireAppContent(id,el) {
           return;
         }
         if(kind==='bank-transfer'){
+          if (!rateOk('bank-tx', 800)) { toast('Подожди…','warn'); return; }
           const to=(f.elements.to?.value||'').trim();
           const amount=Number(f.elements.amount?.value||0);
           const sid=state.bankSessionId||state.game.bank?.sessionId;
-          if(!sid){toast('Нет сессии','error');return;}
-          if(!to){toast('Укажи счёт получателя','error');return;}
-          const r=bankTransfer(state.game,sid,to,amount);
-          if(!r.ok){toast(r.reason||'Ошибка перевода','error');return;}
-          toast(r.message||'Перевод выполнен','success');
+          if(!sid){toast('Нет сессии — войди в кабинет заново','error');return;}
+          if(!to){toast('Укажи счёт получателя или свой wallet','error');return;}
+          if(!amount||amount<=0){toast('Укажи сумму','error');return;}
+          let r;
+          try { r=bankTransfer(state.game,sid,to,amount); }
+          catch(err){ toast(String(err.message||err),'error'); return; }
+          if(!r||!r.ok){toast((r&&r.reason)||'Ошибка перевода','error');return;}
+          toast(r.message||('Перевод '+amount+' CR выполнен'),'success');
           scheduleSave();
-          renderWindow(id);
+          try { renderWindow(id); } catch(e){}
+          try { refreshOpenApps(['bank','profile','browser']); } catch(e){}
         }
       });
     });
@@ -607,14 +1129,18 @@ function renderProfile(g) {
   const phonesTotal = Number(st.phonesHacked || st.hackedPhones || 0);
   const phonesOk = Number(st.successfulPhoneHacks || st.successfulOperations || 0);
   const earned = Number(p.totalEarned || 0);
+  const photo = p.photoUrl || '';
+  const initial = String(p.nickname || 'OP').slice(0, 1).toUpperCase();
+  const avatar = photo
+    ? `<img class="profile-avatar-img" src="${esc(photo)}" alt="" referrerpolicy="no-referrer" decoding="async">`
+    : `<span class="profile-avatar-fallback">${esc(initial)}</span>`;
   return `<div class="app-heading"><div><div class="eyebrow">OPERATOR</div><h2>Профиль</h2></div><span class="badge green">ACTIVE</span></div>
-  <section class="profile-hero">
+  <section class="profile-hero profile-hero-row">
+    <div class="profile-avatar">${avatar}</div>
     <div class="profile-ident">
-      <div class="avatar">${esc((p.nickname||'OP').slice(0,2).toUpperCase())}</div>
-      <div><h3>${esc(p.nickname||'operator')}</h3>
-      <small>TG: ${esc(p.telegramId||'—')}</small></div>
+      <h3 class="profile-name">${esc(p.nickname||'operator')}</h3>
+      <div class="profile-sub">Уровень ${p.level} · оператор</div>
     </div>
-    <div class="profile-rank"><b>LVL ${p.level}</b><small>OPERATOR</small></div>
   </section>
   <div class="panel section-gap">
     <div class="panel-title"><span>ОПЫТ</span><small>${fmt(p.xp)} XP</small></div>
@@ -707,16 +1233,35 @@ function renderFiles(g) {
 
 
 function renderDarkShop(g) {
-  return `<div class="app-heading"><div><div class="eyebrow">DARKSHOP</div><h2>DarkShop</h2><p>Каталог</p></div><span class="badge">1</span></div>
-  <div class="list section-gap">
-    <div class="list-row">
-      <div class="list-main"><strong>Сервер (rack node)</strong><small>Выделенный узел · визуал</small></div>
-      <span class="badge">1200 €</span>
-    </div>
-  </div>
-  <div class="notice warning section-gap">Покупка пока недоступна — только витрина.</div>
-  <div class="muted small">Комплектующие CPU/RAM — в разработке.</div>`;
+  ensureDarkshop(g);
+  refreshDarkshopListings(g);
+  const ds = g.darkshop;
+  const tab = state.darkshopTab || 'market';
+  const tabs = [
+    ['market','РЫНОК'],['files','ФАЙЛЫ'],['db','БАЗЫ'],['phones','ТЕЛЕФОНЫ'],['servers','СЕРВЕРЫ'],['sell','МОИ ФАЙЛЫ'],['history','ИСТОРИЯ']
+  ];
+  const tabBar = `<div class="btn-row section-gap" style="flex-wrap:wrap;gap:6px">${tabs.map(([id,l])=>`<button type="button" class="btn tiny ${tab===id?'primary':''}" data-action="darkshop-tab" data-id="${id}">${l}</button>`).join('')}</div>`;
+  let body = '';
+  if (tab === 'history') {
+    const rows = (ds.history||[]).slice(0,40).map(tx => `<div class="list-row"><div class="list-main"><strong>${esc(tx.operation_type==='buy'?'ПОКУПКА':'ПРОДАЖА')} · ${esc(tx.name||tx.instance_id)}</strong><small>${new Date(tx.timestamp).toLocaleString('ru-RU')} · ${esc(tx.transaction_id)}</small></div><b class="${tx.operation_type==='buy'?'text-red':'text-green'}">${tx.operation_type==='buy'?'−':'+'}${fmt(tx.amount_cr)} CR</b></div>`).join('') || '<div class="muted">История пуста.</div>';
+    body = `<div class="list">${rows}</div>`;
+  } else if (tab === 'sell') {
+    const mine = (g.computer.files||[]).filter(f => f.sale_state !== 'sold_to_market');
+    body = mine.length ? `<div class="list">${mine.map(f=>{
+      const ap = appraiseFileInstance(f);
+      return `<div class="list-row"><div class="list-main"><strong>${esc(f.file_name||f.name)}</strong><small>${esc(rarityLabel(f.rarity))} · ${esc(f.file_type||f.kind||'file')} · ${esc((f.content_preview||f.body||'').slice(0,100))}</small></div><div class="list-actions"><span class="badge">${fmt(ap.price)} CR</span><button type="button" class="btn tiny" data-action="darkshop-appraise" data-id="${esc(f.instance_id||f.id)}">ОЦЕНИТЬ</button><button type="button" class="btn tiny primary" data-action="darkshop-sell" data-id="${esc(f.instance_id||f.id)}">ПРОДАТЬ</button></div></div>`;
+    }).join('')}</div>` : '<div class="notice">Нет файлов для продажи. Скачай файлы с телефонов или купи на рынке.</div>';
+  } else {
+    const filter = tab === 'market' ? null : ({files:'file',db:'database',phones:'phone_image',servers:'server'})[tab];
+    const items = (ds.listings||[]).filter(l => l.listing_state === 'listed_by_market' && (!filter || l.item_type === filter || (filter==='file' && !['database','phone_image','server'].includes(l.item_type))));
+    body = items.length ? `<div class="list">${items.map(l=>`<div class="list-row"><div class="list-main"><strong>${esc(l.file_name)}</strong><small>${esc(rarityLabel(l.rarity))} · ${esc(l.item_type)} · ${esc(l.origin||'')} · ${esc(l.description||'')}</small></div><div class="list-actions"><span class="badge">${fmt(l.price_cr)} CR</span><button type="button" class="btn tiny primary" data-action="darkshop-buy" data-id="${esc(l.listing_id)}">КУПИТЬ</button></div></div>`).join('')}</div>` : '<div class="muted">Нет предложений в этой категории.</div>';
+  }
+  return `<div class="app-heading"><div><div class="eyebrow">DARKSHOP / DATA MARKET</div><h2>DarkShop</h2><p>Рынок цифровых данных · не заказы</p></div><span class="badge">${fmt((g.economy&&g.economy.credits!=null)?g.economy.credits:(g.player.credits||0))} CR</span></div>
+  ${tabBar}
+  <div class="notice section-gap">Покупай и продавай файлы, базы, образы и дампы. Оценка по редкости и полезности. Уценка 75% — только для проданного instance_id.</div>
+  ${body}`;
 }
+
 
 function renderPluginCard(g,p) {
   const installed=getInstalledPlugin(g,p.id);
@@ -731,7 +1276,17 @@ function renderPluginCard(g,p) {
       : !space ? '<span class="badge red">NO SPACE</span>'
       : bankLocked ? '<span class="badge red">BANK LOCK</span>'
       : `<button class="btn tiny" data-action="install-plugin" data-id="${p.id}" title="${esc(blocker)}">${p.price?'УСТАНОВИТЬ · '+fmt(p.price):'ДОБАВИТЬ'}</button>`;
-  return `<div class="list-row"><div class="list-main"><strong>${esc(p.name)} <span class="muted">v${esc(p.version)}</span></strong><small>${esc(p.category)} · ${esc(p.description)}<br>RAM ${p.ram} GB · ${p.storage} MB · ОС ${(p.minOs||1)}.0+ · ${p.cooldown?`${p.cooldown/1000} сек cooldown`:'без cooldown'}${wip?' · <b>WIP</b>':''}</small><small class="text-blue">${wip?'Закрыто до нового чек-листа. Логика сохранена.':esc(p.effect)}</small></div><div class="list-actions"><button class="btn tiny ghost" data-action="plugin-docs" data-id="${p.id}">ПОДРОБНЕЕ</button>${status}</div></div>`;
+  return `<div class="list-row plugin-row">
+    <div class="list-main">
+      <strong>${esc(p.name)} <span class="muted">v${esc(p.version)}</span></strong>
+      <small>${esc(p.category)} · ${esc(p.description)}<br>RAM ${p.ram} GB · ${p.storage} MB · ОС ${(p.minOs||1)}.0+${wip?' · <b>WIP</b>':''}</small>
+      <small class="text-blue">${wip?'Закрыто до нового чек-листа.':esc(p.effect)}</small>
+    </div>
+    <div class="list-actions">
+      <button type="button" class="btn tiny ghost" data-action="plugin-docs" data-id="${esc(p.id)}">ПОДРОБНЕЕ</button>
+      ${status}
+    </div>
+  </div>`;
 }
 function renderForge(g) {
   const categories=[...new Set(PLUGINS.map(p=>p.category))];
@@ -887,7 +1442,7 @@ function renderSitePage(g, site, page, progress) {
   const p = page || 'home';
 
   if (locked) {
-    return `<div class="site-page site-error"><div class="site-error-code">503</div><h2>Service Recovering</h2><p>${esc(site.domain)} временно недоступен · recovery ${humanLeft(site.recoveryAt - Date.now())}</p></div>`;
+    return `<div class="site-page site-error kind-error"><div class="site-error-code">503</div><h2>Service Recovering</h2><p>${esc(site.domain)} временно недоступен · recovery ${humanLeft(site.recoveryAt - Date.now())}</p></div>`;
   }
 
   // Nav helper
@@ -921,16 +1476,16 @@ function renderSitePage(g, site, page, progress) {
         peopleHtml = rows.slice(0, 18).map(pe => `<div class="nt-person"><div><b>${esc(pe.name)}</b><small>${esc(pe.tick)} · ${esc(pe.region)}</small></div><span>${Number(pe.stake).toLocaleString('ru-RU')} CR</span></div>`).join('');
       } catch(e) { peopleHtml = (tr.people||[]).map(pe=>`<div class="nt-person"><div><b>${esc(pe.name)}</b></div><span>${pe.stake}</span></div>`).join(''); }
 
-      return `<div class="site-page site-trading"><header class="site-hero trading"><div class="site-brand">NULL<span>TRADING</span></div>${navT}</header>
+      return `<div class="site-page site-trading kind-trading"><header class="site-hero trading"><div class="site-brand">NULL<span>TRADING</span></div>${navT}</header>
         <div class="site-body"><h2>Люди</h2><div class="nt-people">${peopleHtml}</div></div></div>`;
     }
     if (p === 'profile') {
-      return `<div class="site-page site-trading"><header class="site-hero trading"><div class="site-brand">NULL<span>TRADING</span></div>${navT}</header>
+      return `<div class="site-page site-trading kind-trading"><header class="site-hero trading"><div class="site-brand">NULL<span>TRADING</span></div>${navT}</header>
         <div class="site-body"><h2>Профиль</h2>
         <div class="notice warning">В разработке. Портфель и сделки появятся позже.</div>
         <p class="muted">Сейчас доступны только котировки и список участников.</p></div></div>`;
     }
-    return `<div class="site-page site-trading"><header class="site-hero trading"><div class="site-brand">NULL<span>TRADING</span></div>${navT}</header>
+    return `<div class="site-page site-trading kind-trading"><header class="site-hero trading"><div class="site-brand">NULL<span>TRADING</span></div>${navT}</header>
       <div class="site-body">
         <h1>Биржа Trade</h1>
         <p class="muted">NULLBYTE · 44weee · tunnel</p>
@@ -946,19 +1501,19 @@ function renderSitePage(g, site, page, progress) {
       { n: 'Order VM-204 (ledger)', price: '—' }
     ];
     if (p === 'catalog') {
-      return `<div class="site-page site-shop"><header class="site-hero shop"><div class="site-brand">VOLT<span>MARKET</span></div>${nav([['home','Главная'],['catalog','Каталог'],['orders','Заказы'],['about','О нас']])}</header>
+      return `<div class="site-page site-shop kind-shop"><header class="site-hero shop"><div class="site-brand">VOLT<span>MARKET</span></div>${nav([['home','Главная'],['catalog','Каталог'],['orders','Заказы'],['about','О нас']])}</header>
         <div class="site-body"><h2>Каталог</h2><div class="shop-grid">${products.map(x=>`<div class="shop-card"><strong>${esc(x.n)}</strong><span>${x.price=== '—' ? 'ledger' : x.price+' CR'}</span></div>`).join('')}</div>
         <p class="site-note">Публичная витрина. Глубокие записи заказа — через операции в Terminal.</p></div></div>`;
     }
     if (p === 'orders') {
-      return `<div class="site-page site-shop"><header class="site-hero shop"><div class="site-brand">VOLT<span>MARKET</span></div>${nav([['home','Главная'],['catalog','Каталог'],['orders','Заказы'],['about','О нас']])}</header>
+      return `<div class="site-page site-shop kind-shop"><header class="site-hero shop"><div class="site-brand">VOLT<span>MARKET</span></div>${nav([['home','Главная'],['catalog','Каталог'],['orders','Заказы'],['about','О нас']])}</header>
         <div class="site-body"><h2>Заказы</h2>
         <div class="data-table"><div class="dt-row head"><span>ID</span><span>Статус</span><span>Сумма</span></div>
         <div class="dt-row"><span>VM-204</span><span>${access?'visible':'restricted'}</span><span>···</span></div>
         <div class="dt-row"><span>VM-118</span><span>shipped</span><span>90 CR</span></div></div>
         <p class="site-note">Артефакт CATALOG-B7 связан с VM-204.</p></div></div>`;
     }
-    return `<div class="site-page site-shop"><header class="site-hero shop"><div class="site-brand">VOLT<span>MARKET</span></div>${nav([['home','Главная'],['catalog','Каталог'],['orders','Заказы'],['about','О нас']])}</header>
+    return `<div class="site-page site-shop kind-shop"><header class="site-hero shop"><div class="site-brand">VOLT<span>MARKET</span></div>${nav([['home','Главная'],['catalog','Каталог'],['orders','Заказы'],['about','О нас']])}</header>
       <div class="site-body"><h1>Электроника и комплектующие</h1><p>${esc(site.description)}</p>
       <div class="shop-grid">${products.slice(0,3).map(x=>`<div class="shop-card"><strong>${esc(x.n)}</strong><span>${x.price} CR</span></div>`).join('')}</div>
       <p class="site-meta">Регион: ${esc(site.region)} · sec ${site.security}/5</p>
@@ -975,7 +1530,7 @@ function renderSitePage(g, site, page, progress) {
       p = 'cabinet';
     }
     if (!acc && (p === 'login' || p === 'cabinet' || p === 'transfer')) {
-      return `<div class="site-page site-bank"><header class="site-hero bank"><div class="site-brand">ASTER <span>UNION</span></div>${nav([['home','Обзор'],['login','Вход'],['security','Безопасность']])}</header>
+      return `<div class="site-page site-bank kind-bank"><header class="site-hero bank"><div class="site-brand">ASTER <span>UNION</span></div>${nav([['home','Обзор'],['login','Вход'],['security','Безопасность']])}</header>
         <div class="site-body"><h2>Вход в кабинет</h2>
         <p class="muted">Логин и пароль из SMS взломанного телефона (hard+ — всегда в переписке).</p>
         <form class="bank-login-form" data-action-form="bank-login">
@@ -987,16 +1542,16 @@ function renderSitePage(g, site, page, progress) {
     }
     if (acc) {
       const tx = (acc.transactions||[]).slice(0,8);
-      return `<div class="site-page site-bank"><header class="site-hero bank"><div class="site-brand">ASTER <span>UNION</span></div>${nav([['home','Обзор'],['cabinet','Кабинет'],['transfer','Перевод']])}</header>
+      return `<div class="site-page site-bank kind-bank"><header class="site-hero bank"><div class="site-brand">ASTER <span>UNION</span></div>${nav([['home','Обзор'],['cabinet','Кабинет'],['transfer','Перевод']])}</header>
         <div class="site-body"><h2>Кабинет</h2>
         <div class="bank-dash"><div class="bank-tile"><span>Счёт</span><strong>${esc(acc.accountNo)}</strong></div><div class="bank-tile"><span>Баланс</span><strong>${fmt(acc.balance)} CR</strong></div><div class="bank-tile"><span>Сессия</span><strong>ACTIVE</strong></div></div>
-        ${p==='transfer'?`<form class="bank-login-form" data-action-form="bank-transfer"><label>Счёт получателя<input class="field" name="to" placeholder="NB-… wallet или AST-…"></label><label>Сумма<input class="field" name="amount" type="number" min="1"></label><button class="btn primary" type="submit">ПЕРЕВЕСТИ</button></form>`:''}
+        ${p==='transfer'?`<form class="bank-login-form" data-action-form="bank-transfer"><p class="muted small">Твой wallet: <b>${esc(g.player?.walletId||'—')}</b> — вставь его, чтобы вывести CR себе.</p><label>Счёт / wallet<input class="field" name="to" placeholder="${esc(g.player?.walletId||'wallet или AST-…')}"></label><label>Сумма (CR)<input class="field" name="amount" type="number" min="1" step="1"></label><button class="btn primary" type="submit">ПЕРЕВЕСТИ</button></form>`:''}
         <h3>История</h3>
         ${tx.map(t=>`<div class="forum-row"><strong>${t.type} ${t.amount}</strong><small>${t.to||t.from||''} · ${formatTime(t.at)}</small></div>`).join('')}
         <div class="btn-row section-gap"><button class="btn tiny" data-action="bank-logout">ВЫЙТИ</button></div>
         </div></div>`;
     }
-    return `<div class="site-page site-bank"><header class="site-hero bank"><div class="site-brand">ASTER <span>UNION</span></div>${nav([['home','Обзор'],['login','Вход'],['security','Безопасность']])}</header>
+    return `<div class="site-page site-bank kind-bank"><header class="site-hero bank"><div class="site-brand">ASTER <span>UNION</span></div>${nav([['home','Обзор'],['login','Вход'],['security','Безопасность']])}</header>
       <div class="site-body">
         <div class="bank-dash"><div class="bank-tile"><span>Контур</span><strong>NPC ACCOUNTS</strong></div><div class="bank-tile"><span>Защита</span><strong>${site.security}/5</strong></div><div class="bank-tile"><span>Статус</span><strong>${site.state}</strong></div></div>
         <p>Aster Union — внутриигровой банк. Счета NPC, переводы, ограниченная сессия.</p>
@@ -1011,18 +1566,18 @@ function renderSitePage(g, site, page, progress) {
       { t: 'Сигналы с Площади Маяк', by: 'harbor_ops', n: 8 }
     ];
     if (p === 'threads') {
-      return `<div class="site-page site-forum"><header class="site-hero forum"><div class="site-brand">COBALT <span>FORUM</span></div>${nav([['home','Лента'],['threads','Темы'],['users','Участники']])}</header>
+      return `<div class="site-page site-forum kind-forum"><header class="site-hero forum"><div class="site-brand">COBALT <span>FORUM</span></div>${nav([['home','Лента'],['threads','Темы'],['users','Участники']])}</header>
         <div class="site-body"><h2>Темы</h2>${threads.map(th=>`<div class="forum-row"><strong>${esc(th.t)}</strong><small>${esc(th.by)} · ${th.n} msg</small></div>`).join('')}
         <p class="site-note">Полные тексты сообщений — через контракт / Terminal export.</p></div></div>`;
     }
-    return `<div class="site-page site-forum"><header class="site-hero forum"><div class="site-brand">COBALT <span>FORUM</span></div>${nav([['home','Лента'],['threads','Темы'],['users','Участники']])}</header>
+    return `<div class="site-page site-forum kind-forum"><header class="site-hero forum"><div class="site-brand">COBALT <span>FORUM</span></div>${nav([['home','Лента'],['threads','Темы'],['users','Участники']])}</header>
       <div class="site-body"><h1>Сообщество Cobalt</h1><p>${esc(site.description)}</p>
       ${threads.slice(0,2).map(th=>`<div class="forum-row"><strong>${esc(th.t)}</strong><small>${esc(th.by)}</small></div>`).join('')}
       </div></div>`;
   }
 
   if (site.kind === 'database') {
-    return `<div class="site-page site-gov"><header class="site-hero gov"><div class="site-brand">CIVIC <span>RECORDS</span></div>${nav([['home','Портал'],['registry','Реестр'],['docs','Документы']])}</header>
+    return `<div class="site-page site-gov kind-gov"><header class="site-hero gov"><div class="site-brand">CIVIC <span>RECORDS</span></div>${nav([['home','Портал'],['registry','Реестр'],['docs','Документы']])}</header>
       <div class="site-body">
         <h1>Муниципальный реестр</h1>
         <p>Официальный интерфейс. Записи CR-* доступны операторам с Virtual DB Reader.</p>
@@ -1034,7 +1589,7 @@ function renderSitePage(g, site, page, progress) {
   }
 
   if (site.kind === 'utility') {
-    return `<div class="site-page site-util"><header class="site-hero util"><div class="site-brand">GRID<span>WORKS</span></div>${nav([['home','Статус'],['logs','Журналы'],['nodes','Узлы']])}</header>
+    return `<div class="site-page site-util kind-util"><header class="site-hero util"><div class="site-brand">GRID<span>WORKS</span></div>${nav([['home','Статус'],['logs','Журналы'],['nodes','Узлы']])}</header>
       <div class="site-body"><h1>Сетевой контроллер</h1>
       <div class="util-meters"><div><span>Load</span><b>${30+site.security*8}%</b></div><div><span>Nodes</span><b>14</b></div><div><span>Journal</span><b>GW-11</b></div></div>
       <p>${esc(site.description)}</p>
@@ -1042,7 +1597,7 @@ function renderSitePage(g, site, page, progress) {
   }
 
   if (site.kind === 'auto') {
-    return `<div class="site-page site-auto"><header class="site-hero auto"><div class="site-brand">NEON <span>MOTORS</span></div>${nav([['home','Сервис'],['cards','Карточки'],['about','О сервисе']])}</header>
+    return `<div class="site-page site-auto kind-auto"><header class="site-hero auto"><div class="site-brand">NEON <span>MOTORS</span></div>${nav([['home','Сервис'],['cards','Карточки'],['about','О сервисе']])}</header>
       <div class="site-body"><h1>Сервисные карточки</h1>
       <div class="auto-card"><strong>NM-88</strong><span>VIN-SIM-88</span><small>status: workshop</small></div>
       <div class="auto-card"><strong>NM-12</strong><span>VIN-SIM-12</span><small>status: ready</small></div>
@@ -1050,21 +1605,21 @@ function renderSitePage(g, site, page, progress) {
   }
 
   if (site.kind === 'device') {
-    return `<div class="site-page site-device"><header class="site-hero device"><div class="site-brand">POCKET <span>MOBILE</span></div>${nav([['home','Устройство'],['apps','Приложения']])}</header>
+    return `<div class="site-page site-device kind-device"><header class="site-hero device"><div class="site-brand">POCKET <span>MOBILE</span></div>${nav([['home','Устройство'],['apps','Приложения']])}</header>
       <div class="site-body"><div class="phone-frame"><div class="phone-screen"><strong>PM-22</strong><small>demo handset</small><p>Сеть: NorthWifi</p></div></div>
       <p>${esc(site.description)}</p>
       <p class="site-note">Глубокий разбор — map-scanner forensics в Terminal.</p></div></div>`;
   }
 
   if (site.kind === 'wifi') {
-    return `<div class="site-page site-wifi"><header class="site-hero wifi"><div class="site-brand">NORTH <span>WIFI</span></div>${nav([['home','Точка'],['status','Статус']])}</header>
+    return `<div class="site-page site-wifi kind-wifi"><header class="site-hero wifi"><div class="site-brand">NORTH <span>WIFI</span></div>${nav([['home','Точка'],['status','Статус']])}</header>
       <div class="site-body"><h1>AP-05 · Площадь Маяк</h1>
       <div class="wifi-panel"><span>SSID</span><strong>NorthWifi-AP05</strong><span>Signal</span><strong>-48 dBm</strong><span>Clients</span><strong>6</strong></div>
       <p class="site-note">Параметры точки экспортируются контрактом.</p></div></div>`;
   }
 
   // generic
-  return `<div class="site-page site-generic"><header class="site-hero"><div class="site-brand">${esc(site.title)}</div></header>
+  return `<div class="site-page site-generic kind-generic"><header class="site-hero"><div class="site-brand">${esc(site.title)}</div></header>
     <div class="site-body"><p>${esc(site.description)}</p><p class="site-meta">${esc(site.domain)} · ${esc(site.kind)} · sec ${site.security}</p></div></div>`;
 }
 
@@ -1135,42 +1690,50 @@ function renderMap(g) {
   const selected = state.mapSelected || null;
   const regions = PHONE_REGIONS || [];
   const net = g.phoneWorld?.network;
-  const bans = g.phoneWorld?.networkBanUntil || {};
   const now = Date.now();
-  // fixed positions for 6 regions
+  // Positions match city_map art (6 districts)
+  // top-left towers = midtown | top-right industrial = ironreach
+  // mid-left circular = bayshore | mid-right residential = oakridge
+  // bot-left campus = southgate | bot-right dark ruins = shadowline
   const pos = {
-    bayshore: { x: 18, y: 28 }, midtown: { x: 48, y: 22 }, ironreach: { x: 78, y: 30 },
-    southgate: { x: 22, y: 68 }, oakridge: { x: 52, y: 62 }, shadowline: { x: 78, y: 72 }
+    midtown:    { x: 28, y: 18 },
+    ironreach:  { x: 74, y: 20 },
+    bayshore:   { x: 26, y: 48 },
+    oakridge:   { x: 74, y: 50 },
+    southgate:  { x: 28, y: 78 },
+    shadowline: { x: 74, y: 80 }
   };
   const points = regions.map(r => {
     const p = pos[r.id] || { x: 50, y: 50 };
     const banned = isNetworkBanned(g, r.id);
-    return `<button type="button" class="map-point ${selected===r.id?'on':''} ${banned?'banned':''}" style="left:${p.x}%;top:${p.y}%" data-action="map-select" data-id="${esc(r.id)}"><span>${esc(r.name)}</span></button>`;
+    const onNet = net && net.regionId === r.id;
+    return `<button type="button" class="map-point ${selected===r.id?'on':''} ${banned?'banned':''} ${onNet?'linked':''}" style="left:${p.x}%;top:${p.y}%" data-action="map-select" data-id="${esc(r.id)}" aria-label="${esc(r.name)}"><span class="map-label">${esc(r.name)}</span></button>`;
   }).join('');
   const detail = selected ? regions.find(r => r.id === selected) : null;
   let info = '<span class="muted">Выбери район сети</span>';
   if (detail) {
     const banned = isNetworkBanned(g, detail.id);
-    const vis = listRegionPhones(detail.id).length;
+    let vis = 0;
+    try { vis = listRegionPhones(detail.id).length; } catch (e) {}
     if (banned) {
       info = `<strong class="text-red">${esc(detail.name)}</strong>
-        <p class="text-red">НЕДОСТУПНО — бан сети</p>
-        <div class="kv"><span>Статус</span><b class="text-red">BANNED</b></div>
-        <div class="muted small">connect / scan / open недоступны до снятия бана</div>`;
+        <p class="text-red">НЕДОСТУПНО — бан сети. Connect / взлом закрыты.</p>`;
     } else {
       info = `<strong>${esc(detail.name)}</strong>
-        <div class="kv"><span>REGION_ID</span><b>${esc(detail.id)}</b></div>
-        <div class="kv"><span>NET_KEY</span><b>${esc(detail.netKey)}</b></div>
-        <div class="kv"><span>SSID</span><b>${esc(detail.ssid)}</b></div>
-        <div class="kv"><span>Видимых устройств</span><b>${vis}</b></div>
-        <div class="kv"><span>Сейчас в сети</span><b>${net?.regionId===detail.id?'CONNECTED':'—'}</b></div>`;
+        <div class="kv"><span>NET KEY</span><b>${esc(detail.netKey || '—')}</b></div>
+        <div class="kv"><span>SSID</span><b>${esc(detail.ssid || '—')}</b></div>
+        <div class="kv"><span>Видимые узлы</span><b>${vis}</b></div>
+        <p class="muted small">net-link → connect ${esc(detail.id)}</p>`;
     }
   }
-  return `<div class="app-heading"><div><div class="eyebrow">NULLATLAS</div><h2>Карта сетей</h2><p>Районы · NET_KEY · бан</p></div><span class="badge">${regions.length}</span></div>
-  <div class="map-canvas section-gap">${points}</div>
-  <div class="panel section-gap map-net-info">${info}
-  <div class="kv section-gap"><span>Активная сеть</span><b>${net ? esc(net.regionId)+' · '+esc(net.netKey||'') : 'OFFLINE'}</b></div>
-  </div>`;
+  return `<div class="app-heading"><div><div class="eyebrow">NULLATLAS</div><h2>Карта сетей</h2><p>Null-City · 6 регионов</p></div><span class="badge">LIVE</span></div>
+  <div class="map-wrap">
+    <div class="map-canvas">
+      <img class="map-art" src="city_map.jpg" alt="Null-City map" draggable="false">
+      ${points}
+    </div>
+  </div>
+  <div class="panel map-info section-gap">${info}</div>`;
 }
 
 function missionSteps(m, g) {
@@ -1211,7 +1774,8 @@ function renderMissionGuide(m, g) {
     <div class="kv"><span>Цель</span><b>${esc(site?.title || m.target)} · ${esc(site?.domain || '—')}</b></div>
     <div class="kv"><span>Район</span><b>${esc(loc?.name || site?.region || '—')} / ${esc(site?.district || '—')}</b></div>
     <div class="kv"><span>Сложность / SEC</span><b>${esc(m.difficulty)} · ${site?.security ?? '—'}</b></div>
-    <div class="kv"><span>Награда</span><b class="text-green">+${fmt(m.reward)} CR · +${fmt(m.xp)} XP</b></div>
+    <div class="kv"><span>Защита цели</span><b>${esc(m.difficultyLabel||m.protection||'—')} ${missionProtBadge(m)}</b></div>
+    <div class="kv"><span>Награда</span><b class="text-green">+${fmt(m.reward)} CR</b> <span class="muted small">(${fmt(m.baseReward||m.reward)} + ${fmt(m.rewardBonus||0)})</span> · <b>+${fmt(m.xp)} XP</b></div>
     <div class="kv"><span>Плагины</span><b>${esc(tools)}</b></div>
     <div class="divider"></div>
     <p><b>Задача:</b> ${esc(m.objective)}</p>
@@ -1225,6 +1789,12 @@ function renderMissionGuide(m, g) {
 }
 
 
+function missionProtBadge(m) {
+  const p = String(m.protection || '').toLowerCase();
+  const labels = { low:'LOW +0', medium:'MED +100', high:'HIGH +200', hard:'HARD +300', xhard:'XHARD +400' };
+  const cls = { low:'badge green', medium:'badge', high:'badge', hard:'badge amber', xhard:'badge red' };
+  return `<span class="${cls[p]||'badge'}">${labels[p]||(m.difficultyLabel||'—')}</span>`;
+}
 function renderBlackWire(g) {
   const now = Date.now();
   const boardLeft = typeof missionBoardTimer === 'function' ? missionBoardTimer(g, now) : 0;
@@ -1243,8 +1813,9 @@ function renderBlackWire(g) {
     return `<article class="contract-card ${state.selectedMissionId===m.id?'is-selected':''}">
       <div class="contract-top"><strong>${esc(m.title)}</strong><span class="badge ${m.status==='accepted'?'amber':m.status==='submitted'?'green':'gray'}">${m.status==='accepted'?'ACTIVE':m.status==='submitted'?'VERIFYING':(m.category||'JOB').toUpperCase()}</span></div>
       <p>${esc(m.objective)}</p>
-      <div class="contract-meta"><span>ID ${esc(m.id)}</span><span>ЦЕЛЬ ${esc(site?.domain||m.target)}</span><span>${esc(m.difficulty)}</span></div>
-      <div class="contract-meta section-gap"><span class="text-green">+${fmt(m.reward)} CR</span><span>+${fmt(m.xp)} XP</span><span>${esc(m.client)}</span></div>
+      <div class="contract-meta mission-meta"><span>ID ${esc(m.id)}</span><span>${esc(m.ownerName||m.client||'—')}</span><span>${esc(m.regionId||'')}</span></div>
+      <div class="contract-meta mission-meta"><span>Защита ${missionProtBadge(m)}</span><span>${esc(m.phoneId||'—')}</span></div>
+      <div class="contract-meta section-gap"><span class="text-green">+${fmt(m.reward)} CR</span><span class="muted small">${m.baseReward!=null?`база ${fmt(m.baseReward)} + бонус ${fmt(m.rewardBonus||0)}`:''}</span><span>+${fmt(m.xp)} XP</span></div>
       <div class="divider"></div>
       <div class="small muted">${esc(m.hint||'')}</div>
       <div class="btn-row">
@@ -1270,49 +1841,352 @@ function renderBlackWire(g) {
 function terminalPrompt(term) {
   const nick = (state.game?.player?.nickname || 'user').toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'user';
   if (state.game?.ops?.serverSession && !term?.plugin) {
-    return `${nick}@${state.game.ops.serverSession.domain}:~$`;
+    return nick + '@' + state.game.ops.serverSession.domain + ':~$';
   }
   if (term?.plugin) {
     const p = getPlugin(term.plugin);
-    const short = (p?.id || term.plugin).replace(/[^a-z0-9]/gi, '').slice(0, 12);
-    return `${nick}@nullbyte-os:${short}$`;
+    const short = ((p && p.id) || term.plugin).replace(/[^a-z0-9]/gi, '').slice(0, 12);
+    return nick + '@nullbyte-os:' + short + '$';
   }
-  return `${nick}@nullbyte-os:~ $`;
+  return nick + '@nullbyte-os:~$';
 }
 
 function scrollTerminalBottom(termId, force = false) {
   const out = document.querySelector(`[data-window="${termId}"] .terminal-output`);
   if (!out) return;
   const term = getTerm(termId);
-  if (!force && term && !term.scrollPin) return;
-  requestAnimationFrame(() => {
-    out.scrollTop = out.scrollHeight + 400;
-    requestAnimationFrame(() => { out.scrollTop = out.scrollHeight + 400; });
+  if (!force && term && term.scrollPin === false) return;
+  const prev = out.style.scrollBehavior;
+  out.style.scrollBehavior = 'auto';
+  out.scrollTop = out.scrollHeight;
+  out.style.scrollBehavior = prev || '';
+}
+
+
+function resolvePluginId(rawId) {
+  const raw = String(rawId || '').trim().toLowerCase();
+  if (!raw) return null;
+  const q = raw.replace(/\s+/g, '-');
+  const qSp = raw.replace(/-/g, ' ');
+  const installed = (state.game?.computer?.installedPlugins) || [];
+  let hit = installed.find(id => {
+    const idL = String(id).toLowerCase();
+    return idL === q || idL === raw || idL.replace(/-/g, ' ') === qSp;
   });
+  if (hit) return hit;
+  const all = (typeof PLUGINS !== 'undefined' && Array.isArray(PLUGINS)) ? PLUGINS : [];
+  const p = all.find(pl => {
+    const idL = String(pl.id).toLowerCase();
+    const nameL = String(pl.name || '').toLowerCase();
+    return idL === q || idL === raw || idL.replace(/-/g, ' ') === qSp || nameL === raw || nameL === qSp;
+  });
+  return p ? p.id : null;
+}
+
+async function runTerminalCommand(termId, raw) {
+  const term = getTerm(termId);
+  if (!term) return;
+  if (term.booting) return; // no input until boot finishes
+  const cmd = String(raw || '').trim();
+  if (!cmd) return;
+  termAdd(termId, terminalPrompt(term) + ' ' + cmd, 'prompt');
+  term.scrollPin = true;
+  if (term.busy) { termAdd(termId, 'busy…', 'error'); return; }
+
+  const parts = cmd.split(/\s+/).filter(Boolean);
+  const c0 = (parts[0] || '').toLowerCase();
+  const arg1 = parts[1] || '';
+  const argRest = parts.slice(1).join(' '); // "net link" / "phone access"
+
+  // Plugin shell
+  if (term.plugin) {
+    if (c0 === 'exit' || c0 === 'quit') {
+      term.plugin = null;
+      term.awaitFilename = null;
+      clearTerminalView(termId);
+      printNeofetch(termId);
+      termAdd(termId, 'Type help · plugins · run <plugin-id> · neofetch', 'muted');
+      const pr = document.querySelector(`[data-window="${termId}"] .term-inline-prompt`);
+      if (pr) pr.textContent = terminalPrompt(term);
+      return;
+    }
+
+    // After scan etc.: next line is filename, not a command
+    if (term.booting) { return; }
+    if (term.awaitFilename) {
+      const pending = term.awaitFilename;
+      term.awaitFilename = null;
+      const name = cmd.trim();
+      try {
+        const r = savePlayerNamedFile(state.game, name, pending.content, {
+          ext: pending.ext || '.txt',
+          type: pending.type || pending.kind || 'file',
+          kind: pending.kind
+        });
+        if (!r || !r.ok) {
+          termAdd(termId, (r && r.reason) || 'Не удалось сохранить', 'error');
+          term.awaitFilename = pending; // keep waiting
+          return;
+        }
+        termAdd(termId, 'Saved → ' + (r.file?.name || name), 'green');
+        scheduleSave();
+        if (state.opened.has('ide')) renderWindow('ide');
+        if (state.opened.has('computer')) renderWindow('computer');
+      } catch (e) {
+        termAdd(termId, String(e.message || e), 'error');
+        term.awaitFilename = pending;
+      }
+      return;
+    }
+
+    term.busy = true;
+    try {
+      // restore loaders for heavy commands
+      const loadCmds = {
+        'net-link': { connect: 8500, scan: 11000, analyze: 11000, disconnect: 2200 },
+        'phone-access': { open: 6500, attack: 9500, block: 4000 },
+        'mail-drop': { craft: 4500 },
+        'sms-bomber': { bomb: 7000 }
+      };
+      const ms = (loadCmds[term.plugin] && loadCmds[term.plugin][c0]) || 0;
+      // Validate BEFORE loader — wrong args / offline = no animation
+      if (ms > 0) {
+        const pre = runPluginShellCommand(state.game, term.plugin, cmd, { dry: true });
+        if (!pre || pre.ok === false) {
+          (pre && pre.lines || [{ text: 'Команда отклонена', type: 'error' }]).forEach(l =>
+            termAdd(termId, typeof l === 'string' ? l : (l.text || ''), (l && l.type) || 'error')
+          );
+          return;
+        }
+        if (typeof animateWorkTimed === 'function') await animateWorkTimed(termId, term.plugin, ms, c0);
+        else if (typeof animateWork === 'function') await animateWork(termId, term.plugin);
+      }
+
+      const result = await runPluginShellCommand(state.game, term.plugin, cmd, Date.now());
+      (result && result.lines || []).forEach(l => termAdd(termId, typeof l === 'string' ? l : (l.text || ''), (l && l.type) || ''));
+      if (result && result.awaitFilename) {
+        term.awaitFilename = result.awaitFilename;
+        termAdd(termId, '(следующая строка = имя файла)', 'muted');
+      }
+      if (result && result.clear) clearTerminalView(termId);
+      if (result && (result.closePhoneLab || result.clearPhone)) {
+        state._phoneTarget = null; state.phoneUnlocked = null; state.pinInput = '';
+        try { refreshPhoneLab(); } catch(e) {}
+      }
+      if (result && result.progressUpdated) scheduleSave();
+      if (result && result.refresh) refreshOpenApps();
+    } catch (e) {
+      termAdd(termId, String(e.message || e), 'error');
+    } finally {
+      term.busy = false;
+      const pr = document.querySelector(`[data-window="${termId}"] .term-inline-prompt`);
+      if (pr) pr.textContent = terminalPrompt(term);
+    }
+    return;
+  }
+
+  if (c0 === 'neofetch' || c0 === 'fastfetch' || c0 === 'fetch') {
+    printNeofetch(termId);
+    return;
+  }
+  if (c0 === 'clear' || c0 === 'cls') {
+    clearTerminalView(termId);
+    return;
+  }
+  if (c0 === 'help') {
+    const mode = getTerm(termId)?.mode || 'vanilla';
+    if (mode === 'vanilla') {
+      termAdd(termId, 'Commands: help · neofetch · status · wallpaper · clear', 'green');
+      termAdd(termId, '  wallpaper           — список обоев', 'muted');
+      termAdd(termId, '  wallpaper <id|n>    — применить обои', 'muted');
+      termAdd(termId, '  status              — сеть / RAM / диск / телефон', 'muted');
+      termAdd(termId, 'Плагины в этом терминале отключены. Phone Term — для взлома.', 'muted');
+    } else if (mode === 'phone') {
+      termAdd(termId, 'Commands: help · neofetch · plugins · run <id> · status · clear', 'muted');
+      termAdd(termId, 'Plugins: net link · phone access · mail drop · sms bomber', 'muted');
+    } else {
+      termAdd(termId, 'Server Term · серверные плагины скоро · help · clear · exit', 'muted');
+    }
+    return;
+  }
+  
+  if (c0 === 'wallpaper' || c0 === 'wallpapers') {
+    if ((getTerm(termId)?.mode || 'vanilla') !== 'vanilla') {
+      termAdd(termId, 'wallpaper — только в обычном Terminal', 'warn'); return;
+    }
+    const walls = [
+      { id: 'void', name: 'Void Grid', css: 'radial-gradient(ellipse at 30% 20%,#1a2838 0%,#0a1018 55%,#05080c 100%)' },
+      { id: 'ember', name: 'Ember Night', css: 'radial-gradient(ellipse at 70% 10%,#3a1810 0%,#12080a 50%,#070405 100%)' },
+      { id: 'toxic', name: 'Toxic Mesh', css: 'radial-gradient(ellipse at 50% 0%,#0d2a22 0%,#071410 45%,#030a08 100%)' },
+      { id: 'violet', name: 'Violet Core', css: 'radial-gradient(ellipse at 20% 80%,#221038 0%,#0c0818 50%,#05040c 100%)' },
+      { id: 'steel', name: 'Steel Horizon', css: 'linear-gradient(165deg,#1c2430 0%,#0e141c 40%,#080c12 100%)' },
+      { id: 'signal', name: 'Signal Blue', css: 'radial-gradient(circle at 80% 20%,#123048 0%,#0a1520 40%,#060a10 100%)' }
+    ];
+    if (!argRest) {
+      termAdd(termId, '┌─ WALLPAPERS ─────────────', 'green');
+      walls.forEach((w,i) => termAdd(termId, `  ${i+1}. ${w.id.padEnd(8)} ${w.name}`, ''));
+      termAdd(termId, 'usage: wallpaper <id|number>', 'muted');
+      return;
+    }
+    const key = argRest.trim().toLowerCase();
+    const w = walls.find((x,i) => x.id === key || String(i+1) === key);
+    if (!w) { termAdd(termId, 'не найдено. wallpaper — список', 'error'); return; }
+    termAdd(termId, 'applying ' + w.name + '…', 'muted');
+    await new Promise(r => setTimeout(r, 400));
+    if (!state.game.computer) state.game.computer = {};
+    state.game.computer.wallpaper = w.id;
+    state.game.computer.wallpaperCss = w.css;
+    applyWallpaper(w.css);
+    scheduleSave();
+    termAdd(termId, '✔ wallpaper → ' + w.name, 'green');
+    return;
+  }
+  if (c0 === 'status' || c0 === 'sys' || c0 === 'sysinfo') {
+    if ((getTerm(termId)?.mode || 'vanilla') !== 'vanilla') {
+      termAdd(termId, 'status — только в обычном Terminal', 'warn'); return;
+    }
+    termAdd(termId, 'collecting host status…', 'muted');
+    const glitch = () => {
+      const g = '░▒▓█';
+      return [...Array(8)].map(()=>g[Math.random()*4|0]).join('');
+    };
+    await new Promise(r => setTimeout(r, 200));
+    termAdd(termId, '  ' + glitch() + ' iface…', 'muted');
+    await new Promise(r => setTimeout(r, 280));
+    termAdd(termId, '  ' + glitch() + ' mem…', 'muted');
+    await new Promise(r => setTimeout(r, 220));
+    const g = state.game;
+    const net = g.phoneWorld?.network;
+    const ram = typeof getRamUsage === 'function' ? getRamUsage(g) : { used: 0, total: 8 };
+    const files = (g.computer?.files || []).length;
+    const plugins = (g.computer?.installedPlugins || []).length;
+    const storageUsed = Math.min(98, 12 + files * 2 + plugins * 3);
+    // deterministic local IP from seed/wallet
+    const seed = g.player?.walletId || g.meta?.seed || g.player?.nickname || 'op';
+    const h = hashStr(seed);
+    const ip = '10.' + (40 + (h % 80)) + '.' + ((h >> 8) % 200) + '.' + (2 + ((h >> 16) % 250));
+    if (!g.player.hostIp) { g.player.hostIp = ip; scheduleSave(); }
+    const hostIp = g.player.hostIp || ip;
+    const ssid = net?.ssid || net?.regionId || '— offline —';
+    const traffic = (20 + (Date.now()/1000|0) % 80) + ' Mbps ↓  /  ' + (5 + (Date.now()/700|0)%20) + ' Mbps ↑';
+    termAdd(termId, '┌─ HOST STATUS ──────────────────', 'green');
+    termAdd(termId, '  NET NAME    ' + (net?.regionId || 'none'), '');
+    termAdd(termId, '  WIFI/SSID   ' + ssid, '');
+    termAdd(termId, '  TRAFFIC     ' + traffic, '');
+    termAdd(termId, '  RAM         ' + (ram.used||0) + ' / ' + (ram.total||8) + ' GB', '');
+    termAdd(termId, '  DISK        ' + storageUsed + '% used · ' + (100-storageUsed) + '% free', '');
+    termAdd(termId, '  SERVER      local (standalone)', '');
+    termAdd(termId, '  HOST IP     ' + hostIp, '');
+    termAdd(termId, '  WALLET      ' + (g.player?.walletId || '—'), 'muted');
+    termAdd(termId, '└────────────────────────────────', 'green');
+    return;
+  }
+
+  if (c0 === 'plugins' || c0 === 'plugin') {
+    const term = getTerm(termId);
+    const mode = term?.mode || 'vanilla';
+    if (mode === 'vanilla') {
+      termAdd(termId, 'Обычный Terminal: плагины отключены. Используй Phone Term / Server Term.', 'warn');
+      return;
+    }
+    if (mode === 'server') {
+      termAdd(termId, 'Server Term: серверные плагины пока в разработке.', 'warn');
+      return;
+    }
+    const installed = new Set((state.game.computer && state.game.computer.installedPlugins) || []);
+    const all = ((typeof PLUGINS !== 'undefined' && Array.isArray(PLUGINS)) ? PLUGINS : [])
+      .filter(p => !p.hidden && p.id !== 'net-analyzer' && (!p.terminal || p.terminal === mode || (mode === 'phone' && p.category === 'Mobile Operations')));
+    termAdd(termId, '┌─ PHONE PLUGINS ───────────────────', 'green');
+    termAdd(termId, '│ id                 status     name', 'muted');
+    termAdd(termId, '├────────────────────────────────────', 'muted');
+    const rows = all.length ? all : [...installed].map(id => ({ id, name: id }));
+    rows.forEach(p => {
+      const id = p.id || p;
+      const name = p.name || (getPlugin(id)?.name) || id;
+      const locked = typeof isPluginLocked === 'function' && isPluginLocked(id);
+      const on = installed.has(id);
+      let status, typ;
+      if (locked) { status = '[LOCKED]  '; typ = 'error'; }
+      else if (on) { status = '[ON]      '; typ = 'green'; }
+      else { status = '[OFF]     '; typ = 'muted'; }
+      const idShow = String(id).replace(/-/g, ' '); const idPad = (idShow + '                    ').slice(0, 18);
+      termAdd(termId, '│ ' + idPad + ' ' + status + ' ' + name, typ);
+    });
+    termAdd(termId, '└─ run <id> · locked = в разработке', 'muted');
+    return;
+  }
+  if (c0 === 'status') {
+    const g = state.game;
+    termAdd(termId, 'operator ' + ((g.player && g.player.nickname) || '—') + ' · L' + ((g.player && g.player.level) || 1), '');
+    termAdd(termId, 'credits ' + ((g.economy && g.economy.credits) || 0) + ' · net ' + (g.phoneWorld && g.phoneWorld.network ? g.phoneWorld.network.regionId : 'offline'), '');
+    return;
+  }
+  if (c0 === 'run' || c0 === 'exec') {
+    const tmode = (getTerm(termId)?.mode) || 'vanilla';
+    if (tmode === 'vanilla') { termAdd(termId, 'Плагины недоступны в обычном Terminal. Открой Phone Term.', 'error'); return; }
+    if (tmode === 'server') { termAdd(termId, 'Серверные плагины в разработке.', 'error'); return; }
+    if (!argRest) { termAdd(termId, 'usage: run <plugin-id>   (пример: run net link)', 'error'); return; }
+    const realId = resolvePluginId(argRest) || resolvePluginId(arg1) || argRest.replace(/\s+/g, '-').toLowerCase();
+    const installedList = state.game.computer.installedPlugins || [];
+    const installed = installedList.some(id => String(id).toLowerCase() === String(realId).toLowerCase());
+    if (!installed) {
+      termAdd(termId, 'not installed: ' + argRest + '  → plugins', 'error');
+      return;
+    }
+    if (typeof isPluginLocked === 'function' && isPluginLocked(realId)) {
+      termAdd(termId, 'plugin locked / в разработке: ' + realId, 'error'); return;
+    }
+    term.busy = true;
+    try {
+      term.plugin = realId;
+      await enterPluginWorkspace(termId, realId);
+    } catch (e) {
+      termAdd(termId, String(e.message || e), 'error');
+      term.plugin = null;
+    } finally {
+      term.busy = false;
+      const pr = document.querySelector(`[data-window="${termId}"] .term-inline-prompt`);
+      if (pr) pr.textContent = terminalPrompt(term);
+    }
+    return;
+  }
+  if (c0 === 'whoami') { termAdd(termId, (state.game.player && state.game.player.nickname) || 'user', ''); return; }
+  if (c0 === 'pwd') { termAdd(termId, '/home/' + (((state.game.player && state.game.player.nickname) || 'user').toLowerCase()), ''); return; }
+  termAdd(termId, 'bash: ' + c0 + ': command not found. Type help.', 'error');
 }
 
 function termAdd(termId, text, type = '') {
   const term = getTerm(termId);
   if (!term) return;
-  term.lines.push({ text, type });
-  term.lines = term.lines.slice(-200);
+  if (type === 'html') {
+    term.lines.push({ text: text || '__NEOFETCH__', type: 'html', html: arguments[3] || null });
+  } else {
+    term.lines.push({ text, type });
+  }
+  term.lines = term.lines.slice(-220);
   const out = document.querySelector(`[data-window="${termId}"] .terminal-output`);
   if (out) {
     const row = document.createElement('div');
-    if (type) row.className = type;
-    row.textContent = text;
-    const form = out.querySelector('.term-inline-form');
-    if (form) out.insertBefore(row, form);
-    else out.appendChild(row);
-    // prune old lines but keep form
-    while (out.children.length > 201) {
-      const first = out.firstChild;
-      if (first && first.classList && first.classList.contains('term-inline-form')) break;
-      if (first) out.removeChild(first);
+    if (type === 'html') {
+      row.className = 'term-block';
+      row.innerHTML = (typeof buildNeofetchHtml === 'function' ? buildNeofetchHtml(state.game) : '') || '';
+    } else {
+      row.className = 'term-line' + (type ? ' ' + type : '');
+      row.textContent = text;
     }
-    scrollTerminalBottom(termId, true);
+    out.appendChild(row);
+    if (term.scrollPin !== false) {
+      // instant jump — avoid smooth-scroll fight
+      const prev = out.style.scrollBehavior;
+      out.style.scrollBehavior = 'auto';
+      out.scrollTop = out.scrollHeight;
+      out.style.scrollBehavior = prev || '';
+    }
   }
 }
+
+
+
 
 function pluginBanner(pluginId) {
   const skins = {
@@ -1392,11 +2266,11 @@ function clearTerminalView(termId) {
     const form = out.querySelector('.term-inline-form');
     out.innerHTML = '';
     if (form) out.appendChild(form);
-    else {
-      // form will come on next full render
-    }
   }
 }
+
+
+
 
 
 async function showPluginDashboard(termId, pluginId) {
@@ -1459,6 +2333,9 @@ async function enterPluginWorkspace(termId, pluginId) {
   // remember focus — do NOT blur keyboard on mobile
   const keep = document.querySelector(`[data-window="${termId}"] .term-inline-input, [data-window="${termId}"] .terminal-form input`);
   clearTerminalView(termId);
+  if (typeof animatePluginBoot === 'function') {
+    try { await animatePluginBoot(termId, pluginId); } catch (e) {}
+  }
   await showPluginDashboard(termId, pluginId);
   const term = getTerm(termId);
   const win = document.querySelector(`[data-window="${termId}"]`);
@@ -1579,94 +2456,101 @@ async function animatePluginBoot(termId, pluginId) {
 async function animateWorkTimed(termId, pluginId, totalMs, mode) {
   const start = performance.now();
   const regions = ['BAYS','MIDT','IRON','SOUT','OAKR','SHAD'];
+  const verbs = ['probe','sniff','handshake','resolve','fingerprint','correlate','map-route','ttl-check','arp-scan','sync'];
   const randMac = () => [...Array(6)].map(() => ((Math.random()*256)|0).toString(16).padStart(2,'0')).join(':');
-  const randPhone = () => `PH-${regions[(Math.random()*regions.length)|0]}-${String((Math.random()*550)|0).padStart(4,'0')}`;
-  const randIp = () => `172.16.${(Math.random()*40|0)}.${(1+Math.random()*250|0)}`;
-  const randIpPub = () => `10.0.${(Math.random()*20|0)}.${(1+Math.random()*250|0)}`;
-  const randHex = (n=6) => [...Array(n)].map(() => ((Math.random()*16)|0).toString(16)).join('');
+  const randPhone = () => 'PH-' + regions[(Math.random()*regions.length)|0] + '-' + String((Math.random()*550)|0).padStart(4,'0');
+  const randIp = () => '10.' + ((Math.random()*30)|0) + '.' + ((Math.random()*200)|0) + '.' + (1+((Math.random()*250)|0));
+  const randHex = (n=8) => [...Array(n)].map(() => ((Math.random()*16)|0).toString(16)).join('');
   const randBar = (pct) => {
-    const f = Math.max(0, Math.min(20, Math.round(pct/5)));
-    return '█'.repeat(f) + '░'.repeat(20-f);
+    const f = Math.max(0, Math.min(22, Math.round(pct/4.5)));
+    return '[' + '\u2588'.repeat(f) + '\u2591'.repeat(22-f) + ']';
   };
-  const randPin = () => String(1000 + ((Math.random()*9000)|0));
-
-  const titles = {
-    'net-link': 'NET LINK · connect bridge',
-    'net-analyzer': 'NET ANALYZER · deep sweep',
-    'phone-access': mode === 'attack' ? 'PHONE ACCESS · brute PIN' : mode === 'open' ? 'PHONE ACCESS · device link' : 'PHONE ACCESS · work'
+  const glitch = () => {
+    const chars = '01\u2591\u2592\u2593\u2588/\\<>|#*';
+    return [...Array(8+((Math.random()*14)|0))].map(() => chars[(Math.random()*chars.length)|0]).join('');
   };
-  termAdd(termId, `┌─ ${titles[pluginId] || pluginId}`, 'green');
-  let step = 0;
-  while (performance.now() - start < totalMs) {
-    step++;
-    const elapsed = performance.now() - start;
-    const pct = Math.min(99, Math.round((elapsed / totalMs) * 100));
+  const styles = {
+    scan: { title: 'NET ANALYZER \u00b7 DEEP SWEEP', border: true, pauseEvery: 3 },
+    connect: { title: 'NET LINK \u00b7 MESH BRIDGE', border: true, pauseEvery: 4 },
+    open: { title: 'PHONE ACCESS \u00b7 DEVICE LINK', border: true, pauseEvery: 3 },
+    attack: { title: 'PHONE ACCESS \u00b7 BRUTE SEQUENCE', border: true, pauseEvery: 2 },
+    default: { title: String(pluginId||'WORK').toUpperCase(), border: false, pauseEvery: 4 }
+  };
+  const st = styles[mode] || styles[pluginId === 'net-analyzer' ? 'scan' : pluginId === 'net-link' ? 'connect' : 'default'] || styles.default;
+  if (mode === 'scan' || pluginId === 'net-analyzer') Object.assign(st, styles.scan);
+  if (mode === 'connect' || pluginId === 'net-link') Object.assign(st, styles.connect);
+  if (mode === 'open') Object.assign(st, styles.open);
+  if (mode === 'attack') Object.assign(st, styles.attack);
 
-    if (pluginId === 'net-link') {
-      const lines = [
-        `│ peer N0${1+(step%6)}  ${randIp()}:48101  rtt=${(5+Math.random()*20)|0}ms  ACTIVE`,
-        `│ hop  LOCAL → N0${1+(step%4)} → N0${2+(step%3)}  path_lat=${(8+Math.random()*15)|0}ms`,
-        `│ bssid=${randMac()}  lease=${(Math.random()*40+10)|0}s  qos=STANDARD`,
-        `│ uplink ${(Math.random()*12+2).toFixed(2)} Mbps  [${randBar(20+step*3)}]`,
-        `│ session ${randHex(8)}-${randHex(4)}  enc=AES-NULL`,
-        `│ AUTH handshake ${step}  nonce=0x${randHex(8)}`
-      ];
-      termAdd(termId, lines[step % lines.length], 'muted');
-      if (step % 3 === 0) termAdd(termId, `│ bridge ${pct}%  [${randBar(pct)}]`, 'blue');
-    } else if (pluginId === 'net-analyzer') {
-      const proto = ['TCP','UDP','ICMP','ARP','DNS'][step%5];
-      const lines = [
-        `│ ${String(23+(step%37)).padStart(2,'0')}:${String(40+(step%20)).padStart(2,'0')}:${String(step%60).padStart(2,'0')} ${proto}  ${randIpPub()} → ${randIp()}`,
-        `│ ${randPhone()}  rssi=-${40+((Math.random()*45)|0)}  mac=${randMac()}`,
-        `│ TOPO  node ${randIpPub()}  label=USER-${10+(step%90)}  L3`,
-        `│ DPI  flag=${['SYN','ACK','FIN','RST','DATA'][step%5]}  len=${40+((Math.random()*1400)|0)}`,
-        `│ registry idx=${(step*17)%550}  hash=0x${randHex(6)}`,
-        `│ BUFFER ${Math.min(1024, step*48)}/1024  FILTER=ANY`
-      ];
-      termAdd(termId, lines[step % lines.length], 'muted');
-      if (step % 4 === 0) termAdd(termId, `│ SCAN ${pct}%  [${randBar(pct)}]  devices≈${Math.min(250, step*9)}`, 'blue');
-    } else if (pluginId === 'phone-access' && mode === 'attack') {
-      const tryPin = randPin();
-      const lines = [
-        `│ brute  try=${tryPin}  entropy=${(Math.random()*8+1).toFixed(2)}  batch=${1000+((Math.random()*8000)|0)}`,
-        `│ dict  wordlist=${['rock','null','mesh','grid','pulse'][step%5]}  hit=0`,
-        `│ mask  ????  cand=${(Math.random()*9999)|0}  gpu_kernel=pin4`,
-        `│ side-channel  jitter=${((Math.random()*12)+1).toFixed(1)}ms  sample=${step}`,
-        `│ oracle  resp=0x${randHex(4)}  noise=${(Math.random()*100)|0}%`
-      ];
-      termAdd(termId, lines[step % lines.length], 'muted');
-      if (step % 2 === 0) {
-        const errs = [
-          `│ ! DEFENSE reject pin ${tryPin}`,
-          `│ ! watchdog tick 0x${randHex(6)}`,
-          `│ ! rate-limit backoff ${((Math.random()*400)|0)}ms`,
-          `│ ! integrity mismatch block=${step}`,
-          `│ ! crypto noise floor`
-        ];
-        termAdd(termId, errs[step % errs.length], 'error');
-      }
-      if (step % 4 === 0) termAdd(termId, `│ CRACK ${pct}%  [${randBar(pct)}]  candidates≈${step*240}`, 'blue');
-    } else if (pluginId === 'phone-access' && mode === 'open') {
-      const lines = [
-        `│ link  target=${randPhone()}  channel=ENC`,
-        `│ signal  ${(Math.random()*5+1)|0}/5  rssi=-${30+((Math.random()*40)|0)} dBm`,
-        `│ profile  model=handset  os=vOS  ip=${randIp()}`,
-        `│ auth  state=HANDSHAKE  token=0x${randHex(8)}`,
-        `│ tunnel  hop=${1+(step%3)}  rtt=${(4+Math.random()*18)|0}ms`,
-        `│ vault  session=${randHex(4)}…${randHex(4)}  ttl=300s`
-      ];
-      termAdd(termId, lines[step % lines.length], 'muted');
-      if (step % 2 === 0) termAdd(termId, `│ LINK ${pct}%  [${randBar(pct)}]`, 'blue');
-    } else if (pluginId === 'phone-access') {
-      termAdd(termId, `│ probe surface=${['lock','svc','fs','ipc','radio'][step%5]}  0x${randHex(6)}`, 'muted');
-    } else {
-      termAdd(termId, `│ · working ${pct}%`, 'muted');
-    }
-    await sleep(Math.max(70, totalMs / 40));
+  termAdd(termId, '', '');
+  if (st.border) {
+    termAdd(termId, '\u2554' + '\u2550'.repeat(38) + '\u2557', 'green');
+    termAdd(termId, '\u2551  ' + (st.title + '                                      ').slice(0, 36) + '\u2551', 'green');
+    termAdd(termId, '\u255a' + '\u2550'.repeat(38) + '\u255d', 'green');
+  } else {
+    termAdd(termId, '>> ' + st.title, 'green');
   }
-  termAdd(termId, `│ [${'█'.repeat(20)}] 100%`, 'green');
-  termAdd(termId, `└─ READY`, 'green');
+  termAdd(termId, '  phase 0 \u2014 init buffers', 'muted');
+
+  let lastPct = -1;
+  let tick = 0;
+  let phase = 0;
+  const phases = mode === 'attack'
+    ? ['dictionary', 'mask', 'timing-skew', 'pin-space']
+    : mode === 'scan'
+      ? ['radio', 'dhcp', 'arp', 'correlate', 'report']
+      : mode === 'open'
+        ? ['handshake', 'session', 'mount']
+        : ['link', 'auth', 'tunnel'];
+
+  return new Promise(resolve => {
+    const step = async () => {
+      const elapsed = performance.now() - start;
+      const pct = Math.min(100, (elapsed / Math.max(1, totalMs)) * 100);
+      tick++;
+      // phase banners with pause
+      const phaseIdx = Math.min(phases.length - 1, Math.floor((pct / 100) * phases.length));
+      if (phaseIdx > phase) {
+        phase = phaseIdx;
+        termAdd(termId, '  \u2500\u2500 phase ' + phases[phase] + ' \u2500\u2500', 'green');
+        await new Promise(r => setTimeout(r, 280 + Math.random() * 420));
+      }
+      if (tick % (st.pauseEvery || 3) === 0) {
+        if (mode === 'attack') {
+          termAdd(termId, '  try ****  cand=' + (1000+((Math.random()*9000)|0)) + '  ' + glitch() + '  ' + randBar(pct), Math.random()>0.75?'warn':'');
+        } else if (mode === 'scan' || pluginId === 'net-analyzer') {
+          const lines = [
+            '  > ' + verbs[(Math.random()*verbs.length)|0] + ' ' + randIp() + '  ' + glitch(),
+            '  > MAC ' + randMac() + '  node ' + randPhone(),
+            '  > fingerprint 0x' + randHex(6) + '  ' + randBar(pct),
+            '  > frame #' + (1000+((Math.random()*8000)|0)) + '  len=' + (40+((Math.random()*300)|0))
+          ];
+          termAdd(termId, lines[(Math.random()*lines.length)|0], Math.random()>0.88?'warn':'');
+        } else if (mode === 'open') {
+          termAdd(termId, '  session ' + randHex(4) + '  device-link  ' + randBar(pct), '');
+        } else {
+          termAdd(termId, '  handshake ' + randMac() + '  tunnel=' + randHex(5) + '  ' + randBar(pct), 'green');
+        }
+      }
+      if (Math.floor(pct / 15) > Math.floor(lastPct / 15)) {
+        termAdd(termId, '  ' + randBar(pct) + '  ' + (pct|0) + '%', 'muted');
+        // micro-pause for effect
+        await new Promise(r => setTimeout(r, 160 + Math.random() * 280));
+      }
+      lastPct = pct;
+      if (elapsed >= totalMs) {
+        termAdd(termId, '  ' + randBar(100) + '  100%', 'green');
+        termAdd(termId, '\u2714 ' + st.title + ' \u2014 complete', 'green');
+        resolve();
+        return;
+      }
+      setTimeout(step, 140 + Math.random() * 220);
+    };
+    step();
+  });
 }
+
+
 
 
 
@@ -1733,6 +2617,11 @@ async function animateWork(termId, pluginId) {
 
 
 async function enterPlugin(termId, pluginId) {
+  if (pluginId === 'net-analyzer') {
+    termAdd(termId, 'Net Analyzer объединён с Net Link.', 'amber');
+    termAdd(termId, 'Запусти: run net link → scan', 'muted');
+    return;
+  }
   if (isPluginLocked(pluginId) || pluginId === 'phone-control') {
     termAdd(termId, `Плагин «${pluginId}» недоступен (на доработке / заменён).`, 'error');
     if (pluginId === 'phone-control') termAdd(termId, 'Управление телефоном — приложение Phone Lab на рабочем столе.', 'muted');
@@ -1760,347 +2649,37 @@ async function enterPlugin(termId, pluginId) {
 
 function renderTerminal(g, termId) {
   const term = getTerm(termId);
-  const plug = term.plugin ? getPlugin(term.plugin) : null;
   const prompt = terminalPrompt(term);
-  return `<div class="term-root"><div class="terminal-shell terminal-shell-compact">
-    <div class="terminal-toolbar">
-      <span class="term-prompt-label">${esc(prompt)}</span>
-      <span class="term-mode">${plug ? esc(plug.id) : 'tty'}</span>
-      <button type="button" class="term-kb-btn" data-action="term-hide-kb" data-term="${esc(termId)}" title="Свернуть клавиатуру">⌨↓</button>
-    </div>
-    <div class="terminal-output" data-term-out="${esc(termId)}">
-      ${term.lines.map(l => `<div class="${esc(l.type || '')}">${esc(l.text)}</div>`).join('')}
-      <form class="term-inline-form terminal-form" data-term="${esc(termId)}">
-        <span class="term-inline-prompt">${esc(prompt)}</span>
-        <input class="term-inline-input term-cmd-input" name="command" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go" aria-label="Команда">
-      </form>
-    </div>
-  </div></div>`;
+  const mode = term?.mode || 'vanilla';
+  const body = (term.lines || []).map(l => {
+    if (l.type === 'html' && (l.html || l.text === '__NEOFETCH__')) {
+      const html = l.html || (typeof buildNeofetchHtml === 'function' ? buildNeofetchHtml(g) : '');
+      return `<div class="term-block">${html || ''}</div>`;
+    }
+    return `<div class="term-line ${esc(l.type || '')}">${esc(l.text)}</div>`;
+  }).join('');
+  const titleUser = ((g.player && g.player.nickname) || 'user').toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'user';
+  const modeLabel = mode === 'phone' ? 'phone-ops' : mode === 'server' ? 'server-ops' : 'shell';
+  const booting = !!(term && (term.booting || (term.busy && term.bootStarted && !term.bootDone)));
+  // Input only after boot — no typing during load
+  const formHtml = booting
+    ? `<div class="term-boot-wait muted">⏳ boot… ввод после загрузки</div>`
+    : `<form class="term-inline-form terminal-form promptrow" data-term="${esc(termId)}">
+      <span class="term-inline-prompt prompt">${esc(prompt)}</span>
+      <input class="term-inline-input" name="command" type="text" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" enterkeyhint="send" inputmode="text" aria-label="Команда">
+    </form>`;
+  // Output scrolls alone; input is fixed under it (stable typing + scroll)
+  return `<div class="term-root nb-term term-mode-${esc(mode)}" data-term="${esc(termId)}">
+  <div class="nb-term-titlebar term-bar-${esc(mode)}">
+    <img class="termglyph" src="dragon.png" alt="" draggable="false">
+    <span class="title-user">${esc(titleUser)}@nullbyte-os</span>
+    <span class="path">:~/${esc(modeLabel)}</span>
+    <span class="term-mode-badge">${esc(modeLabel)}</span>
+  </div>
+  <div class="terminal-output screen" data-term-out="${esc(termId)}">${body}</div>
+  <div class="term-input-dock">${formHtml}</div>
+</div>`;
 }
-
-async function runTerminalCommand(termId, raw) {
-  const term = getTerm(termId);
-  if (!term) return;
-  const cmd = String(raw || '').trim();
-  if (!cmd) return;
-  termAdd(termId, `${terminalPrompt(term)} ${cmd}`, 'prompt');
-  term.scrollPin = true;
-
-  // —— SERVER SHELL (when connected) —— locked while web ops WIP ——
-  if (state.game.ops?.serverSession && !term.plugin) {
-    termAdd(termId, 'Серверная сессия на доработке. exit server.', 'error');
-    if (cmd.toLowerCase().includes('exit')) {
-      const r = runPluginShellCommand(state.game, 'sim-exploit', 'exit server');
-      for (const line of (r.lines||[])) termAdd(termId, line.text, line.type||'');
-    }
-    return;
-  }
-  if (false && state.game.ops?.serverSession && !term.plugin) {
-    const sess = state.game.ops.serverSession;
-    const lower = cmd.toLowerCase();
-    const parts = cmd.split(/\s+/);
-    const one = (parts[0]||'').toLowerCase();
-    if (lower === 'exit server' || lower === 'exit' || lower === 'logout') {
-      const r = runPluginShellCommand(state.game, 'sim-exploit', 'exit server');
-      for (const line of (r.lines||[])) termAdd(termId, line.text, line.type||'');
-      scheduleSave();
-      return;
-    }
-    if (lower === 'help') {
-      termAdd(termId, 'SERVER SHELL — команды узла (не локальный ПК)', 'blue');
-      termAdd(termId, 'whoami | users | services | read <file> | set user <id> <field> <val>', 'muted');
-      termAdd(termId, 'delete user <id> | posts | ban <id> | exit server', 'muted');
-      return;
-    }
-    if (one === 'whoami') {
-      termAdd(termId, `shell@${sess.domain}  site=${sess.siteId}`, 'green');
-      return;
-    }
-    if (one === 'users') {
-      const users = Object.values(state.game.intel?.users||{}).slice(0, 15);
-      if (!users.length) termAdd(termId, 'Нет записей users в intel. server-index → decode.', 'muted');
-      users.forEach(u => termAdd(termId, `${u.id}  ${u.username}  role=${u.role}`));
-      return;
-    }
-    if (one === 'services') {
-      termAdd(termId, 'http 443  up', '');
-      termAdd(termId, 'ssh  22   filtered', '');
-      termAdd(termId, `domain ${sess.domain}`, 'muted');
-      return;
-    }
-    if (one === 'set' && parts[1] === 'user') {
-      const uid = parts[2]; const field = parts[3]; const val = parts.slice(4).join(' ');
-      const u = state.game.intel?.users?.[uid];
-      if (!u) { termAdd(termId, 'user not found', 'error'); return; }
-      if (field === 'username' || field === 'role') { u[field] = val; termAdd(termId, `updated ${uid}.${field}=${val}`, 'green'); }
-      else termAdd(termId, 'fields: username | role', 'error');
-      if (typeof markServerModified === 'function') markServerModified(state.game);
-      else if (state.game.ops?.serverSession) { state.game.ops.serverSession.modified = true; }
-      scheduleSave();
-      return;
-    }
-    if (one === 'delete' && parts[1] === 'user') {
-      const uid = parts[2];
-      if (state.game.intel?.users?.[uid]) { delete state.game.intel.users[uid]; termAdd(termId, `deleted ${uid}`, 'green'); }
-      else termAdd(termId, 'not found', 'error');
-      scheduleSave();
-      return;
-    }
-    if (one === 'posts') {
-      termAdd(termId, 'forum posts (sim): post_01 likes=12 | post_02 likes=3', 'muted');
-      return;
-    }
-    if (one === 'ban') {
-      termAdd(termId, `ban flag set for ${parts[1]||'?'} (sim)`, 'green');
-      scheduleSave();
-      return;
-    }
-    termAdd(termId, `server: неизвестная команда «${cmd}». help`, 'error');
-    return;
-  }
-
-
-  if (term.plugin) {
-    // net-analyzer scan → next line is filename
-    if (term.awaitFilename) {
-      const af = term.awaitFilename;
-      term.awaitFilename = null;
-      const nameRaw = cmd.trim().replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 48) || 'scan';
-      const name = nameRaw.endsWith('.txt') ? nameRaw : nameRaw + '.txt';
-      const content = String(af.content || '');
-      if (!state.game.computer.files) state.game.computer.files = [];
-      const file = {
-        id: 'file_scan_' + Date.now().toString(36),
-        name,
-        type: af.type || 'network-report',
-        content,
-        path: '/scan/',
-        createdAt: Date.now(),
-        size: Math.max(1, Math.ceil(content.length / 1024))
-      };
-      state.game.computer.files.unshift(file);
-      state.game.computer.files = state.game.computer.files.slice(0, 100);
-      termAdd(termId, `Сохранено: ${file.name} (${file.size} KB)`, 'green');
-      scheduleSave();
-      if (state.opened.has('ide')) renderWindow('ide');
-      return;
-    }
-    const lower = cmd.toLowerCase();
-    if (lower === 'exit' || lower === 'quit') {
-      runPluginShellCommand(state.game, term.plugin, 'exit');
-      term.plugin = null;
-      await leavePluginWorkspace(termId);
-      return;
-    }
-    if (lower === 'status' || lower === 'home' || lower === 'dashboard') {
-      clearTerminalView(termId);
-      await showPluginDashboard(termId, term.plugin);
-      return;
-    }
-    if (lower === 'help') {
-      for (const line of (runPluginShellCommand(state.game, term.plugin, 'help').lines || [])) termAdd(termId, line.text, line.type || '');
-      return;
-    }
-    if (lower === 'clear') {
-      term.lines = [];
-      const out = document.querySelector(`[data-window="${termId}"] .terminal-output`);
-      if (out) out.innerHTML = '';
-      return;
-    }
-    // save <name> after analyze / server-index
-    if (lower.startsWith('save ') || lower === 'save') {
-      const name = cmd.slice(4).trim() || term.pendingSave?.defaultName;
-      if (!term.pendingSave) {
-        termAdd(termId, 'Нечего сохранять. Сначала analyze / index.', 'error');
-        return;
-      }
-      if (!name) {
-        termAdd(termId, 'save <имя_файла>', 'error');
-        return;
-      }
-      const meta = {
-        siteId: term.pendingSave.siteId,
-        type: term.pendingSave.type || 'encrypted',
-        encrypted: true,
-        path: '/recon/',
-        ext: '.enc'
-      };
-      const r = savePlayerNamedFile(state.game, name, term.pendingSave.content, meta);
-      if (!r.ok) { termAdd(termId, r.reason, 'error'); return; }
-      term.pendingSave = null;
-      termAdd(termId, `Saved: ${r.file.name}`, 'green');
-      termAdd(termId, 'Файл сохранён в системе.', 'muted');
-      scheduleSave();
-      refreshOpenApps(['files','computer']);
-      return;
-    }
-    if (lower === 'exit server' || lower.startsWith('exit server')) {
-      const result = runPluginShellCommand(state.game, term.plugin || 'sim-exploit', 'exit server');
-      for (const line of result.lines || []) termAdd(termId, line.text, line.type || '');
-      scheduleSave();
-      return;
-    }
-    term.busy = true;
-    try {
-      const shellMeta = PLUGIN_SHELLS[term.plugin];
-      const cmd0 = (cmd.split(/\s+/)[0]||'').toLowerCase();
-      const allowed = shellMeta?.commands || [];
-      if (allowed.length && !allowed.includes(cmd0) && cmd0 !== 'save' && !(cmd0==='exit' && cmd.toLowerCase().includes('server'))) {
-        termAdd(termId, `Нет такой команды: ${cmd0}. Введи help`, 'error');
-      } else {
-        const cmd0h = (cmd.split(/\s+/)[0]||'').toLowerCase();
-        const heavyMap = {
-          'net-link': { cmds:['connect'], ms: 8000 },
-          'net-analyzer': { cmds:['scan','analyze'], ms: 9000 },
-          'phone-access': { cmds:['open'], ms: 3000 }
-        };
-        const hm = heavyMap[term.plugin];
-        if (term.plugin === 'phone-access' && cmd0h === 'attack') {
-          await animateWorkTimed(termId, 'phone-access', 13000, 'attack');
-        } else if (term.plugin === 'phone-access' && cmd0h === 'open') {
-          await animateWorkTimed(termId, 'phone-access', 3000, 'open');
-        } else if (hm && hm.cmds.includes(cmd0h)) {
-          // validate before long anim
-          if (term.plugin === 'net-analyzer' && !state.game.phoneWorld?.network) {
-            termAdd(termId, 'Сначала net-link → connect <region>', 'error');
-          } else if (term.plugin === 'net-link' && cmd0h === 'connect') {
-            const rid = (cmd.split(/\s+/)[1]||'').toLowerCase();
-            const okRegion = ['bayshore','midtown','ironreach','southgate','oakridge','shadowline'].includes(rid);
-            if (!okRegion) termAdd(termId, 'Неизвестный region_id. list', 'error');
-            else await animateWorkTimed(termId, term.plugin, hm.ms, cmd0h);
-          } else if (term.plugin === 'phone-access' && cmd0h === 'open') {
-            const pid = (cmd.split(/\s+/)[1]||'');
-            if (!/^PH-[A-Z0-9]{4}-\d{4}$/i.test(pid)) termAdd(termId, 'Формат: open PH-XXXX-0000', 'error');
-            else await animateWorkTimed(termId, term.plugin, hm.ms, cmd0h);
-          } else {
-            await animateWorkTimed(termId, term.plugin, hm.ms, cmd0h);
-          }
-        }
-        const result = runPluginShellCommand(state.game, term.plugin, cmd);
-        for (const line of result.lines || []) {
-          termAdd(termId, line.text, line.type || '');
-          await sleep(20);
-        }
-        if (result.pendingSave) term.pendingSave = result.pendingSave;
-        if (result.awaitFilename) term.awaitFilename = result.awaitFilename;
-        if (result.revealedPin) {
-          termAdd(termId, '→ PIN: ' + result.revealedPin + '  · открой Phone Lab сам и введи PIN', 'green');
-        }
-        if (term.plugin === 'phone-access' && result.ok && !result.revealedPin) {
-          if (state.opened.has('phone')) renderWindow('phone');
-        }
-        if (result.serverSession) {
-          term.plugin = null;
-          const win = document.querySelector(`[data-window="${termId}"]`);
-          if (win?.querySelector('.terminal-form .term-prompt')) win.querySelector('.terminal-form .term-prompt').textContent = terminalPrompt(term);
-          const tool = win?.querySelector('.terminal-toolbar .term-mode');
-          if (tool) tool.textContent = 'server';
-          termAdd(termId, 'Локальные команды ПК отключены. help — серверные.', 'muted');
-        }
-        if (result.exit) term.plugin = null;
-        if (result.progressUpdated || result.exportFile) scheduleSave();
-        if (result.exportFile) toast('Файл готов → N-Mail', 'success');
-        if (result.progressUpdated) refreshOpenApps(['browser', 'mail', 'blackwire', 'computer', 'files', 'phone', 'intel']);
-        if (result.closePhoneLab || result.clearPhone) {
-          state._phoneTarget = null;
-          state.phoneUnlocked = null;
-          state.pinInput = '';
-          state.pinError = '';
-          state.phoneLabTab = 'home';
-          if (state.opened.has('phone')) renderWindow('phone');
-          termAdd(termId, '→ Phone Lab: сессия закрыта.', 'muted');
-        } else if (result.progressUpdated && state.opened.has('phone')) {
-          renderWindow('phone');
-        }
-        if (result.progressUpdated && state.opened.has('phone') && !(result.closePhoneLab || result.clearPhone)) renderWindow('phone');
-      }
-    } finally {
-      term.busy = false;
-      const input = document.querySelector(`[data-window="${termId}"] .terminal-form input`);
-      if (input) { input.disabled = false; input.focus({ preventScroll: true }); }
-    }
-    return;
-  }
-
-  const lower = cmd.toLowerCase();
-  const parts = cmd.split(/\s+/);
-  const one = (parts[0] || '').toLowerCase();
-  if (lower === 'help') {
-    termAdd(termId, 'help | clear | plugins | run <plugin> | mission list', 'blue');
-    termAdd(termId, 'intel | ops | rm <file> — разведка / журнал / удаление файла', 'blue');
-  } else if (lower === 'clear') {
-    term.lines = [];
-    const out = document.querySelector(`[data-window="${termId}"] .terminal-output`);
-    if (out) out.innerHTML = '';
-  } else if (lower === 'whoami') termAdd(termId, state.game.player.nickname);
-  else if (lower === 'status' || lower === 'info') termAdd(termId, `LEVEL ${state.game.player.level} · XP ${state.game.player.xp}`);
-  else if (one === 'files' || lower === 'files' || lower.startsWith('files ')) {
-    const sub = (parts[1]||'open').toLowerCase();
-    if (sub === 'list') {
-      const files = state.game.computer.files||[];
-      if (!files.length) termAdd(termId, 'Нет файлов.', 'muted');
-      else files.slice(0,40).forEach(f=>termAdd(termId, `${f.name}  [${f.encrypted?'ENC':(f.type||'file')}]`));
-    } else {
-      openApp('files');
-      termAdd(termId, 'Files opened.', 'green');
-    }
-  } else if (lower === 'plugins' || lower === 'pkg list') {
-    termAdd(termId, PLUGINS.map(p => {
-      const locked = typeof isPluginLocked==='function' && isPluginLocked(p.id);
-      const on = !locked && state.game.computer.installedPlugins.includes(p.id);
-      return `${on?'[on]':'[  ]'} ${p.id}${locked?' (dev)':''}${(!locked && PLUGIN_SHELLS[p.id])?' [shell]':''}`;
-    }).join('\n'));
-  } else if (lower.startsWith('plugin info ')) {
-    const q = cmd.slice(12).trim().toLowerCase();
-    const p = PLUGINS.find(x => x.id === q || x.name.toLowerCase() === q);
-    if (!p) termAdd(termId, 'Не найден.', 'error');
-    else {
-      termAdd(termId, `${p.name}\n${p.description}`);
-      if (PLUGIN_SHELLS[p.id]) termAdd(termId, `SHELL: ${PLUGIN_SHELLS[p.id].help}`, 'blue');
-    }
-  } else if (one === 'run' || one === 'use') await enterPlugin(termId, parts.slice(1).join(' ').trim());
-  else if (lower === 'ls') {
-    const files = [...state.game.computer.files, ...state.game.editor.files];
-    termAdd(termId, files.length ? files.map(f => `${f.name} (${f.size} KB)`).join('\n') : 'Пусто.');
-  } else if (lower.startsWith('cat ')) {
-    const f = [...state.game.computer.files, ...state.game.editor.files].find(x => x.name === cmd.slice(4).trim());
-    termAdd(termId, f ? String(f.content) : 'Нет файла.', f ? '' : 'error');
-  } else if (lower === 'mission list') {
-    termAdd(termId, state.game.missions.items.filter(m => ['accepted','submitted','available'].includes(m.status) && isMissionVisible(m)).map(m => `${m.id} | ${m.status} | ${m.title}`).join('\n') || 'Контракты на доработке (сайты/телефоны).');
-  } else if (lower === 'map') termAdd(termId, LOCATIONS.map(l => `${l.name}`).join('\n'));
-  else if (lower === 'intel') {
-    const intel = state.game.intel;
-    if (!intel) termAdd(termId, 'intel empty', 'muted');
-    else {
-      const doms = Object.values(intel.domains || {}).filter(d => d.discovered || d.analyzed);
-      const srvs = Object.values(intel.servers || {}).filter(s => s.discovered);
-      const users = Object.values(intel.users || {}).filter(u => u.discovered);
-      const phones = Object.values(intel.devices || {}).filter(d => d.discovered);
-      termAdd(termId, `INTEL · dom ${doms.length} · srv ${srvs.length} · users ${users.length} · phones ${phones.length} · art ${Object.keys(intel.artifacts||{}).length}`, 'blue');
-      for (const d of doms.slice(0, 8)) termAdd(termId, `  ${d.domain} · ${d.kind} · sec ${d.security}`);
-      for (const s of srvs.slice(0, 6)) termAdd(termId, `  ${s.hostname} · access=${s.accessLevel} · ${s.ip}`, 'muted');
-      for (const u of users.slice(0, 6)) termAdd(termId, `  user ${u.username} (${u.id})`, 'muted');
-      for (const p of phones.slice(0, 4)) termAdd(termId, `  phone ${p.id} · ${p.model} · ${p.network}`, 'muted');
-    }
-  } else if (lower === 'ops' || lower === 'history') {
-    const ops = state.game.intel?.operations || [];
-    if (!ops.length) termAdd(termId, 'Нет операций.', 'muted');
-    else for (const o of ops.slice(0, 12)) termAdd(termId, `${o.pluginId} · ${o.summary || o.targetId} · ${o.status}`);
-  } else if (lower.startsWith('rm ') || lower.startsWith('delete ')) {
-    const name = cmd.split(/\s+/).slice(1).join(' ').trim().split('/').pop();
-    const files = state.game.computer.files;
-    const idx = files.findIndex(f => f.name === name || f.id === name);
-    if (idx < 0) termAdd(termId, 'FILE_NOT_FOUND', 'error');
-    else {
-      const f = files[idx];
-      if (state.game.missions.items.some(m => m.status === 'accepted' && m.resultFileId === f.id))
-        termAdd(termId, 'FILE_IN_USE — активный контракт', 'error');
-      else { files.splice(idx, 1); termAdd(termId, `Deleted: ${f.name}`, 'green'); scheduleSave(); }
-    }
-  }
-  else termAdd(termId, 'unknown — help', 'error');
-}
-
 
 function renderMail(g) {
   const msgs = (g.mail?.messages || []).slice(0, 80);
@@ -2190,60 +2769,68 @@ function renderMail(g) {
 function renderBank(g) {
   const status = bankStatus(g);
   const risk = bankRisk(g);
-  const tx = (g.economy.transactions || []).slice(0, 30);
-  const missing = (risk.missing || []).map(id => getPlugin(id)?.name || id);
-  return `<div class="app-heading"><div><div class="eyebrow">ASTER UNION</div><h2>Кошелёк оператора</h2><p>Личные CR. Вход в чужие счета — на сайте asterbank.null</p></div><span class="badge">WALLET</span></div>
-  <div class="bank-balance"><span>AVAILABLE CREDITS</span><strong>${fmt(g.economy.credits)} CR</strong>
-  <small>wallet ${esc(g.player.walletId||'—')}</small></div>
-  <div class="panel section-gap">
-    <div class="kv"><span>Номер кошелька</span><b>${esc(g.player.walletId||'—')}</b></div>
-    <button type="button" class="btn tiny" data-action="copy-text" data-text="${esc(g.player.walletId||'')}">КОПИРОВАТЬ</button>
-    <p class="muted small section-gap">Чтобы войти в счёт NPC: Browser → asterbank.null → Вход (логин/пароль из SMS).</p>
+  const tx = (g.economy.transactions || []).slice(0, 12);
+  const wallet = g.player.walletId || '—';
+  const bal = (g.economy && g.economy.credits != null) ? g.economy.credits : 0;
+  // card digits from wallet hash
+  let h = 0; const s = String(wallet);
+  for (let i=0;i<s.length;i++) h = (h*31 + s.charCodeAt(i))|0;
+  const pan = '4276 ' + String(1000 + Math.abs(h%9000)).slice(0,4) + ' ' + String(1000 + Math.abs((h>>4)%9000)).slice(0,4) + ' ' + String(1000 + Math.abs((h>>8)%9000)).slice(0,4);
+  const exp = String(1 + Math.abs(h%12)).padStart(2,'0') + '/' + String(28 + Math.abs(h%5));
+  const cvv = String(100 + Math.abs(h%900));
+  const issuer = 'ASTER UNION · VIRTUAL';
+  return `<div class="app-heading"><div><div class="eyebrow">ASTER UNION</div><h2>Private Card</h2><p>Премиальный кошелёк оператора</p></div><span class="badge">CR</span></div>
+  <div class="bank-card-visual">
+    <div class="bank-card-chip"></div>
+    <div class="bank-card-brand">ASTER</div>
+    <div class="bank-card-pan">${esc(pan)}</div>
+    <div class="bank-card-row"><span>VALID ${esc(exp)}</span><span>CVV ${esc(cvv)}</span></div>
+    <div class="bank-card-name">${esc((g.player.nickname||'OPERATOR').toUpperCase())}</div>
+    <div class="bank-card-issuer">${esc(issuer)}</div>
   </div>
-  ${status.locked?`<div class="notice danger section-gap"><b>БЛОКИРОВКА</b> ${humanLeft(status.remaining)}</div>`:''}
-  <div class="panel section-gap"><div class="panel-title"><span>ЭНДГЕЙМ</span></div>
-    <div class="kv"><span>Trace risk</span><b class="text-red">${Math.round(risk.traceChance*100)}%</b></div>
-    ${missing.length?`<div class="notice warning">${missing.map(esc).join(', ')}</div>`:''}
-    <button type="button" class="btn danger" data-action="bank-attempt" ${status.locked?'disabled':''}>РИСКОВАЯ ОПЕРАЦИЯ</button>
+  <div class="bank-balance premium"><span>AVAILABLE</span><strong>${fmt(bal)} CR</strong>
+    <small>wallet ${esc(wallet)}</small></div>
+  <div class="panel section-gap bank-details">
+    <div class="kv"><span>Номер кошелька</span><b>${esc(wallet)}</b></div>
+    <div class="kv"><span>Код выпуска</span><b>AU-${esc(String(100000+Math.abs(h%900000)))}</b></div>
+    <div class="kv"><span>CVV (оборот)</span><b>${esc(cvv)}</b></div>
+    <div class="kv"><span>Сеть</span><b>Aster Mesh · virtual</b></div>
+    <button type="button" class="btn tiny" data-action="copy-text" data-text="${esc(wallet)}">КОПИРОВАТЬ WALLET</button>
+    <p class="muted small section-gap">Вход в счета NPC — Browser → asterbank.null (логин/пароль из SMS).</p>
   </div>
-  <div class="panel section-gap"><div class="panel-title"><span>ИСТОРИЯ</span></div>
-    ${tx.map(t=>`<div class="list-row"><div class="list-main"><strong>${esc(t.note||t.reason||t.type||'tx')}</strong><small>${new Date(t.at||0).toLocaleString('ru-RU')}</small></div><span>${fmt(t.amount)} CR</span></div>`).join('')||'<div class="muted">пусто</div>'}
+  <div class="panel section-gap"><div class="eyebrow">История</div>
+    ${tx.length ? tx.map(t=>`<div class="list-row"><div class="list-main"><strong>${esc(t.reason||t.type||'tx')}</strong><small>${t.at?new Date(t.at).toLocaleString('ru-RU'):''}</small></div><b class="${(t.type==='expense'||t.amount<0)?'text-red':'text-green'}">${t.type==='expense'?'−':'+'}${fmt(Math.abs(t.amount||0))}</b></div>`).join('') : '<div class="muted">Пока пусто</div>'}
   </div>`;
 }
 
 function renderFbi() {
-  return `<div class="app-heading"><div><div class="eyebrow">FEDERAL BUREAU OF INVESTIGATION</div><h2>FBI</h2><p>Закрытый операционный канал</p></div><span class="badge">LOCKED</span></div>
-  <div class="panel" style="text-align:center;padding:28px 16px">
-    <div style="font-size:28px;letter-spacing:.2em;opacity:.5;margin-bottom:12px">FBI</div>
-    <h3 style="margin:0 0 8px">Раздел недоступен</h3>
-    <p class="muted">Контракты федерального бюро появятся в будущем обновлении. Сейчас вкладка только резервирует место в системе.</p>
-    <div class="notice section-gap">Нет активных заданий · нет выплат · нет рейтинга</div>
+  return `<div class="app-heading"><div><div class="eyebrow">FEDERAL BUREAU OF INVESTIGATION</div><h2>FBI</h2><p>Закрытый канал · симуляция</p></div><span class="badge">LOCKED</span></div>
+  <div class="panel fbi-seal-panel">
+    <div class="fbi-seal">${icon('fbi','fbi-seal-ico')}</div>
+    <h3>ДОСТУП ОГРАНИЧЕН</h3>
+    <p class="muted">Операционный канал FBI в этой сборке закрыт. Следите за обновлениями.</p>
   </div>`;
 }
-
 
 function renderPhoneLab(g) {
   const pw = g.phoneWorld || {};
   const net = pw.network;
-  // offline => drop phone session
+  const clock = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  const dateStr = new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  // offline
   if (!net) {
     if (state._phoneTarget || pw.activeSession || (pw.access && Object.keys(pw.access).length)) {
-      state._phoneTarget = null;
-      state.phoneUnlocked = null;
-      state.pinInput = '';
-      state.pinError = '';
-      if (g.phoneWorld) {
-        g.phoneWorld.activeSession = null;
-        g.phoneWorld.sessionFrozenSms = null;
-        g.phoneWorld.access = {};
-      }
+      state._phoneTarget = null; state.phoneUnlocked = null; state.pinInput = ''; state.pinError = '';
+      if (g.phoneWorld) { g.phoneWorld.activeSession = null; g.phoneWorld.sessionFrozenSms = null; g.phoneWorld.access = {}; }
     }
-    return `<div class="nb-phone-shell idle">
-      <div class="nb-phone-top">NULLBYTE</div>
-      <div class="nb-phone-idle"><div class="nb-lock-hex"><span class="nb-lock-icon">📡</span></div><p>OFFLINE</p><small>net-link → connect &lt;region&gt;</small></div>
-      <div class="nb-phone-footer">NET: OFFLINE</div>
-    </div>`;
+    return `<div class="titan-phone"><div class="titan-screen">
+      <div class="titan-wallpaper" data-wp="abyss"></div>
+      <div class="titan-status"><span>${clock}</span><span class="titan-status-r">▮▮▮ · 🔋</span></div>
+      <div class="titan-idle"><div class="titan-idle-icon">📡</div><p>Нет сети</p><small>net link → connect</small></div>
+    </div></div>`;
   }
+
   let activeId = state._phoneTarget || pw.activeSession?.phoneId || null;
   if (!activeId && pw.access) {
     const keys = Object.keys(pw.access);
@@ -2251,95 +2838,128 @@ function renderPhoneLab(g) {
   }
   const phone = activeId ? findPhone(activeId) : null;
   if (!phone) {
-    return `<div class="nb-phone-shell idle">
-      <div class="nb-phone-top">NULLBYTE</div>
-      <div class="nb-phone-idle"><div class="nb-lock-hex"><span class="nb-lock-icon">📱</span></div><p>Устройство не подключено</p><small>phone-access → open &lt;PHONE_ID&gt; → attack</small></div>
-      <div class="nb-phone-footer">NET: ${esc(net.regionId||'—')}</div>
-    </div>`;
+    return `<div class="titan-phone"><div class="titan-screen">
+      <div class="titan-wallpaper"></div>
+      <div class="titan-status"><span>${clock}</span><span class="titan-status-r">NET · 🔋</span></div>
+      <div class="titan-idle"><div class="titan-idle-icon">📱</div><p>Нет устройства</p><small>phone access → open → attack</small></div>
+      <div class="titan-net">${esc(net.regionId||'')}</div>
+    </div></div>`;
   }
+
   let acc = pw.access?.[phone.id] || {};
   if (!acc.unlocked && !acc.pin && !acc.attackOk) {
     const k = Object.keys(pw.access || {}).find(x => x.toUpperCase() === phone.id.toUpperCase());
     if (k) acc = pw.access[k] || acc;
   }
   if (acc.blocked) {
-    return `<div class="nb-phone-shell idle"><div class="nb-phone-top">BLOCKED</div>
-      <div class="nb-phone-idle"><div class="nb-lock-hex">⛔</div><p>${esc(phone.id)}</p></div></div>`;
+    return `<div class="titan-phone"><div class="titan-screen">
+      <div class="titan-wallpaper" data-wp="graphite"></div>
+      <div class="titan-status"><span>${clock}</span><span>⛔</span></div>
+      <div class="titan-idle"><div class="titan-idle-icon">⛔</div><p>Заблокирован</p><small>${esc(phone.id)}</small></div>
+    </div></div>`;
   }
+
   const isUnlocked = !!(acc.unlocked || state.phoneUnlocked === phone.id);
+  const pinUi = state.pinInput || '';
+
+  // LOCK + PIN (swipe up reveals pin - we show pin panel when state.phonePinOpen or always after attack)
   if (!isUnlocked) {
-    const pinUi = state.pinInput || '';
-    const dots = [0,1,2,3].map(i => `<span class="nb-pin-dot ${i < pinUi.length ? 'on' : ''}"></span>`).join('');
-    const keysHtml = ['1','2','3','4','5','6','7','8','9','del','0','ok'].map(k => {
-      if (k === 'del') return `<button type="button" class="nb-pin-key" data-action="phone-pin-del">⌫</button>`;
-      if (k === 'ok') return `<button type="button" class="nb-pin-key nb-pin-blank" disabled></button>`;
-      return `<button type="button" class="nb-pin-key" data-action="phone-pin-digit" data-digit="${k}">${k}</button>`;
+    const showPin = !!(state.phonePinOpen || (acc.pin || acc.attackOk) || pinUi.length);
+    const dots = [0,1,2,3].map(i => `<i class="titan-pin-dot ${i < pinUi.length ? 'filled' : ''}"></i>`).join('');
+    const keys = ['1','2','3','4','5','6','7','8','9','','0','del'].map(k => {
+      if (k === '') return `<span></span>`;
+      if (k === 'del') return `<button type="button" class="titan-pin-key" data-action="phone-pin-del">⌫</button>`;
+      return `<button type="button" class="titan-pin-key" data-action="phone-pin-digit" data-digit="${k}">${k}<small></small></button>`;
     }).join('');
-    const clock = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-    return `<div class="nb-phone-shell lock">
-      <div class="nb-phone-status-row"><span>▣▣▣ SYS</span><span>🔋</span></div>
-      <div class="nb-lock-time">${clock}</div>
-      <div class="nb-lock-date">${esc(phone.ownerName)} · ${esc(phone.model)}</div>
-      <div class="nb-lock-hex"><span class="nb-lock-icon">🔒</span></div>
-      <div class="nb-lock-label">// SYSTEM SECURE //</div>
-      <div class="nb-pin-dots">${dots}</div>
-      <div class="nb-pin-pad">${keysHtml}</div>
-      ${state.pinError ? `<div class="nb-pin-err">${esc(state.pinError)}</div>` : ''}
-      <div class="nb-lock-hint">PIN после attack · 4 цифры</div>
-    </div>`;
+    return `<div class="titan-phone"><div class="titan-screen">
+      <div class="titan-wallpaper"></div>
+      <div class="titan-status"><span>${clock}</span><span class="titan-status-r">▮▮▮ 🔋</span></div>
+      <div class="titan-lock ${showPin ? 'dim' : ''}">
+        <div class="titan-lock-icon">🔒</div>
+        <div class="titan-lock-time">${clock}</div>
+        <div class="titan-lock-date">${esc(phone.ownerName)}</div>
+        <div class="titan-lock-model">${esc(phone.model||'')} · ${esc(phone.id)}</div>
+        <div class="titan-swipe" data-action="phone-pin-open"><span>свайп вверх · код</span><div class="titan-swipe-mark"></div></div>
+      </div>
+      <div class="titan-pin-panel ${showPin ? 'open' : ''}">
+        <div class="titan-pin-title">Код-пароль</div>
+        <div class="titan-pin-sub">${esc(phone.ownerName)}</div>
+        <div class="titan-pin-dots">${dots}</div>
+        ${state.pinError ? `<div class="titan-pin-err">${esc(state.pinError)}</div>` : ''}
+        <div class="titan-pin-pad">${keys}</div>
+        <button type="button" class="titan-pin-cancel" data-action="phone-pin-cancel">Отмена</button>
+      </div>
+    </div></div>`;
   }
+
+  // HOME / APPS
   const now = Date.now();
-  let msgs = [], gal = [], calls = [], contacts = [];
+  let msgs = [], gal = [], calls = [], contacts = [], files = [];
   try { msgs = (pw.sessionFrozenSms && pw.sessionFrozenSms.length) ? pw.sessionFrozenSms : phoneMessages(phone, now); } catch (e) {}
   try { registerBankFromMessages(g, phone, msgs); } catch (e) {}
   try { gal = phoneGallery(phone) || []; } catch (e) {}
   try { calls = phoneCallLog(phone, now) || []; } catch (e) {}
   try { contacts = phoneContacts(phone, now) || []; } catch (e) {}
+  try { files = phoneFiles(phone, now, state.game) || []; } catch (e) {}
+
   const tab = state.phoneLabTab || 'home';
-  let files = [];
-  try { files = phoneFiles(phone, now) || []; } catch (e) { files = []; }
-  const tabs = `<div class="nb-tabs">
-      <button type="button" class="nb-tab ${tab==='msgs'||tab==='home'?'on':''}" data-action="phone-lab-tab" data-tab="msgs">MESSAGES</button>
-      <button type="button" class="nb-tab ${tab==='calls'?'on':''}" data-action="phone-lab-tab" data-tab="calls">CALLS</button>
-      <button type="button" class="nb-tab ${tab==='gallery'?'on':''}" data-action="phone-lab-tab" data-tab="gallery">GALLERY</button>
-      <button type="button" class="nb-tab ${tab==='files'?'on':''}" data-action="phone-lab-tab" data-tab="files">FILES</button>
-    </div>`;
+  if (tab === 'home') {
+    return `<div class="titan-phone"><div class="titan-screen">
+      <div class="titan-wallpaper" data-wp="nebula"></div>
+      <div class="titan-status"><span>${clock}</span><span class="titan-status-r">▮▮▮▮ 🔋</span></div>
+      <div class="titan-home">
+        <div class="titan-home-grid">
+          <button type="button" class="titan-app" data-action="phone-lab-tab" data-tab="msgs"><span class="titan-tile titan-msgs">💬</span><span class="titan-label">Сообщения</span></button>
+          <button type="button" class="titan-app" data-action="phone-lab-tab" data-tab="calls"><span class="titan-tile titan-calls">📞</span><span class="titan-label">Звонки</span></button>
+          <button type="button" class="titan-app" data-action="phone-lab-tab" data-tab="contacts"><span class="titan-tile titan-contacts">👤</span><span class="titan-label">Контакты</span></button>
+          <button type="button" class="titan-app" data-action="phone-lab-tab" data-tab="gallery"><span class="titan-tile titan-photos">🖼️</span><span class="titan-label">Галерея</span></button>
+          <button type="button" class="titan-app" data-action="phone-lab-tab" data-tab="files"><span class="titan-tile titan-files">📁</span><span class="titan-label">Файлы</span></button>
+        </div>
+        <div class="titan-dock">
+          <button type="button" class="titan-app" data-action="phone-lab-tab" data-tab="msgs"><span class="titan-tile titan-msgs">💬</span></button>
+          <button type="button" class="titan-app" data-action="phone-lab-tab" data-tab="calls"><span class="titan-tile titan-calls">📞</span></button>
+          <button type="button" class="titan-app" data-action="phone-lab-tab" data-tab="contacts"><span class="titan-tile titan-contacts">👤</span></button>
+          <button type="button" class="titan-app" data-action="phone-lab-tab" data-tab="files"><span class="titan-tile titan-files">📁</span></button>
+        </div>
+        <div class="titan-home-indicator" data-action="phone-lab-tab" data-tab="home"></div>
+      </div>
+      <div class="titan-owner">${esc(phone.ownerName)} · ${esc(phone.id)}</div>
+    </div></div>`;
+  }
+
   let body = '';
   if (tab === 'msgs') {
-    body = `<div class="nb-list">${msgs.map(m => `<div class="nb-card"><div class="nb-card-top"><span class="nb-cyan">${esc(m.from||'SMS')}</span></div><div class="nb-card-body">${esc(m.text||'')}</div></div>`).join('')||'<div class="nb-empty">нет SMS</div>'}</div>
-      <button type="button" class="nb-action" data-action="phone-lab-export" data-kind="msgs" data-id="${esc(phone.id)}">SAVE SMS</button>`;
+    body = (msgs.map(m => `<div class="titan-card"><div class="titan-card-from">${esc(m.from||'SMS')}</div><div class="titan-card-text">${esc(m.text||'')}</div></div>`).join('') || '<div class="titan-empty">Нет сообщений</div>');
+    body += `<button type="button" class="titan-primary" data-action="phone-save-msgs" data-phone="${esc(phone.id)}">Сохранить SMS</button>`;
   } else if (tab === 'calls') {
-    body = `<div class="nb-list">${calls.map(c => `<div class="nb-card"><div class="nb-card-top"><span class="nb-pink">${esc(c.info||'')}</span><span class="nb-muted">${esc(c.date||'')} ${esc(c.time||'')}</span></div><div class="nb-card-body">${esc(c.with||'')} · ${esc(c.number||'')}</div></div>`).join('')||'<div class="nb-empty">пусто</div>'}</div>`;
+    body = (calls.map(c => `<div class="titan-card"><div class="titan-card-from">${esc(c.name||c.number||'—')}</div><div class="titan-card-text">${esc(c.info||c.dir||'')} · ${esc(c.duration||'')} · ${esc(c.at||'')}</div></div>`).join('') || '<div class="titan-empty">Нет звонков</div>');
   } else if (tab === 'contacts') {
-    body = `<div class="nb-list">${contacts.map(c => `<div class="nb-card"><div class="nb-card-top"><span class="nb-pink">${esc(c.name||'')}</span></div><div class="nb-card-body nb-cyan">${esc(c.number||'')}</div></div>`).join('')||'<div class="nb-empty">пусто</div>'}</div>
-      <button type="button" class="nb-action" data-action="phone-lab-export" data-kind="contacts" data-id="${esc(phone.id)}">SAVE CONTACTS</button>`;
+    body = (contacts.map(c => `<div class="titan-card"><div class="titan-card-from">${esc(c.name||'—')}</div><div class="titan-card-text">${esc(c.number||'')}</div></div>`).join('') || '<div class="titan-empty">Нет контактов</div>');
+    body += `<button type="button" class="titan-primary" data-action="phone-save-contacts" data-phone="${esc(phone.id)}">Сохранить контакты</button>`;
   } else if (tab === 'gallery') {
-    body = `<div class="nb-gal">${gal.map(x=>`<div class="nb-thumb"><span>${esc(x.title||'')}</span></div>`).join('')}</div>
-      <button type="button" class="nb-action" data-action="phone-lab-export" data-kind="gallery" data-id="${esc(phone.id)}">SAVE GALLERY</button>`;
+    body = `<div class="titan-photos">${(gal.map((g,i)=>`<div class="titan-photo" style="background:${esc(g.bg||g.color||'#333')}"></div>`).join('') || '')}</div>`;
+    if (!gal.length) body = '<div class="titan-empty">Пусто</div>';
   } else if (tab === 'files') {
-    body = `<div class="nb-list">${files.map(f => `<div class="nb-card">
-        <div class="nb-card-top"><span class="nb-cyan">${esc(f.name)}</span><span class="nb-muted">${esc(f.kind)} · ${f.size}b</span></div>
-        <div class="nb-card-body">${esc((f.body||'').slice(0,120))}${(f.body||'').length>120?'…':''}</div>
-        <button type="button" class="nb-action tiny" data-action="phone-file-download" data-phone="${esc(phone.id)}" data-file="${esc(f.id)}">СКАЧАТЬ</button>
-      </div>`).join('')||'<div class="nb-empty">нет файлов</div>'}</div>`;
-  } else {
-    body = `<div class="nb-app-grid">
-      <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="msgs"><span class="nb-app-ico nb-cyan">💬</span><label>MESSAGES</label></button>
-      <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="calls"><span class="nb-app-ico nb-pink">📞</span><label>CALLS</label></button>
-      <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="gallery"><span class="nb-app-ico nb-cyan">🖼</span><label>GALLERY</label></button>
-      <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="files"><span class="nb-app-ico nb-pink">📁</span><label>FILES</label></button>
-      <button type="button" class="nb-app" data-action="phone-lab-tab" data-tab="contacts"><span class="nb-app-ico nb-pink">👥</span><label>CONTACTS</label></button>
-    </div>`;
+    body = (files.map((f,i) => `<div class="titan-card titan-file"><div class="titan-card-from">${esc(f.name||f.file_name||'file')}</div><div class="titan-card-text">${esc(f.preview||f.file_type||'')} · ${fmt(f.base_price_cr||0)} CR</div>
+      <button type="button" class="titan-mini" data-action="phone-file-download" data-phone="${esc(phone.id)}" data-idx="${i}">Скачать</button></div>`).join('') || '<div class="titan-empty">Нет файлов</div>');
   }
-  return `<div class="nb-phone-shell unlocked">
-    <div class="nb-phone-status-row"><span>${new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</span><span>▣ NULLBYTE</span><span>🔋</span></div>
-    <div class="nb-phone-brand">NULLBYTE</div>
-    <div class="nb-phone-meta">${esc(phone.ownerName)} · ${esc(phone.role||'')} · ${esc(phone.number)}</div>
-    ${tabs}
-    <div class="nb-phone-body">${body}</div>
-    <div class="nb-phone-dock"><span>SYS: SECURE</span><span>NET: ${esc(net.regionId)}</span></div>
-  </div>`;
+
+  const titles = { msgs:'Сообщения', calls:'Звонки', contacts:'Контакты', gallery:'Галерея', files:'Файлы' };
+  return `<div class="titan-phone"><div class="titan-screen">
+    <div class="titan-wallpaper" data-wp="graphite"></div>
+    <div class="titan-status"><span>${clock}</span><span class="titan-status-r">▮▮▮▮ 🔋</span></div>
+    <div class="titan-app-view">
+      <div class="titan-app-head">
+        <button type="button" class="titan-back" data-action="phone-lab-tab" data-tab="home">‹ Назад</button>
+        <div class="titan-app-title">${esc(titles[tab]||tab)}</div>
+        <span></span>
+      </div>
+      <div class="titan-app-body">${body}</div>
+      <div class="titan-home-indicator" data-action="phone-lab-tab" data-tab="home"></div>
+    </div>
+  </div></div>`;
 }
+
 
 function renderIntel(g) {
   const intel = g.intel || {};
@@ -2365,34 +2985,46 @@ function renderIntel(g) {
 
 function renderHelp() {
   const g = state.game;
-  const sections = [
-    ['Обзор NULLBYTE', 'Одиночная симуляция хакерской жизни в вымышленном городе Нулл-Сити. Все сети, телефоны, серверы, почта и банки — игровые. Нет доступа к реальным устройствам, SMS, сайтам или API.'],
-    ['Что исследовать', '1) Региональные сети и телефоны (PHONE_ID). 2) Виртуальные сайты .null (сейчас web-цепочка на доработке). 3) Серверы и Intel. 4) Контракты BlackWire. 5) Случайные события мира.'],
-    ['Регионы и сеть', 'NullAtlas: 6 регионов (Бейшор-Хайтс, Мидтаун-Спайн, Айронрич, Саутгейт, Окридж, Шэдоулайн). Terminal: run net-link → list → connect <region_id>. Подключение только внутриигровое.'],
-    ['Анализ сети', 'run net-analyzer → scan (~анализ) → save <имя>. Полный отчёт содержит все ~550 PHONE_ID региона. Не обрезается. Ищи нужный ID сам (поиск в Files / IDE).'],
-    ['Телефоны PHONE_ID', 'Идентификатор формата PH-XXXX-0000. open через phone-access. После open открывается Phone Lab. SMS/звонки/галерея/lock/export — в приложении. disconnect только командой: phone-access → disconnect (или net-link → disconnect). Прогресс (файлы, discovered) сохраняется, сессия — нет.'],
-    ['Альтернатива: Mail Drop', 'run mail-drop → craft → save файл → N-Mail вложение NPC. Движок считает шанс/задержку открытия. При успехе в почте приходит PHONE_ID.'],
-    ['Плагины mobile', 'Бесплатно: net-link, net-analyzer, phone-access, mail-drop. Управление телефоном — Phone Lab. Платно: sms-bomber 40000 CR, bank-peek 100000 CR. Старые mobile-модули удалены.'],
-    ['Сайты (WIP)', 'Web-плагины в NULForge помечены «В доработке». Логика сохранена, run закрыт до отдельного чек-листа.'],
-    ['Terminal', 'help | plugins | run <id> | files | ls | cat | mission list | intel | map. В плагине: help, exit. Неизвестная команда — сразу ошибка без фейковой загрузки.'],
-    ['Files и IDE', 'Files — список и просмотр. IDE — вкладки, правка, поиск, сохранение виртуальных файлов. Нет доступа к файловой системе устройства.'],
-    ['N-Mail / BlackWire', 'Почта для писем и сдачи. Контракты по сайтам временно скрыты; phone-ветка расширяется.'],
-    ['События', 'Движок сам создаёт редкие события (инфра / социал / security / rare). Они меняют доступность и иногда кладут артефакт в Files. Пропуск не ломает основной прогресс.'],
-    ['Уровни и экономика', 'Уровень растёт только от XP, потолка практически нет. Гейт плагинов по уровню снят. CR — только игровые.'],
-    ['Сохранение', 'Telegram CloudStorage (чанки) + local fallback. Ник вводится один раз. migrateSave не затирает ops/phoneWorld/events.'],
-    ['Частые ошибки', '«Плагин на доработке» — web/legacy. «Сначала connect» — нет сети. «PHONE_ID не найден» — проверь формат из отчёта. Файлы смотри в Files, не жди автоподсветки ID.']
-  ];
-  const plugs = (typeof PLUGINS !== 'undefined' ? PLUGINS : []).map(p => {
-    const lock = typeof isPluginLocked === 'function' && isPluginLocked(p.id);
-    return `<div class="list-row"><div class="list-main"><strong>${esc(p.name)}</strong><small>${esc(p.category)} · ${lock ? 'WIP' : 'OK'} · ${esc(p.description)}</small></div>
-      <button class="btn tiny ghost" data-action="plugin-docs" data-id="${p.id}">ПОДРОБНЕЕ</button></div>`;
-  }).join('');
-  const ev = (g?.events?.active || []).map(e => `<div class="list-row"><div class="list-main"><strong>${esc(e.title)}</strong><small>${esc(e.body)}</small></div></div>`).join('') || '<div class="muted small">Активных событий нет</div>';
-  return `<div class="app-heading"><div><div class="eyebrow">NULLBYTE KNOWLEDGE BASE</div><h2>Help / Docs</h2><p>Полное руководство: что исследовать, как брать ID, какие инструменты.</p></div><span class="badge green">RU</span></div>
-  <div class="notice warning">Все термины «взлом», «сеть», «SMS» — только симуляция.</div>
-  ${sections.map((s,i)=>`<div class="panel section-gap"><div class="panel-title"><span>${String(i+1).padStart(2,'0')} / ${esc(s[0].toUpperCase())}</span></div><div class="muted small" style="line-height:1.75">${esc(s[1])}</div></div>`).join('')}
-  <div class="panel section-gap"><div class="panel-title"><span>ПЛАГИНЫ</span></div><div class="list">${plugs}</div></div>
-  <div class="panel section-gap"><div class="panel-title"><span>СОБЫТИЯ СЕЙЧАС</span></div>${ev}</div>`;
+  const installed = new Set((g.computer?.installedPlugins) || []);
+  const all = (typeof PLUGINS !== 'undefined' && Array.isArray(PLUGINS)) ? PLUGINS : [];
+  const rows = all.map(p => {
+    const locked = typeof isPluginLocked === 'function' && isPluginLocked(p.id);
+    const on = installed.has(p.id);
+    let status, cls;
+    if (locked) { status = 'В РАЗРАБОТКЕ'; cls = 'text-red'; }
+    else if (on) { status = 'ДОСТУПЕН'; cls = 'text-green'; }
+    else if ((p.price || 0) > 0) { status = 'НЕ КУПЛЕН · ' + fmt(p.price) + ' CR'; cls = 'text-amber'; }
+    else { status = 'НЕ УСТАНОВЛЕН'; cls = 'muted'; }
+    const idShow = String(p.id).replace(/-/g, ' ');
+    return `<div class="list-row"><div class="list-main"><strong>${esc(idShow)}</strong><small>${esc(p.name)} · ${esc(p.category || '')}</small></div><span class="${cls}">${esc(status)}</span></div>`;
+  }).join('') || '<div class="muted">Нет данных о плагинах</div>';
+
+  return `<div class="app-heading"><div><div class="eyebrow">DOCS</div><h2>Help</h2><p>NULLBYTE — игровая симуляция. Всё вымышленное.</p></div><span class="badge">v1</span></div>
+
+  <div class="panel section-gap">
+    <div class="panel-title"><span>ПЛАГИНЫ</span><small>статус</small></div>
+    <p class="muted small">В терминале: <b>plugins</b> · запуск <b>run id</b> (можно с пробелами: run net link)</p>
+    <div class="list">${rows}</div>
+  </div>
+
+  <div class="panel section-gap">
+    <div class="panel-title"><span>БЫСТРЫЙ СТАРТ</span></div>
+    <ol class="help-steps">
+      <li>Terminal → <code>run net link</code> → <code>connect &lt;region&gt;</code></li>
+      <li><code>run net analyzer</code> → <code>scan</code> → имя файла отчёта</li>
+      <li><code>run phone access</code> → <code>open PHONE_ID</code> → <code>attack</code> → PIN в Phone Lab</li>
+      <li>FILES / SMS / contacts → скачать → N-Mail заказчику</li>
+      <li>Блок телефона: <code>block</code> в phone access → письмо заказчику <b>без файла</b></li>
+    </ol>
+  </div>
+
+  <div class="panel section-gap">
+    <div class="panel-title"><span>ПРИЛОЖЕНИЯ</span></div>
+    <div class="kv"><span>Phone Lab</span><b>сессия телефона после open/attack</b></div>
+    <div class="kv"><span>N-Mail</span><b>сдача заданий и переписка с NPC</b></div>
+    <div class="kv"><span>NullAtlas</span><b>регионы сети</b></div>
+    <div class="kv"><span>Aster Bank</span><b>кошелёк · вход в NPC-счета на asterbank.null</b></div>
+  </div>`;
 }
 
 function highlightNbs(source) {
@@ -2513,7 +3145,30 @@ function runNbsAction(action) {
   }
 }
 
-function handleAction(action,el) {
+const _ptrTrack = { x:0, y:0, t:0 };
+document.addEventListener('pointerdown', e => {
+  _ptrTrack.x = e.clientX; _ptrTrack.y = e.clientY; _ptrTrack.t = Date.now();
+}, true);
+
+function isIntentionalClick(el, ev) {
+  // was blocking mobile browser tiles — always allow
+  return true;
+  if (!el || !el.classList || !el.classList.contains('start-tile')) return true;
+  if (!_ptrTrack || !_ptrTrack.t) return true;
+  const dt = Date.now() - (_ptrTrack.t || 0);
+  if (dt > 900) return true;
+  if (ev && typeof ev.clientX === 'number') {
+    const dx = Math.abs(ev.clientX - _ptrTrack.x);
+    const dy = Math.abs(ev.clientY - _ptrTrack.y);
+    if (dx > 24 || dy > 24) return false;
+  }
+  return true;
+}
+
+function handleAction(action,el,ev) {
+  if(action==='noop') return;
+  if(action==='browser-tab' && el?.dataset?.site && !isIntentionalClick(el,ev)) return;
+
   const id=el.dataset.id,app=el.dataset.app,site=el.dataset.site,part=el.dataset.part;
   switch(action){
     case 'bank-npc-login':{
@@ -2551,20 +3206,33 @@ function handleAction(action,el) {
     }
     case 'bank-logout-skip':state.bankSessionId=null;toast('Сессия закрыта');refreshOpenApps();break;
     case 'plugin-docs':{
-      const docs={...pluginDocs(),...extendedPluginDocs()}[id]||{...pluginDocs(),...extendedPluginDocs()}[el.dataset.plugin];
-      const p=docs||{title:id,role:'Нет описания',steps:[],inputs:'—',outputs:'—',next:[]};
-      const plug = getPlugin(id) || PLUGINS.find(x=>x.id===id);
-      showModal({title:p.title||'Плагин',eyebrow:'ПОДРОБНЕЕ О ПЛАГИНЕ',body:`
-        <p><b>ID:</b> <code>${esc(id)}</code> · <b>Версия:</b> ${esc(plug?.version||'—')} · <b>Категория:</b> ${esc(plug?.category||'—')}</p>
-        <p><b>Назначение:</b> ${esc(p.role)}</p>
-        <p><b>Что делает / не делает:</b> ${esc(plug?.description||p.role)} ${esc(p.limits||'')}</p>
-        <p><b>Цена:</b> ${plug?.price?fmt(plug.price)+' CR':'бесплатно'} · <b>RAM:</b> ${plug?.ram||'—'} · <b>Storage:</b> ${plug?.storage||'—'} MB</p>
-        <p><b>Вход:</b> ${esc(p.inputs)}</p>
-        <p><b>Выход:</b> ${esc(p.outputs)}</p>
-        <p><b>Шаги:</b></p><ol style="margin:6px 0 0 18px">${(p.steps||[]).map(s=>`<li>${esc(s)}</li>`).join('')}</ol>
-        <p><b>Далее:</b> ${(p.next||[]).map(esc).join(', ')||'—'}</p>
-        <p class="muted small"><b>Ограничения:</b> ${esc(p.limits||'—')}</p>
-        ${typeof isPluginLocked==='function'&&isPluginLocked(id)?'<p class="notice warning">Статус: НА ДОРАБОТКЕ — запуск и установка закрыты.</p>':''}`,confirm:'ЗАКРЫТЬ',cancel:'',onConfirm:()=>{}});
+      const pid = id || el.dataset.id || el.dataset.plugin || '';
+      let docs = {};
+      try { docs = { ...(pluginDocs()||{}), ...(extendedPluginDocs()||{}) }; } catch (e) { docs = {}; }
+      const p = docs[pid] || { title: pid, role: 'Описание появится позже', steps: [], inputs: '—', outputs: '—', next: [], limits: '—' };
+      const plug = (typeof getPlugin==='function' && getPlugin(pid)) || (PLUGINS||[]).find(x=>x.id===pid) || {};
+      const locked = typeof isPluginLocked==='function' && isPluginLocked(pid);
+      const steps = (p.steps && p.steps.length)
+        ? p.steps
+        : ['Открой Terminal', 'plugins — список', 'run ' + String(pid).replace(/-/g,' '), 'Следуй help внутри плагина'];
+      showModal({
+        title: p.title || plug.name || pid || 'Плагин',
+        eyebrow: 'ПОДРОБНЕЕ О ПЛАГИНЕ',
+        body: `
+          <p><b>ID:</b> <code>${esc(pid)}</code> · <b>v</b>${esc(plug.version||'—')} · <b>${esc(plug.category||'—')}</b></p>
+          <p><b>Назначение:</b> ${esc(p.role || plug.description || '—')}</p>
+          <p><b>Эффект:</b> ${esc(plug.effect || '—')}</p>
+          <p><b>Цена:</b> ${plug.price ? fmt(plug.price)+' CR' : 'бесплатно'} · RAM ${plug.ram||'—'} · ${plug.storage||'—'} MB</p>
+          <p><b>Вход:</b> ${esc(p.inputs||'—')} · <b>Выход:</b> ${esc(p.outputs||'—')}</p>
+          <p><b>Шаги:</b></p>
+          <ol style="margin:6px 0 0 18px">${steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol>
+          <p class="muted small"><b>Далее:</b> ${(p.next||[]).map(esc).join(', ')||'—'} · <b>Лимиты:</b> ${esc(p.limits||'—')}</p>
+          ${locked ? '<p class="notice warning">Статус: НА ДОРАБОТКЕ — run закрыт.</p>' : '<p class="notice">Можно запускать из Terminal, если установлен.</p>'}
+        `,
+        confirm: 'ЗАКРЫТЬ',
+        cancel: '',
+        onConfirm: () => closeModal()
+      });
       break;
     }
     case 'copy-text':{
@@ -2691,7 +3359,15 @@ function handleAction(action,el) {
           state.pinError = '';
           state.phoneLabTab = 'home';
           state.phoneUnlocked = r.phoneId || pid;
-          if (r.xpGain) toast('+' + r.xpGain + ' XP за взлом телефона' + (r.leveled ? ' · LEVEL UP!' : ''), 'success');
+          if (r.xpGain) {
+            try {
+              if (typeof grantXp === 'function' && !(r.xp >= 0 && r.leveled !== undefined && false)) {
+                // XP already applied in unlockWithPin; just toast
+              }
+            } catch (e) {}
+            toast('+' + r.xpGain + ' XP' + (r.leveled ? ' · LEVEL UP ' + (r.level || '') : ''), 'success');
+            refreshOpenApps(['profile']);
+          }
           scheduleSave();
           // force access unlocked
           try {
@@ -2708,6 +3384,8 @@ function handleAction(action,el) {
       renderWindow('phone');
       break;
     }
+    case 'phone-pin-open':{ state.phonePinOpen = true; renderWindow('phone'); break; }
+    case 'phone-pin-cancel':{ state.phonePinOpen = false; state.pinInput=''; state.pinError=''; renderWindow('phone'); break; }
     case 'phone-pin-del':{
       state.pinInput = String(state.pinInput || '').slice(0, -1);
       state.pinError = '';
@@ -2719,26 +3397,49 @@ function handleAction(action,el) {
       renderWindow('phone'); break;
     }
     case 'phone-file-download': {
-      const phoneId = target.getAttribute('data-phone');
-      const fileId = target.getAttribute('data-file');
+      if (!rateOk('dl-file', 350)) break;
+      const phoneId = el.dataset.phone || el.getAttribute('data-phone');
+      const fileId = el.dataset.file || el.getAttribute('data-file');
       const phone = findPhone(phoneId);
-      const list = phone ? phoneFiles(phone) : [];
-      const file = list.find(f => f.id === fileId);
+      if (!phone) { toast('Телефон не найден', 'error'); break; }
+      let list = [];
+      try { list = phoneFiles(phone, Date.now(), state.game) || []; } catch (err) { toast(String(err.message||err), 'error'); break; }
+      const file = list.find(f => f.id === fileId || f.name === fileId);
       if (!file) { toast('Файл не найден', 'error'); break; }
-      if (!state.game.computer.files) state.game.computer.files = [];
-      const id = 'dl_' + file.id + '_' + Date.now().toString(36);
+      if (!state.game.computer) state.game.computer = {};
+      if (!Array.isArray(state.game.computer.files)) state.game.computer.files = [];
+      const fid = 'dl_' + String(file.id || 'f') + '_' + Date.now().toString(36);
+      const price = Number(file.base_price_cr != null ? file.base_price_cr : file.price) || 0;
       state.game.computer.files.unshift({
-        id,
-        name: file.name,
-        type: file.kind || 'file',
-        content: file.body || '',
-        body: file.body || '',
+        id: fid,
+        instance_id: file.instance_id || fid,
+        template_id: file.template_id || '',
+        name: file.file_name || file.name || 'file.txt',
+        file_name: file.file_name || file.name || 'file.txt',
+        type: file.file_type || file.kind || 'file',
+        kind: file.file_type || file.kind || 'file',
+        file_type: file.file_type || file.kind || 'file',
+        rarity: file.rarity || 'common',
+        base_price_cr: price,
+        content_preview: file.content_preview || (file.body || '').slice(0, 160),
+        content: file.body || file.plaintext_payload || '',
+        body: file.body || file.plaintext_payload || '',
+        plaintext_payload: file.plaintext_payload || file.body || '',
+        encryption_state: file.encryption_state || 'none',
+        integrity_state: file.integrity_state || 'full',
+        sale_state: 'owned',
+        individual_value_multiplier: 1,
         source: 'phone:' + phoneId,
+        phone_id: phoneId,
+        owner_name: file.owner_name || phone.ownerName || '',
+        owner_role: file.owner_role || phone.role || '',
         at: Date.now()
       });
       state.game.computer.files = state.game.computer.files.slice(0, 80);
-      toast('Скачано: ' + file.name, 'success');
+      toast('Скачано: ' + (file.name || 'file'), 'success');
       scheduleSave();
+      if (state.opened.has('ide')) renderWindow('ide');
+      if (state.opened.has('computer')) renderWindow('computer');
       break;
     }
     case 'phone-lab-export':{
@@ -2792,9 +3493,12 @@ function handleAction(action,el) {
       else if(state.game.phoneWorld){ state.game.phoneWorld.access[id]={...(state.game.phoneWorld.access[id]||{}), blockedUntil:Date.now()+30*60*1000}; }
       toast('Lock 30м','success'); scheduleSave(); renderWindow('phone'); break;
     }
-    case 'open-app':$('startMenu').hidden=true;$('startButton').setAttribute('aria-expanded','false');
+    case 'open-app':{
+      const sm=$('startMenu'); if(sm) sm.hidden=true;
+      const sb=$('startButton'); if(sb) sb.setAttribute('aria-expanded','false');
       if(app==='browser'&&state.game&&typeof ensureTrading==='function') ensureTrading(state.game);
-      openApp(app);break;
+      openApp(app); break;
+    }
     case 'close-window':closeWindow(el.closest('.app-window')?.dataset.window);break;
     case 'toggle-pin-window': togglePinWindow(el.closest('.app-window')?.dataset.window); break;
     case 'minimize-window':minimizeWindow(el.closest('.app-window')?.dataset.window);break;
@@ -2829,9 +3533,27 @@ function handleAction(action,el) {
       }
       break;
     }
+    case 'mission-detail':
     case 'mission-details':{
-      state.selectedMissionId=id;
-      if(!state.opened.has('blackwire'))openApp('blackwire');
+      const mid = id || el.dataset.id;
+      state.selectedMissionId = mid;
+      try {
+        const m = (state.game.missions?.items||[]).find(x=>x.id===mid);
+        if (m) {
+          showModal({
+            title: m.title || mid,
+            eyebrow: 'КОНТРАКТ',
+            body: `<p><b>Заказчик:</b> ${esc(m.client||'—')}</p>
+              <p><b>Задача:</b> ${esc(m.objective||m.task||'—')}</p>
+              <p><b>Цель:</b> ${esc(m.ownerName||'—')} · ${esc(m.phoneId||m.boundPhoneId||'—')}</p>
+              <p><b>Регион:</b> ${esc(m.regionId||'—')} · <b>Защита:</b> ${esc(m.difficultyLabel||m.protection||'—')}</p>
+              <p><b>Награда:</b> ${fmt(m.reward||0)} CR <span class="muted">(база ${fmt(m.baseReward||0)} + ${fmt(m.rewardBonus||0)})</span> · XP ${m.xp||0}</p>
+              <p class="muted">${esc(m.hint||'')}</p>`,
+            confirm: 'ЗАКРЫТЬ', cancel: '', onConfirm: () => closeModal()
+          });
+        }
+      } catch (e) { console.error(e); }
+      if(!state.opened.has('blackwire')) openApp('blackwire');
       else renderWindow('blackwire');
       break;
     }
@@ -2956,23 +3678,31 @@ function handleAction(action,el) {
       state.mailView=null; renderWindow('mail'); break;
     }
     case 'mail-send':{
-      const root = document.querySelector('.mail-compose') || document;
-      const to=(root.querySelector('#mailTo')?.value||document.getElementById('mailTo')?.value||'').trim();
-      const subject=(root.querySelector('#mailSubject')?.value||document.getElementById('mailSubject')?.value||'').trim();
-      const body=(root.querySelector('#mailBody')?.value||document.getElementById('mailBody')?.value||'').trim();
-      const attSel=root.querySelector('#mailAttach')||document.getElementById('mailAttach');
-      const att=(attSel?.value||'').trim();
-      if(!to){ toast('Укажи Имя Фамилия NPC','error'); break; }
+      const root = document.querySelector('.mail-compose') || document.querySelector('[data-window="mail"]') || document;
+      const to=(root.querySelector('#mailTo')?.value||'').trim();
+      const subject=(root.querySelector('#mailSubject')?.value||'').trim();
+      const body=(root.querySelector('#mailBody')?.value||'').trim();
+      const att=(root.querySelector('#mailAttach')?.value||'').trim();
+      if(!to){ toast('Укажи получателя (Имя Фамилия)','error'); break; }
+      if(typeof sendPlayerMail !== 'function'){ toast('sendPlayerMail недоступен','error'); break; }
       try {
         const r = sendPlayerMail(state.game, { to, subject, body, attachmentId: att || undefined });
-        if(!r.ok){ toast(r.reason||'Ошибка отправки','error'); break; }
-        toast(r.hasAttachment ? 'Письмо с вложением отправлено' : 'Письмо отправлено','success');
-        state.mailCompose=null;
-        state.mailView=null;
+        if(!r || !r.ok){ toast((r && r.reason) || 'Ошибка отправки','error'); break; }
+        if(!state.game.mail) state.game.mail = { messages: [], pendingDelivery: [] };
+        toast(r.hasAttachment ? 'Письмо с вложением отправлено' : 'Письмо отправлено → ' + to, 'success');
+        // Block-missions: no attachment required — verify phone blocked
+        try {
+          const paid = tryCompleteLockMissions(state.game, to);
+          if (paid && paid.length) {
+            toast('Задание (блок) выполнено · +CR', 'success');
+            refreshOpenApps(['mail','blackwire','profile','bank']);
+          }
+        } catch (e) { console.warn(e); }
+        state.mailCompose = null;
+        state.mailView = null;
         scheduleSave();
         renderWindow('mail');
-        refreshOpenApps(['mail']);
-      } catch(err){ console.error(err); toast(String(err.message||err),'error'); }
+      } catch(err){ console.error('[mail-send]', err); toast(String(err.message||err),'error'); }
       break;
     }
 
@@ -3012,29 +3742,109 @@ function handleAction(action,el) {
     case 'ide-copy':{const editor=$('nbsEditor');if(editor){editor.select();const value=editor.value;try{if(navigator.clipboard?.writeText){navigator.clipboard.writeText(value).then(()=>toast('Сценарий скопирован.','success')).catch(()=>toast('Браузер не разрешил доступ к буферу обмена. Используй Ctrl/Cmd+C.','error'));}else{const ok=document.execCommand?.('copy');toast(ok?'Сценарий скопирован.':'Используй Ctrl/Cmd+C для копирования.',ok?'success':'info');}}catch{toast('Используй Ctrl/Cmd+C для копирования.','info');}}break;}
     case 'ide-find':{const editor=$('nbsEditor'),input=$('nbsSearch'),query=input?.value?.trim();if(!editor||!query){toast('Введи текст для поиска.','error');break;}const text=editor.value.toLowerCase(),q=query.toLowerCase();let index=text.indexOf(q,editor.selectionEnd||0);if(index<0)index=text.indexOf(q);if(index<0){toast('Совпадений не найдено.','error');break;}editor.focus();editor.setSelectionRange(index,index+query.length);break;}
     case 'editor-delete':confirm('Удалить NBS-файл?',`Файл ${esc(state.game.editor.files.find(x=>x.id===id)?.name||'')} будет удалён.`,()=>{state.game.editor.files=state.game.editor.files.filter(x=>x.id!==id);scheduleSave();refreshOpenApps();toast('Файл удалён.','success');},{danger:true,confirmText:'УДАЛИТЬ'});break;
+    case 'darkshop-tab':{
+      state.darkshopTab = id || 'market';
+      renderWindow('darkshop');
+      break;
+    }
+    case 'darkshop-buy':{
+      if (!rateOk('ds-buy', 600)) { toast('Подожди…','warn'); break; }
+      const lid = id || el.dataset.id || el.getAttribute('data-id');
+      try {
+        const r = buyDarkshopListing(state.game, lid);
+        if(!r.ok){ toast(r.error||'Ошибка покупки','error'); break; }
+        scheduleSave();
+        toast('Куплено «'+(r.file?.name||'')+'» −'+fmt(r.price)+' CR','success');
+        renderWindow('darkshop');
+        try { refreshOpenApps(['bank','profile','files','computer']); } catch(e){}
+      } catch (err) {
+        console.error(err);
+        toast(String(err.message||err),'error');
+      }
+      break;
+    }
+    case 'darkshop-appraise':{
+      const f = (state.game.computer.files||[]).find(x=>(x.instance_id||x.id)===id);
+      if(!f){ toast('Файл не найден','error'); break; }
+      const ap = appraiseFileInstance(f);
+      showModal({
+        title: f.file_name||f.name||'Файл',
+        eyebrow: 'ОЦЕНКА DARKSHOP',
+        body: `<p><b>Редкость:</b> ${esc(rarityLabel(f.rarity))}</p>
+          <p><b>Информативность:</b> ${ap.info}/10</p>
+          <p><b>Состояние:</b> ${esc(f.integrity_state||'full')} · ${esc(f.encryption_state||'none')}</p>
+          <p><b>База:</b> ${fmt(ap.base)} CR · <b>Оценка:</b> <span class="text-green">${fmt(ap.price)} CR</span></p>
+          <p class="muted">${esc(ap.reason)}</p>`,
+        confirm: 'ПРОДАТЬ ЗА '+fmt(ap.price)+' CR',
+        cancel: 'ОСТАВИТЬ',
+        onConfirm: () => {
+          const r = sellFileToDarkshop(state.game, id);
+          if(!r.ok){ toast(r.error||'Ошибка','error'); return; }
+          scheduleSave(); toast('Продано +'+fmt(r.price)+' CR','success'); renderWindow('darkshop');
+        }
+      });
+      break;
+    }
+    case 'darkshop-sell':{
+      const f = (state.game.computer.files||[]).find(x=>(x.instance_id||x.id)===id);
+      if(!f){ toast('Файл не найден','error'); break; }
+      const ap = appraiseFileInstance(f);
+      confirm('Продать файл?', `«${esc(f.file_name||f.name)}» за <b>${fmt(ap.price)} CR</b>.<br><span class="muted">${esc(ap.reason)}</span><br>После продажи этот instance нельзя продать снова (уценка 75%).`, () => {
+        const r = sellFileToDarkshop(state.game, id);
+        if(!r.ok){ toast(r.error||'Ошибка','error'); return; }
+        scheduleSave(); toast('Продано +'+fmt(r.price)+' CR','success'); renderWindow('darkshop');
+      });
+      break;
+    }
     case 'modal-cancel':closeModal();break;
     case 'modal-confirm':finishModal();break;
   }
 }
 
+
 function onUiAction(event){
-  const button=event.target.closest('[data-action]');
-  if(!button)return;
-  // Prefer the innermost action target (e.g. tab close over tab activate).
-  const now=Date.now();
-  if(button._nbActAt && now-button._nbActAt<350)return;
-  button._nbActAt=now;
-  // Don't preventDefault on inputs; only on actionable chrome controls
-  if(!event.target.closest('input,textarea,select')) event.preventDefault();
-  try{
-    handleAction(button.dataset.action,button);
-  }catch(err){
-    console.error('[NULLBYTE] action',button.dataset.action,err);
-    toast(String(err.message||err),'error');
+  try {
+    if (!event || !event.target) return;
+    // ignore non-primary mouse
+    if (event.type === 'pointerup' && event.pointerType === 'mouse' && event.button !== 0) return;
+    if (event.type === 'click' && event.button != null && event.button !== 0) return;
+    // while dragging window, ignore UI actions
+    if (state.drag) return;
+
+    const target = event.target;
+    if (!target || !target.closest) return;
+
+    // typing in pure inputs — skip (unless the input itself is the action button)
+    if (target.closest('input,textarea,select') && !target.closest('[data-action]')) return;
+
+    const button = target.closest('[data-action]');
+    if (!button) return;
+    if (button.disabled) return;
+
+    const action = button.getAttribute('data-action') || button.dataset.action;
+    if (!action || action === 'noop') return;
+
+    const now = Date.now();
+    const key = action + '|' + (button.getAttribute('data-id')||button.getAttribute('data-app')||button.getAttribute('data-site')||button.getAttribute('data-window')||'');
+    // Deduplicate pointerup + click pair
+    if (onUiAction._lastKey === key && now - (onUiAction._lastAt||0) < 320) return;
+    onUiAction._lastKey = key;
+    onUiAction._lastAt = now;
+
+    // stop only after we accept the action
+    try { event.preventDefault(); } catch(e) {}
+    try { event.stopPropagation(); } catch(e) {}
+
+    handleAction(action, button, event);
+  } catch (err) {
+    console.error('[NULLBYTE] action', err);
+    try { toast(String(err.message||err), 'error'); } catch(e) {}
   }
 }
-document.addEventListener('click',onUiAction);
-document.addEventListener('pointerup',onUiAction);
+
+document.addEventListener('click', onUiAction, false);
+document.addEventListener('pointerup', onUiAction, false);
+
 
 document.addEventListener('pointerdown',event=>{
   const editable=event.target.closest('input,textarea,select,[contenteditable="true"]');
@@ -3045,10 +3855,21 @@ document.addEventListener('pointerdown',event=>{
     queueMicrotask(()=>{ if(editable.isConnected && !editable.disabled) editable.focus({preventScroll:true}); });
   }
 },true);
-$('startButton').addEventListener('click',()=>{$('startMenu').hidden=!$('startMenu').hidden;$('startButton').setAttribute('aria-expanded',String(!$('startMenu').hidden));});
-document.addEventListener('pointerdown',e=>{if(!$('startMenu').hidden&&!$('startMenu').contains(e.target)&&!e.target.closest('#startButton')){$('startMenu').hidden=true;$('startButton').setAttribute('aria-expanded','false');}});
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(!$('modalBackdrop').hidden)closeModal();else if(!$('startMenu').hidden){$('startMenu').hidden=true;$('startButton').setAttribute('aria-expanded','false');}}});
-$('modalBackdrop').addEventListener('click',e=>{if(e.target===$('modalBackdrop')&&state.modalConfirm===null)closeModal();});
+try {
+  const startBtn=$('startButton'), startMenu=$('startMenu');
+  if (startBtn && startMenu) {
+    startBtn.addEventListener('click',()=>{startMenu.hidden=!startMenu.hidden;startBtn.setAttribute('aria-expanded',String(!startMenu.hidden));});
+    document.addEventListener('pointerdown',e=>{if(!startMenu.hidden&&!startMenu.contains(e.target)&&!e.target.closest('#startButton')){startMenu.hidden=true;startBtn.setAttribute('aria-expanded','false');}});
+  }
+  document.addEventListener('keydown',e=>{
+    if(e.key!=='Escape')return;
+    const mb=$('modalBackdrop');
+    if(mb && !mb.hidden) closeModal();
+    else if(startMenu && !startMenu.hidden){ startMenu.hidden=true; startBtn?.setAttribute('aria-expanded','false'); }
+  });
+  const mb=$('modalBackdrop');
+  if(mb) mb.addEventListener('click',e=>{if(e.target===mb && state.modalConfirm===null) closeModal();});
+} catch (e) { console.error('[bind chrome]', e); }
 
 window.addEventListener('beforeunload',()=>{if(state.game&&!state.saveBlocked){state.game.meta.updatedAt=Date.now();try{localStorage.setItem('nullbyte_save_v1',JSON.stringify(state.game));}catch{}}});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')persist();});
@@ -3057,7 +3878,12 @@ let wasBankLocked=false;
 setInterval(()=>{
   updateClock();if(!state.game)return;
   const notices=processTimedEvents(state.game);
-  if(notices.length){notices.forEach(n=>toast(n,'success'));scheduleSave();refreshOpenApps();}
+  if(notices.length){
+    notices.forEach(n=>toast(n,'success'));
+    scheduleSave();
+    // soft refresh: skip focused inputs; only common panels
+    refreshOpenApps(['blackwire','mail','profile','map'], { soft: true });
+  }
   const bankLocked=state.game.bank.lockUntil>Date.now();
   $('systemStatus').textContent=bankLocked?'SYSTEM READY / BANK LOCKED':'SYSTEM READY';
   document.querySelectorAll('[data-bank-until]').forEach(el=>{el.textContent=humanLeft(Number(el.dataset.bankUntil)-Date.now());});
@@ -3134,4 +3960,4 @@ document.addEventListener('submit',event=>{
     });
   }
 });
-boot();
+try { boot(); } catch (e) { console.error('[boot]', e); try { if(!bootFinished) finishBoot(); } catch (e2) {} }

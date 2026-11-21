@@ -80,38 +80,38 @@ export function tradingSparkline(values, w = 120, h = 36) {
 
 
 export const PHONE_JOBS = [
-  {id:'phone-001',title:'Список контактов',client:'Mira Voss',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:180,xp:40,
+  {id:'phone-001',title:'Список контактов',client:'Mira Voss',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:280,xp:55,
     objective:'Подключись к сети региона цели, открой телефон и выгрузи contacts.',
     hint:'net-link → connect <region> → net-analyzer → phone-access open → Phone Lab → Контакты → N-Mail заказчику',
     regionId:'bayshore',ownerHint:'Alex Voss',task:'contacts',requiredPlugins:['net-link','net-analyzer','phone-access']},
-  {id:'phone-002',title:'Снимок переписки',client:'Harbor Desk',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:220,xp:50,
+  {id:'phone-002',title:'Снимок переписки',client:'Harbor Desk',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:340,xp:65,
     objective:'Сохрани SMS (msgs) целевого телефона в файл и сдай через N-Mail.',
     hint:'Phone Lab → SMS → Сохранить SMS → письмо заказчику',
     regionId:'midtown',ownerHint:'Eli North',task:'msgs',requiredPlugins:['phone-access']},
-  {id:'phone-003',title:'Звонок от имени',client:'Null Courier',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:320,xp:70,
+  {id:'phone-003',title:'Звонок от имени',client:'Null Courier',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:480,xp:90,
     objective:'Открой указанный телефон в Phone Lab (сессия access).',
     hint:'open PHONE_ID из сети региона → Phone Lab',
     regionId:'ironreach',ownerHint:'Kai Reed',task:'access',requiredPlugins:['phone-access']},
-  {id:'phone-004',title:'Галерея для заказа',client:'Green Mart',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:280,xp:60,
+  {id:'phone-004',title:'Галерея для заказа',client:'Green Mart',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:420,xp:80,
     objective:'Экспортируй gallery телефона в файл.',
     hint:'Phone Lab → Галерея → Сохранить галерею',
     regionId:'southgate',ownerHint:'Nora Shaw',task:'gallery',requiredPlugins:['phone-access']},
-  {id:'phone-005',title:'Блокировка на полчаса',client:'Shadowline Ops',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:350,xp:80,
+  {id:'phone-005',title:'Блокировка на полчаса',client:'Shadowline Ops',target:'phone',category:'phone',difficulty:'Средняя',minLevel:1,reward:520,xp:100,
     objective:'Заблокируй целевой телефон на 30 минут (Lock в Phone Lab).',
     hint:'Phone Lab → Lock 30м',
     regionId:'shadowline',ownerHint:'Dax Kane',task:'lock',requiredPlugins:['phone-access']},
-  {id:'phone-006',title:'Номер из Окриджа',client:'Oakridge Watch',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:200,xp:45,
+  {id:'phone-006',title:'Номер из Окриджа',client:'Oakridge Watch',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:300,xp:60,
     objective:'Найди телефон в сети oakridge и сохрани contacts.',
     hint:'connect oakridge → scan → open → contacts',
     regionId:'oakridge',ownerHint:'Vera Cole',task:'contacts',requiredPlugins:['net-link','net-analyzer','phone-access']},
-  {id:'phone-007',title:'SMS из Мидтауна',client:'Spine Desk',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:210,xp:48,
+  {id:'phone-007',title:'SMS из Мидтауна',client:'Spine Desk',target:'phone',category:'phone',difficulty:'Лёгкая',minLevel:1,reward:320,xp:62,
     objective:'Сними переписку телефона в midtown.',
     hint:'connect midtown → open → сохранить SMS',
     regionId:'midtown',ownerHint:'Sam Hayes',task:'msgs',requiredPlugins:['phone-access']},
 ];
 
 export const BALANCE = {
-  creditsStart: 650,
+  creditsStart: 2500,
   maxLevel: 9999,
   xpToLevel: [0, 100, 260, 480, 760, 1100, 1500, 1960, 2480, 3060, 3700],
   verificationDelayMs: 5500,
@@ -124,27 +124,11 @@ export const BALANCE = {
 };
 
 export const PLUGINS = [
-  
-  { id:'net-link', name:'Net Link', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:40, cooldown:0, description:'Подключение терминала к региональной сети (15с).', effect:'Текущая сеть региона.', starter:true },
-  { id:'net-analyzer', name:'Net Analyzer', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:80, cooldown:0, description:'Анализ региональной сети (~20с) и полный отчёт PHONE_ID.', effect:'Отчёт 550 устройств/регион.', starter:true },
-  { id:'phone-access', name:'Phone Access', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:100, cooldown:0, description:'Доступ к телефону по PHONE_ID.', effect:'Сессия исследования телефона.', starter:true },
-  { id:'mail-drop', name:'Mail Drop', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:60, cooldown:0, description:'Вложение для NPC через N-Mail (альтернативный путь).', effect:'Шанс раскрытия PHONE_ID.', starter:true },
-  { id:'sms-bomber', name:'SMS Bomber', category:'Mobile Operations', version:'1.0.0', price:40000, requiredLevel:1, minOs:1, ram:1, storage:40, cooldown:5000, description:'Игровая нагрузка SMS на виртуальный номер.', effect:'Симуляция спама.', starter:false },
-  { id:'bank-peek', name:'Bank Peek', category:'Mobile Operations', version:'1.0.0', price:100000, requiredLevel:1, minOs:1, ram:1, storage:80, cooldown:0, description:'Доступ к виртуальным банковским пометкам телефона.', effect:'Игровые bank notes.', starter:false },
-
-  { id:'site-analyzer', name:'Site Analyzer', category:'Анализ сайтов', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:120, cooldown:0, description:'WEB RECON: DNS, fingerprint, surface, артефакты разведки.', effect:'Карта домена и SIGNATURE для pipeline.', starter:true },
-  { id:'artifact-decoder', name:'Artifact Decoder', category:'Расшифровка', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:180, cooldown:0, description:'Преобразует условный игровой артефакт в подсказку.', effect:'Открывает шаг декодирования.', starter:true },
-  { id:'node-radar', name:'Node Radar', category:'Обнаружение узлов', version:'1.1.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:260, cooldown:5000, description:'Находит симулируемый узел цели в личном мире.', effect:'Показывает игровой host-node.', starter:true },
-  { id:'weakness-lab', name:'Weakness Lab', category:'Поиск игровых слабостей', version:'1.2.0', price:0, requiredLevel:1, minOs:1, ram:2, storage:420, cooldown:7000, description:'Проверяет абстрактную модель защиты цели.', effect:'Открывает условную слабость.', starter:true },
-  { id:'sim-exploit', name:'Sim Exploit', category:'Симуляция доступа', version:'2.0.0', price:0, requiredLevel:1, minOs:1, ram:2, storage:650, cooldown:12000, description:'Выполняет безопасную игровую проверку шанса доступа.', effect:'Завершает этап проникновения в симуляции.', starter:true },
-  { id:'data-exporter', name:'Data Exporter', category:'Экспорт', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:220, cooldown:0, description:'Создаёт файл с результатом внутриигровой операции.', effect:'Позволяет экспортировать результат контракта.', starter:true },
-  { id:'site-editor', name:'Site Editor', category:'Изменение сайта', version:'1.0.0', price:620, requiredLevel:1, ram:2, storage:380, cooldown:9000, description:'Меняет текст или виртуальную запись тестовой цели.', effect:'Открывает игровое изменение содержимого.',minOs:2 },
-  { id:'db-reader', name:'Virtual DB Reader', category:'Виртуальные данные', version:'1.0.0', price:1900, requiredLevel:6, ram:3, storage:900, cooldown:15000, description:'Читает только записи собственной вымышленной базы.', effect:'Открывает высокоуровневые игровые записи.',minOs:3 },
-  { id:'identity-mask', name:'Identity Veil', category:'Игровая маскировка', version:'1.0.0', price:3800, requiredLevel:7, ram:2, storage:700, cooldown:0, description:'Снижает условную заметность персонажа в модели мира.', effect:'Уменьшает симулируемый банковский риск.',minOs:3 },
-  { id:'bank-decryptor', name:'Vault Decoder', category:'Банк / эндгейм', version:'1.0.0', price:5200, requiredLevel:8, ram:3, storage:1200, cooldown:0, description:'Редкий декриптор для финальной банковской миссии.', effect:'Необходим для рискованной игровой цели.',minOs:4 },
-  { id:'obfuscator', name:'Trace Obfuscator', category:'Банк / эндгейм', version:'1.0.0', price:4600, requiredLevel:8, ram:2, storage:1000, cooldown:0, description:'Снижает риск виртуальной трассировки.', effect:'Необходим для рискованной игровой цели.',minOs:4 },
-  { id:'file-forge', name:'File Forge', category:'Создание файлов', version:'1.0.0', price:520, requiredLevel:1, ram:1, storage:300, cooldown:0, description:'Подготавливает виртуальные файлы и NBS-документы.', effect:'Разблокирует продвинутую работу с файлами.',minOs:2 },
-  { id:'map-scanner', name:'Atlas Scanner', category:'Карта / цели', version:'1.0.0', price:350, requiredLevel:1, ram:1, storage:250, cooldown:0, description:'Уточняет POI и игровые маршруты на NullAtlas.', effect:'Показывает расширенные подсказки карты.',minOs:1 }
+  { id:'net-link', name:'Net Link', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:40, cooldown:0, description:'Подключение терминала к региональной сети.', effect:'Текущая сеть региона.', starter:true, terminal:'phone' },
+  { id:'net-analyzer', name:'Net Analyzer', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:99, minOs:1, ram:1, storage:80, cooldown:0, description:'Объединён с Net Link.', effect:'Используй Net Link → scan.', starter:false, terminal:'phone', locked:true, hidden:true },
+  { id:'phone-access', name:'Phone Access', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:100, cooldown:0, description:'Доступ к телефону по PHONE_ID.', effect:'Сессия Phone Lab.', starter:true, terminal:'phone' },
+  { id:'mail-drop', name:'Mail Drop', category:'Mobile Operations', version:'1.0.0', price:0, requiredLevel:1, minOs:1, ram:1, storage:60, cooldown:0, description:'Вложение для NPC через N-Mail.', effect:'Шанс раскрытия PHONE_ID.', starter:true, terminal:'phone' },
+  { id:'sms-bomber', name:'SMS Bomber', category:'Mobile Operations', version:'1.0.0', price:40000, requiredLevel:1, minOs:1, ram:1, storage:40, cooldown:5000, description:'Игровая нагрузка SMS на виртуальный номер.', effect:'Симуляция спама.', starter:false, terminal:'phone' },
 ];
 
 export const HARDWARE = {
@@ -212,10 +196,14 @@ export const PLUGINS_LOCKED = new Set([
 
 
 export function isPluginLocked(id) {
-  return PLUGINS_LOCKED.has(id);
+  if (PLUGINS_LOCKED.has(id)) return true;
+  const p = PLUGINS.find(x => x.id === id);
+  if (!p) return true; // removed plugins
+  if (p.terminal === 'server') return true;
+  return false;
 }
 
-const STARTER_CONTRACT_TOOLS=['site-analyzer','artifact-decoder','node-radar','weakness-lab','sim-exploit','data-exporter'];
+const STARTER_CONTRACT_TOOLS=['net-link','net-analyzer','phone-access'];
 const DB_CONTRACT_TOOLS=[...STARTER_CONTRACT_TOOLS,'db-reader'];
 const MISSION_TEMPLATES = [
   {id:'job-001',title:'Потерянная накладная',client:'Mira Voss',target:'volt-market',category:'info',difficulty:'Лёгкая',minLevel:1,reward:180,xp:110,objective:'Найти игровую запись заказа VM-204 и передать файл клиенту.',hint:'В каталоге Volt Market хранится артефакт CATALOG-B7.',requiredPlugins:STARTER_CONTRACT_TOOLS},
@@ -243,13 +231,266 @@ export function validNickname(value) { return /^[A-Za-z0-9]{2,12}$/.test(String(
 export function escapeText(value='') { return String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
 export function idempotencyKey(prefix='evt') { return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,9)}`; }
 
+
+/** Darkshop market state */
+export function getCredits(state) {
+  const n = Number(state?.economy?.credits);
+  if (Number.isFinite(n) && n >= 0) return Math.min(n, 1e12);
+  const p = Number(state?.player?.credits);
+  if (Number.isFinite(p) && p >= 0) return Math.min(p, 1e12);
+  return 0;
+}
+export function setCredits(state, value) {
+  let v = Math.round(Number(value) || 0);
+  if (!Number.isFinite(v) || v < 0) v = 0;
+  if (v > 1e12) v = 1e12;
+  if (!state.economy) state.economy = { credits: v, transactions: [] };
+  state.economy.credits = v;
+  if (state.player) state.player.credits = v;
+  return v;
+}
+export function addCredits(state, delta, reason = '') {
+  const next = getCredits(state) + (Number(delta) || 0);
+  setCredits(state, next);
+  if (!state.economy.transactions) state.economy.transactions = [];
+  if (delta) {
+    state.economy.transactions.unshift({
+      id: 'txn_' + Date.now().toString(36),
+      type: delta >= 0 ? 'income' : 'expense',
+      amount: Math.abs(Number(delta) || 0),
+      reason: reason || (delta >= 0 ? 'income' : 'expense'),
+      at: Date.now()
+    });
+  }
+  if (delta > 0 && state.player) {
+    state.player.totalEarned = (Number(state.player.totalEarned) || 0) + delta;
+  }
+  return getCredits(state);
+}
+
+export function createEmptyDarkshop() {
+  return {
+    version: 2,
+    listings: [],
+    history: [],
+    lastRefresh: 0,
+    soldInstanceIds: {}
+  };
+}
+
+export function ensureDarkshop(state) {
+  if (!state.darkshop || state.darkshop.version !== 2) {
+    state.darkshop = createEmptyDarkshop();
+  }
+  if (!Array.isArray(state.darkshop.listings)) state.darkshop.listings = [];
+  if (!Array.isArray(state.darkshop.history)) state.darkshop.history = [];
+  if (!state.darkshop.soldInstanceIds) state.darkshop.soldInstanceIds = {};
+  return state.darkshop;
+}
+
+const RARITY_LABEL = {
+  trash: 'Мусор', common: 'Обычный', low: 'Низкая', medium: 'Средняя',
+  high: 'Высокая', rare: 'Редкая', exclusive: 'Эксклюзивная'
+};
+
+export function rarityLabel(r) { return RARITY_LABEL[r] || r || 'Обычный'; }
+
+export function appraiseFileInstance(file) {
+  if (!file) return { price: 0, reason: 'Нет файла', info: 0 };
+  const base = Number(file.base_price_cr != null ? file.base_price_cr : file.price) || 0;
+  let info = 5;
+  if (file.integrity_state === 'corrupted' || file.file_type === 'corrupted') info = 1;
+  else if (file.encryption_state === 'locked') info = 3;
+  else if (file.file_type === 'anomaly') info = 6;
+  else if (file.file_type === 'work' || file.file_type === 'data') info = 6;
+  else if (file.file_type === 'encrypted') info = 4;
+  const mult = Number(file.individual_value_multiplier != null ? file.individual_value_multiplier : 1) || 1;
+  const infoF = 0.25 + (info / 10) * 1.0; // 0.25..1.25
+  let cond = 1;
+  if (file.integrity_state === 'corrupted') cond = 0.15;
+  else if (file.encryption_state === 'locked') cond = 0.55;
+  let price = Math.round(base * infoF * cond * mult);
+  // clamp by rarity band roughly
+  const bands = { trash:[0,2], common:[3,8], low:[9,20], medium:[21,55], high:[56,130], rare:[131,280], exclusive:[281,600] };
+  const band = bands[file.rarity] || [0, 600];
+  price = Math.max(band[0], Math.min(band[1], price));
+  if (file.integrity_state === 'corrupted' && info <= 1) price = Math.min(price, 2);
+  if (price < 1 && file.rarity !== 'trash' && file.file_type !== 'corrupted') price = Math.max(3, base || 3);
+
+  const reason = mult < 1
+    ? 'Экземпляр ранее продавался рынку (уценка).'
+    : (file.integrity_state === 'corrupted' ? 'Повреждённый файл — низкая ценность.'
+      : (file.encryption_state === 'locked' ? 'Зашифрован: оценка по метаданным.'
+        : 'Оценка по редкости, полноте и полезности.'));
+  return { price, reason, info, base };
+}
+
+export function refreshDarkshopListings(state, force = false) {
+  const ds = ensureDarkshop(state);
+  const now = Date.now();
+  if (!force && ds.listings.length && now - (ds.lastRefresh || 0) < 30 * 60 * 1000) return ds;
+  // seed market from catalog templates (not real phone instances)
+  const origins = ['неизвестный продавец', 'другой участник сети', 'архивный слив', 'частная коллекция', 'восстановленный дамп'];
+  const cats = [
+    { type: 'file', label: 'Файл' },
+    { type: 'database', label: 'База' },
+    { type: 'phone_image', label: 'Телефон' },
+    { type: 'server', label: 'Сервер' }
+  ];
+  const listings = [];
+  // generate ~18 listings deterministically from nickname seed
+  const seed = String(state.player?.nickname || 'nb') + ':' + Math.floor(now / (30 * 60 * 1000));
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619); }
+  const samples = [
+    { name: 'Фрагмент переписки .msg', type: 'file', rarity: 'common', price: 150, desc: 'Бытовой диалог, слабый контекст.' },
+    { name: 'Служебная заявка.pdf', type: 'file', rarity: 'low', price: 14, desc: 'Рабочая заявка без вложений.' },
+    { name: 'Журнал доступа (частичный)', type: 'file', rarity: 'medium', price: 32, desc: 'Несколько записей входа, одна аномалия.' },
+    { name: 'Слитый реестр клиентов (фрагмент)', type: 'database', rarity: 'high', price: 180, desc: 'Фрагмент таблицы, часть полей затёрта.' },
+    { name: 'Образ телефона — резервная копия', type: 'phone_image', rarity: 'medium', price: 95, desc: 'Архив без привязки к живому NPC.' },
+    { name: 'Конфиг шлюза (дамп)', type: 'server', rarity: 'high', price: 200, desc: 'Сетевые параметры, без доступа к инфраструктуре.' },
+    { name: 'Повреждённый кэш', type: 'file', rarity: 'trash', price: 2, desc: 'Битый контейнер, полезных данных нет.' },
+    { name: 'Закрытый отчёт (LOCKED)', type: 'file', rarity: 'high', price: 70, desc: 'Зашифрованный контейнер. Payload скрыт.' },
+    { name: 'Финансовая таблица Q', type: 'database', rarity: 'medium', price: 85, desc: 'Локальные суммы, без реквизитов входа.' },
+    { name: 'Архив внутренних заметок', type: 'file', rarity: 'low', price: 60, desc: 'Личные пометки неизвестного автора.' },
+    { name: 'Дамп логов auth', type: 'server', rarity: 'rare', price: 320, desc: 'Редкий срез событий, требует анализа.' },
+    { name: 'Коллекция SMS-дампов', type: 'phone_image', rarity: 'medium', price: 80, desc: 'Набор переписок без привязки к сети.' },
+    { name: 'Аномальная пометка', type: 'file', rarity: 'low', price: 40, desc: 'Странная фраза, источник не подтверждён.' },
+    { name: 'Полный архив проекта (уценка)', type: 'file', rarity: 'rare', price: 120, desc: 'Ранее проданный экземпляр рынка, остаточная цена.' },
+    { name: 'Справочник ролей FBR', type: 'file', rarity: 'medium', price: 28, desc: 'Внутренние коды и пометки (вымышленные).' },
+    { name: 'Экспорт контактов', type: 'database', rarity: 'common', price: 16, desc: 'Обезличенные строки.' },
+    { name: 'Серверный backup.cfg', type: 'server', rarity: 'medium', price: 90, desc: 'Конфиг без ключей доступа.' },
+    { name: 'Досье-черновик', type: 'file', rarity: 'high', price: 240, desc: 'Неподтверждённые связи, высокая информативность.' },
+  ];
+  for (let i = 0; i < samples.length; i++) {
+    const s = samples[i];
+    const id = 'LST-' + (h + i * 9973).toString(36) + '-' + i;
+    const iid = 'MKT-' + (h + i * 131).toString(36);
+    listings.push({
+      listing_id: id,
+      instance_id: iid,
+      item_type: s.type,
+      file_name: s.name,
+      rarity: s.rarity,
+      price_cr: s.price,
+      description: s.desc,
+      integrity_state: s.rarity === 'trash' ? 'corrupted' : 'full',
+      encryption_state: /LOCKED/i.test(s.name) ? 'locked' : 'none',
+      seller_type: 'market',
+      origin: origins[(h + i) % origins.length],
+      listing_state: 'listed_by_market',
+      created_at: now - i * 3600000,
+      base_price_cr: s.price,
+      body: s.desc + '\n\nИсточник: ' + origins[(h + i) % origins.length] + '\nТип: ' + s.type
+    });
+  }
+  ds.listings = listings;
+  ds.lastRefresh = now;
+  return ds;
+}
+
+export function buyDarkshopListing(state, listingId) {
+  const ds = ensureDarkshop(state);
+  const listing = (ds.listings || []).find(l => String(l.listing_id) === String(listingId) && l.listing_state === 'listed_by_market');
+  if (!listing) return { ok: false, error: 'Товар снят с рынка или не найден.' };
+  const price = Math.max(0, Number(listing.price_cr) || 0);
+  const bal = getCredits(state);
+  if (bal < price) return { ok: false, error: 'Недостаточно CR (' + bal + ' / ' + price + ').' };
+  if (!state.computer) state.computer = { files: [] };
+  if (!state.computer.files) state.computer.files = [];
+  if (state.computer.files.some(f => f.instance_id === listing.instance_id || f.id === listing.instance_id)) {
+    return { ok: false, error: 'Уже в инвентаре.' };
+  }
+  addCredits(state, -price, 'Darkshop покупка: ' + (listing.file_name || listing.listing_id));
+  const file = {
+    id: listing.instance_id,
+    instance_id: listing.instance_id,
+    name: listing.file_name,
+    file_name: listing.file_name,
+    type: 'darkshop',
+    kind: listing.item_type || 'file',
+    file_type: listing.item_type || 'file',
+    rarity: listing.rarity,
+    base_price_cr: listing.base_price_cr || price,
+    content_preview: listing.description,
+    body: listing.body || listing.description,
+    plaintext_payload: listing.body || listing.description,
+    encryption_state: listing.encryption_state || 'none',
+    integrity_state: listing.integrity_state || 'full',
+    sale_state: 'owned',
+    individual_value_multiplier: Number(listing.individual_value_multiplier) || 1,
+    origin_source: 'darkshop',
+    at: Date.now()
+  };
+  state.computer.files.unshift(file);
+  listing.listing_state = 'sold';
+  const tx = {
+    transaction_id: 'TX-' + Date.now().toString(36),
+    operation_type: 'buy',
+    instance_id: file.instance_id,
+    amount_cr: price,
+    timestamp: Date.now(),
+    name: file.name
+  };
+  ds.history.unshift(tx);
+  return { ok: true, file, price, tx };
+}
+
+export function sellFileToDarkshop(state, instanceId) {
+  const ds = ensureDarkshop(state);
+  const files = state.computer?.files || [];
+  const idx = files.findIndex(f => (f.instance_id || f.id) === instanceId);
+  if (idx < 0) return { ok: false, error: 'Файл не найден.' };
+  const file = files[idx];
+  if (file.sale_state === 'sold_to_market' || ds.soldInstanceIds[instanceId]) {
+    return { ok: false, error: 'Этот экземпляр уже продан.' };
+  }
+  const ap = appraiseFileInstance(file);
+  // perform sale
+  files.splice(idx, 1);
+  addCredits(state, ap.price, 'Darkshop продажа: ' + (file.file_name || file.name || instanceId));
+  file.sale_state = 'sold_to_market';
+  file.individual_value_multiplier = 0.25;
+  file.previous_appraisal_cr = ap.price;
+  ds.soldInstanceIds[instanceId] = true;
+  // optional: list back at 25%
+  ds.listings.unshift({
+    listing_id: 'LST-P-' + instanceId,
+    instance_id: instanceId,
+    item_type: file.file_type || file.kind || 'file',
+    file_name: file.file_name || file.name,
+    rarity: file.rarity || 'common',
+    price_cr: Math.max(0, Math.round(ap.price * 0.25)),
+    description: (file.content_preview || file.body || '').slice(0, 160),
+    integrity_state: file.integrity_state || 'full',
+    encryption_state: file.encryption_state || 'none',
+    seller_type: 'player_resale',
+    origin: 'продан игроком',
+    listing_state: 'listed_by_market',
+    created_at: Date.now(),
+    base_price_cr: file.base_price_cr || ap.base,
+    body: file.body || file.plaintext_payload || '',
+    individual_value_multiplier: 0.25
+  });
+  const tx = {
+    transaction_id: 'TX-' + Date.now().toString(36),
+    operation_type: 'sell',
+    instance_id: instanceId,
+    amount_cr: ap.price,
+    timestamp: Date.now(),
+    name: file.name || file.file_name
+  };
+  ds.history.unshift(tx);
+  return { ok: true, price: ap.price, tx, appraisal: ap };
+}
+
 export function createInitialState(tgUser=null) {
   const now=Date.now();
   const state0 = {
     version:SAVE_VERSION,
     meta:{createdAt:now,updatedAt:now,seed:`nb-${now.toString(36)}`,migratedFrom:null},
     meta:{seed:'nb',createdAt:Date.now(),updatedAt:Date.now()},
-    player:{nickname:'',telegramId:tgUser?.id ? String(tgUser.id) : '',level:1,xp:0,reputation:0,contractsCompleted:0,totalEarned:0,walletId:''},
+    player:{nickname:'',telegramId:tgUser?.id ? String(tgUser.id) : '',photoUrl:(tgUser?.photo_url||tgUser?.photoUrl||''),level:1,xp:0,reputation:0,contractsCompleted:0,totalEarned:0,walletId:''},
     economy:{credits:BALANCE.creditsStart,transactions:[{id:'txn-starter',type:'income',amount:BALANCE.creditsStart,reason:'Стартовый грант оператора',at:now}]},
     computer:{cpu:1,ram:1,gpu:1,storage:1,os:1,files:[],installedPlugins:['net-link','net-analyzer','phone-access','mail-drop'],uptimeStartedAt:now},
     world:{sites:SITES.map(s=>({...s,state:'online',recoveryAt:0,defenseBoost:0,revision:1})),progress:{},npc:[
@@ -296,9 +537,53 @@ export function createInitialState(tgUser=null) {
 function finite(value) { const n=Number(value); return Number.isFinite(n)?n:0; }
 function clamp(value,min,max) { return Math.max(min,Math.min(max,finite(value))); }
 
+export function clampPlayerEconomy(state) {
+  if (!state) return state;
+  if (!state.economy) state.economy = { credits: 0, transactions: [] };
+  let c = Number(state.economy.credits);
+  if (!Number.isFinite(c) || c < 0) c = 0;
+  if (c > 1e12) c = 1e12;
+  state.economy.credits = Math.round(c);
+  if (state.player) {
+    state.player.credits = state.economy.credits;
+    if (state.player.nickname) {
+      state.player.nickname = String(state.player.nickname).replace(/[\u0000-\u001F\u007F<>]/g,'').slice(0, 24);
+    }
+    if (state.player.walletId) {
+      state.player.walletId = String(state.player.walletId).replace(/[^a-zA-Z0-9\-_]/g,'').slice(0, 32);
+    }
+    let xp = Number(state.player.xp); if (!Number.isFinite(xp) || xp < 0) xp = 0;
+    state.player.xp = Math.min(Math.round(xp), 1e9);
+    let lvl = Number(state.player.level); if (!Number.isFinite(lvl) || lvl < 1) lvl = 1;
+    state.player.level = Math.min(Math.round(lvl), 9999);
+  }
+  return state;
+}
+
+export function sanitizeSaveObject(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  // Block prototype pollution
+  if (Object.prototype.hasOwnProperty.call(raw, '__proto__') ||
+      Object.prototype.hasOwnProperty.call(raw, 'constructor') ||
+      Object.prototype.hasOwnProperty.call(raw, 'prototype')) {
+    try { delete raw.__proto__; } catch {}
+  }
+  const clean = JSON.parse(JSON.stringify(raw, (key, value) => {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') return undefined;
+    if (typeof value === 'function') return undefined;
+    if (typeof value === 'number' && !Number.isFinite(value)) return 0;
+    return value;
+  }));
+  return clean;
+}
+
 export function migrateSave(raw,tgUser=null) {
+  if (raw && typeof raw === 'object') {
+    try { raw = sanitizeSaveObject(raw) || raw; } catch { raw = null; }
+  }
+
   const fresh=createInitialState(tgUser);
-  if (!raw || typeof raw!=='object') return {state:fresh,changed:true};
+  if (!raw || typeof raw!=='object') { clampPlayerEconomy(fresh); return {state:fresh,changed:true}; }
   // Preserve known fields from the previous prototype instead of silently resetting progress.
   if (!raw.version && (raw.playerName || raw.money!==undefined || raw.telegramId)) {
     fresh.player.nickname = validNickname(raw.playerName)?raw.playerName:'';
@@ -307,11 +592,13 @@ export function migrateSave(raw,tgUser=null) {
     fresh.player.totalEarned = Math.max(0, Number(raw.hackEarnings) || 0);
     if (Number.isFinite(Number(raw.money))) fresh.economy.credits=Math.max(0,Number(raw.money));
     fresh.meta.migratedFrom='legacy-nullbyte-player';
-    return {state:fresh,changed:true};
+    clampPlayerEconomy(fresh); return {state:fresh,changed:true};
   }
   const out={...fresh,...raw,version:SAVE_VERSION};
   out.meta={...fresh.meta,...(raw.meta||{})};
   out.player={...fresh.player,...(raw.player||{})};
+  if (tgUser?.photo_url) out.player.photoUrl = String(tgUser.photo_url);
+  else if (tgUser?.photoUrl) out.player.photoUrl = String(tgUser.photoUrl);
   if(!out.player.walletId && out.player.nickname) out.player.walletId='NB-'+String(out.player.nickname).toUpperCase()+'-W1';
   out.economy={...fresh.economy,...(raw.economy||{})};
   out.computer={...fresh.computer,...(raw.computer||{})};
@@ -391,6 +678,7 @@ export function migrateSave(raw,tgUser=null) {
   for(const key of ['xp','reputation','contractsCompleted','totalEarned'])out.player[key]=clamp(out.player[key],0,1e9);
   out.economy.credits=clamp(out.economy.credits,0,1e9);
   out.meta.updatedAt=Date.now();
+  clampPlayerEconomy(out);
   return {state:out,changed:raw.version!==SAVE_VERSION};
 }
 
@@ -526,52 +814,122 @@ export function cancelMission(state, missionId) {
 /** Keep 3–4 available offers; never touch accepted/submitted. */
 export function rotateMissionBoard(state, now = Date.now(), force = false) {
   ensureIntel(state);
-  // current build: only phone-* can be offered
+  if (!state.intel.boardMeta) state.intel.boardMeta = { hourStart: 0, slots: [], lastMailAt: 0 };
+
+  // lock non-phone
   state.missions.items.forEach(m => {
-    if (!String(m.id||'').startsWith('phone-') && m.status === 'available') m.status = 'locked';
+    if (!String(m.id || '').startsWith('phone-') && m.status === 'available') m.status = 'locked';
   });
 
-  if (!state.intel.nextBoardAt) state.intel.nextBoardAt = now + 20 * 60 * 1000;
-  if (!force && state.intel.nextBoardAt > now) {
-    return { rotated: false, nextBoardAt: state.intel.nextBoardAt, offered: state.intel.boardIds || [] };
+  const HOUR = 60 * 60 * 1000;
+  const SLOT_LIFE = 30 * 60 * 1000; // each offer lives 30 min
+  const hourStart = Math.floor(now / HOUR) * HOUR;
+  const meta = state.intel.boardMeta;
+
+  // New hour → reset board (keep accepted/submitted)
+  if (meta.hourStart !== hourStart || force) {
+    meta.hourStart = hourStart;
+    meta.slots = [];
+    // expire previous available offers
+    state.missions.items.forEach(m => {
+      if (m.status === 'available' && String(m.id || '').startsWith('phone-')) {
+        m.status = 'locked';
+        m.boardExpiresAt = 0;
+      }
+    });
+    // schedule up to 4 staggered spawn times within the hour
+    const count = 2 + (Math.abs(hashStr(state.meta?.seed || 'nb' + hourStart)) % 3); // 2..4
+    const used = new Set();
+    for (let i = 0; i < count; i++) {
+      // stagger within hour; first slot appears almost immediately
+      let tOff = i === 0 ? 0 : Math.floor((8 + i * 11 + (hashStr(state.meta?.seed + ':slot:' + hourStart + ':' + i) % 9)) % 50) * 60 * 1000;
+      // pick unique mission template
+      const eligible = state.missions.items.filter(m =>
+        String(m.id || '').startsWith('phone-') &&
+        (m.status === 'locked' || m.status === 'available' || m.status === 'expired') &&
+        m.status !== 'accepted' && m.status !== 'submitted' &&
+        (m.minLevel || 1) <= state.player.level &&
+        !used.has(m.id)
+      );
+      if (!eligible.length) break;
+      const pick = eligible[Math.abs(hashStr(hourStart + ':' + i + ':' + (state.meta?.seed || ''))) % eligible.length];
+      used.add(pick.id);
+      // force uniqueness: rebind phone target with hour salt
+      try { bindPhoneMissionTarget(pick, (state.meta?.seed || 'nb') + hourStart + i); } catch {}
+      meta.slots.push({
+        missionId: pick.id,
+        spawnAt: hourStart + tOff,
+        expiresAt: hourStart + tOff + SLOT_LIFE,
+        spawned: false
+      });
+    }
+    meta.slots.sort((a, b) => a.spawnAt - b.spawnAt);
+    // hourly demand mail from NPC (once per hour)
+    if (!meta.lastMailAt || meta.lastMailAt < hourStart) {
+      meta.lastMailAt = hourStart;
+      try {
+        if (!state.mail) state.mail = { inbox: [], outbox: [], nextId: 1 };
+        if (!state.mail.inbox) state.mail.inbox = [];
+        state.mail.inbox.unshift({
+          id: 'mail_demand_' + hourStart,
+          from: 'BlackWire Desk',
+          subject: 'Сводка за час — жду результат',
+          body: 'Оператор, час закрыт. Если контракт был в работе — пришли отчёт. Новые заявки появятся в течение часа (до 4, каждая 30 мин).',
+          at: now,
+          read: false
+        });
+      } catch {}
+    }
   }
-  state.intel.nextBoardAt = now + 20 * 60 * 1000;
-  unlockMissions(state);
-  const activeIds = new Set(
-    state.missions.items.filter(m => m.status === 'accepted' || m.status === 'submitted').map(m => m.id)
-  );
-  const eligible = state.missions.items.filter(m =>
-    m.status === 'available' && !activeIds.has(m.id) && m.minLevel <= state.player.level
-  );
-  const bucket = Math.floor(now / (20 * 60 * 1000));
-  const scored = eligible.map(m => {
-    let h = 2166136261;
-    const s = `${state.meta?.seed || 'nb'}:${bucket}:${m.id}`;
-    for (let k = 0; k < s.length; k++) { h ^= s.charCodeAt(k); h = Math.imul(h, 16777619); }
-    return { m, score: h >>> 0 };
-  }).sort((a, b) => a.score - b.score);
-  const want = Math.min(4, Math.max(3, Math.min(eligible.length, 3 + (bucket % 2))));
-  const picked = [];
-  const seenCat = new Set();
-  for (const { m } of scored) {
-    if (picked.length >= want) break;
-    const cat = m.category || 'info';
-    if (seenCat.has(cat)) continue;
-    picked.push(m); seenCat.add(cat);
+
+  // Spawn / expire slots
+  const offered = [];
+  for (const slot of meta.slots) {
+    const m = state.missions.items.find(x => x.id === slot.missionId);
+    if (!m) continue;
+    if (m.status === 'accepted' || m.status === 'submitted') {
+      offered.push(m.id);
+      continue;
+    }
+    if (now >= slot.spawnAt && now < slot.expiresAt) {
+      if (m.status !== 'available') {
+        m.status = 'available';
+        m.boardExpiresAt = slot.expiresAt;
+        try { bindPhoneMissionTarget(m, (state.meta?.seed || 'nb') + slot.spawnAt); } catch {}
+      }
+      slot.spawned = true;
+      offered.push(m.id);
+    } else if (now >= slot.expiresAt && m.status === 'available') {
+      m.status = 'locked';
+      m.boardExpiresAt = 0;
+    }
   }
-  for (const { m } of scored) {
-    if (picked.length >= want) break;
-    if (!picked.includes(m)) picked.push(m);
+
+  state.intel.boardIds = offered;
+  // next tick when something changes
+  let nextAt = hourStart + HOUR;
+  for (const slot of meta.slots) {
+    if (now < slot.spawnAt) nextAt = Math.min(nextAt, slot.spawnAt);
+    else if (now < slot.expiresAt) nextAt = Math.min(nextAt, slot.expiresAt);
   }
-  state.intel.boardIds = picked.map(m => m.id);
-  return { rotated: true, nextBoardAt: state.intel.nextBoardAt, offered: state.intel.boardIds };
+  state.intel.nextBoardAt = nextAt;
+  return { rotated: true, nextBoardAt: nextAt, offered };
 }
 
-export function missionBoardTimer(state, now = Date.now()) {
-  ensureIntel(state);
-  if (!state.intel.nextBoardAt) state.intel.nextBoardAt = now + 20 * 60 * 1000;
-  return Math.max(0, state.intel.nextBoardAt - now);
+function hashStr(s) {
+  let h = 2166136261;
+  const str = String(s || '');
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
 }
+
+
+
+export function missionBoardTimer(state, now = Date.now()) {
+  const next = Number(state?.intel?.nextBoardAt) || (now + 60000);
+  return Math.max(0, next - now);
+}
+
 
 
 export function getSite(state,siteId) { return state.world.sites.find(s=>s.id===siteId); }
@@ -583,8 +941,8 @@ export function getSiteProgress(state,siteId) {
 /* —— Terminal plugin sessions / one-time operation keys —— */
 export const PLUGIN_SHELLS = {
 
-  'net-link': { boot: 'Net Link v1', help: 'connect <region_id> · disconnect · status · list · help · exit', commands: ['connect','disconnect','status','list','help','exit'] },
-  'net-analyzer': { boot: 'Net Analyzer v1', help: 'scan — анализ сети · save <имя> — полный отчёт · help · exit', commands: ['scan','analyze','save','help','exit'] },
+  'net-link': { boot: 'NET LINK // mesh bridge v2', help: 'connect <region> · scan · disconnect · status · list · help · exit', commands: ['connect','disconnect','status','list','scan','analyze','save','help','exit'] },
+  'net-analyzer': { boot: 'Net Analyzer (merged)', help: 'use net-link', commands: ['help','exit'] },
   'phone-access': { boot: 'Phone Access v2', help: 'open <PHONE_ID> · attack · block · status · disconnect · help · exit', commands: ['open','attack','block','status','disconnect','close','help','exit'] },
   'mail-drop': { boot: 'Mail Drop v1', help: 'craft <имя_файла> · attach — через N-Mail · help · exit', commands: ['craft','help','exit'] },
   'sms-bomber': { boot: 'SMS Bomber v1', help: 'bomb <PHONE_ID> · help · exit', commands: ['bomb','help','exit'] },
@@ -952,7 +1310,11 @@ export function processServerSessionKick(state, now=Date.now()) {
 }
 
 
-export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = null) {
+export function runPluginShellCommand(state, pluginId, rawLine, missionIdHint = null, opts = {}) {
+  if (missionIdHint && typeof missionIdHint === 'object' && !Array.isArray(missionIdHint)) {
+    opts = missionIdHint; missionIdHint = null;
+  }
+  const dry = !!(opts && opts.dry);
   if (isPluginLocked(pluginId)) {
     return { ok: false, lines: [
       { text: 'NULLBYTE // UNDER CONSTRUCTION', type: 'blue' },
@@ -1385,17 +1747,45 @@ if (pluginId === 'data-exporter' && (cmd === 'export' || cmd === 'pack')) {
   if (pluginId === 'net-link') {
     if (cmd === 'list') {
       return { ok: true, lines: [
-        { text: 'REGIONS', type: 'blue' },
-        ...PHONE_REGIONS.map(r => ({ text: `${r.id} · ${r.name} · ${r.netKey}`, type: '' }))
+        { text: '┌─ REGIONS ──────────────────────', type: 'green' },
+        ...PHONE_REGIONS.map(r => ({ text: `  ${r.id.padEnd(12)} ${r.name}`, type: '' })),
+        { text: '└─ connect <id> · scan · status', type: 'muted' }
       ]};
     }
     if (cmd === 'status') {
       const n = state.phoneWorld?.network;
-      if (!n) return { ok: true, lines: [{ text: 'Не подключено. connect <region_id>', type: 'muted' }] };
-      return { ok: true, lines: [
-        { text: `Сеть: ${n.regionId}`, type: 'green' },
-        { text: `Key ${n.netKey} · SSID ${n.ssid}`, type: 'muted' }
+      if (!n) return { ok: true, lines: [
+        { text: '┌─ NET LINK STATUS', type: 'green' },
+        { text: '  STATE   offline', type: 'muted' },
+        { text: '  HINT    connect <region_id>', type: 'muted' }
       ]};
+      return { ok: true, lines: [
+        { text: '┌─ NET LINK STATUS', type: 'green' },
+        { text: '  STATE    online', type: '' },
+        { text: '  REGION   ' + n.regionId, type: '' },
+        { text: '  SSID     ' + (n.ssid || '—'), type: '' },
+        { text: '  NET KEY  ' + (n.netKey || '—'), type: 'muted' },
+        { text: '  CMDS     scan · disconnect · list', type: 'muted' }
+      ]};
+    }
+    if (cmd === 'scan' || cmd === 'analyze') {
+      if (!state.phoneWorld?.network) {
+        return { ok: false, lines: [{ text: 'Сначала connect <region_id>', type: 'error' }] };
+      }
+      if (dry) return { ok: true, lines: [] };
+      const r = analyzeNetwork(state, Date.now());
+      if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
+      return {
+        ok: true,
+        lines: [
+          { text: '┌─ MESH SCAN COMPLETE', type: 'green' },
+          { text: `  REGION   ${r.report.region.name}`, type: '' },
+          { text: `  VISIBLE  ${r.report.count} devices`, type: '' },
+          { text: '  Введи имя файла для отчёта:', type: 'blue' }
+        ],
+        awaitFilename: { kind: 'net-report', content: r.report.text, type: 'network-report' },
+        progressUpdated: true
+      };
     }
         if (cmd === 'disconnect') {
       if (!state.phoneWorld) state.phoneWorld = { network: null, access: {}, discovered: {} };
@@ -1446,7 +1836,14 @@ if (cmd === 'connect') {
 
   if (pluginId === 'phone-access') {
     if (cmd === 'open') {
-      const r = accessPhone(state, arg1 || parts[1]);
+      const pid = arg1 || parts[1];
+      if (!pid) return { ok: false, lines: [{ text: 'usage: open <PHONE_ID>', type: 'error' }] };
+      if (!state.phoneWorld?.network) return { ok: false, lines: [{ text: 'Сначала connect к сети региона', type: 'error' }] };
+      if (dry) {
+        // light existence check happens in accessPhone; dry skips mutate
+        return { ok: true, lines: [] };
+      }
+      const r = accessPhone(state, pid);
       if (!r.ok) return { ok: false, lines: [{ text: r.reason, type: 'error' }] };
       state._phoneTarget = r.phone.id;
       return { ok: true, lines: [
@@ -1458,7 +1855,21 @@ if (cmd === 'connect') {
     }
     if (cmd === 'status') {
       const id = state._phoneTarget;
-      return { ok: true, lines: [{ text: id ? `Active: ${id}` : 'Нет активного PHONE_ID', type: id ? 'green' : 'muted' }] };
+      if (!id) return { ok: true, lines: [{ text: 'Нет активного PHONE_ID · open <id>', type: 'muted' }] };
+      const acc = (state.phoneWorld?.access && state.phoneWorld.access[id]) || {};
+      const unlocked = !!acc.unlocked;
+      // protection stored at open time if present
+      const prot = acc.protection || '—';
+      const name = acc.ownerName || '—';
+      const num = acc.number || '—';
+      return { ok: true, lines: [
+        { text: '┌─ PHONE ACCESS STATUS', type: 'green' },
+        { text: '  TARGET     ' + id, type: '' },
+        { text: '  OWNER      ' + name, type: '' },
+        { text: '  NUMBER     ' + num, type: '' },
+        { text: '  DEFENSE    ' + String(prot).toUpperCase() + (unlocked ? ' · UNLOCKED' : ' · LOCKED'), type: 'blue' },
+        { text: '  SESSION    ' + (unlocked ? 'active' : 'need attack / pin'), type: 'muted' }
+      ] };
     }
     if (cmd === 'attack') {
       const pid = state._phoneTarget;
@@ -1558,7 +1969,7 @@ if (cmd === 'connect') {
   }
 
   if (pluginId === 'mail-drop' && cmd === 'craft') {
-    const name = arg1 || 'drop';
+    if (dry) return { ok: true, lines: [] };
     const token = 'MD-' + Math.abs((Date.now() * 7) % 1e9).toString(36).toUpperCase();
     const content = [
       'NULLBYTE MAIL-DROP',
@@ -1566,10 +1977,15 @@ if (cmd === 'connect') {
       'hint=attach_and_send_via_nmail',
       'window=5s..10m after delivery'
     ].join('\n');
-    return { ok: true, lines: [
-      { text: 'Mail-drop payload ready · ' + token, type: 'green' },
-      { text: 'save <имя> → N-Mail → кому: имя владельца телефона → вложение → отправить', type: 'muted' }
-    ], pendingSave: { kind: 'mail-drop', content, defaultName: name, type: 'mail-drop', encrypted: false, meta: { token } } };
+    return {
+      ok: true,
+      lines: [
+        { text: 'Mail-drop payload ready · ' + token, type: 'green' },
+        { text: 'Введи имя файла для сохранения:', type: 'blue' }
+      ],
+      awaitFilename: { kind: 'mail-drop', content, type: 'mail-drop', meta: { token } },
+      progressUpdated: true
+    };
   }
   if (pluginId === 'mail-drop' && (cmd === 'status' || cmd === 'list')) {
     const drops = state.phoneWorld?.pendingDrops || [];
@@ -1987,7 +2403,6 @@ export function phoneSeed(stateOrSeed = 'nb') {
 export function bindPhoneMissionTarget(mission, seedRoot = 'nb') {
   if (!mission || !(String(mission.id || '').startsWith('phone-'))) return mission;
   const regionId = mission.regionId || 'bayshore';
-  const seed = phoneSeed(seedRoot);
   try {
     const list = listRegionPhones(regionId);
     if (!list.length) return mission;
@@ -1995,31 +2410,44 @@ export function bindPhoneMissionTarget(mission, seedRoot = 'nb') {
     const s = String(mission.id || 'p');
     for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
     let phone = list[Math.abs(h) % list.length];
-    // if previously bound number not in this region/seed — rebind
     if (mission.phoneNumber) {
       const found = list.find(p => p.number === mission.phoneNumber || p.id === mission.phoneId);
       if (found) phone = found;
-      else {
-        // force fresh pick
-        phone = list[Math.abs(h) % list.length];
-      }
+      else phone = list[Math.abs(h) % list.length];
     }
     mission.phoneId = phone.id;
     mission.targetPhoneId = phone.id;
-    mission.targetName = phone.ownerName;
-    mission.targetNumber = phone.number;
-    mission.ownerName = phone.ownerName;
+    mission.boundPhoneId = phone.id;
     mission.phoneNumber = phone.number;
-    mission.regionId = regionId;
-    mission.ownerType = phone.ownerType;
-    mission._bound = true;
-    mission._boundSeed = seed;
-    // strip any stacked suffix / never put PHONE_ID in player-facing objective
-    let baseObj = String(mission.objective || '').split(' Сеть:')[0].split(' Цель:')[0].trim();
-    mission.objective = baseObj;
-  } catch (e) {}
+    mission.ownerName = phone.ownerName;
+    mission.protection = phone.protection || 'medium';
+    // Reward scales with protection strength of the target
+    // low +0 · medium +100 · high +200 · hard +300 · xhard +400
+    const protBonus = {
+      low: 0,
+      medium: 150,
+      high: 300,
+      hard: 450,
+      xhard: 650
+    };
+    const base = Number(mission.baseReward != null ? mission.baseReward : mission.reward) || 180;
+    if (mission.baseReward == null) mission.baseReward = base;
+    const bonus = protBonus[String(mission.protection).toLowerCase()] ?? 100;
+    mission.reward = base + bonus;
+    mission.rewardBonus = bonus;
+    mission.difficultyLabel = (
+      { low: 'Слабая', medium: 'Средняя', high: 'Высокая', hard: 'Сложная', xhard: 'Экстрим' }
+    )[String(mission.protection).toLowerCase()] || mission.protection;
+    // XP scales lightly with difficulty
+    const xpBase = Number(mission.baseXp != null ? mission.baseXp : mission.xp) || 40;
+    if (mission.baseXp == null) mission.baseXp = xpBase;
+    mission.xp = xpBase + Math.round(bonus / 10);
+  } catch (err) {
+    console.warn('[bindPhoneMissionTarget]', err);
+  }
   return mission;
 }
+
 
 /** Returns true if mission target exists in stated region under phone seed */
 export function validatePhoneMissionTarget(mission, state) {
@@ -2128,7 +2556,10 @@ export function sendPlayerMail(state, { to, subject, body, attachmentId }) {
       return on === nameL || on.includes(nameL) || nameL.includes(on);
     }) || null;
   }
-  if (!found) return { ok: false, reason: 'NPC не найден. Укажи точное «Имя Фамилия» из сети/скана.' };
+  if (!found) {
+    // soft: still allow outbound letter so player can write freely
+    found = { id: 'npc_open_' + nameL.replace(/\s+/g, '_').slice(0, 24), ownerName: name, regionId: state.phoneWorld?.network?.regionId || '' };
+  }
 
   if (!state.mail) state.mail = { messages: [], pendingDelivery: [] };
   if (!state.mail.messages) state.mail.messages = [];
@@ -2172,6 +2603,51 @@ export function sendPlayerMail(state, { to, subject, body, attachmentId }) {
  * Verify mail attachments against active missions.
  * Success if: recipient is mission client (заказчик) AND file is SMS dump of mission target phone.
  */
+
+/** Complete phone lock missions when mail sent to client and target phone is blocked. */
+export function tryCompleteLockMissions(state, clientName) {
+  const name = String(clientName || '').trim().toLowerCase();
+  if (!name) return [];
+  const done = [];
+  const now = Date.now();
+  const items = state.missions?.items || [];
+  for (const m of items) {
+    const st = String(m.status || '');
+    if (!(st === 'accepted' || st === 'active' || st === 'in_progress')) continue;
+    if (String(m.task || '') !== 'lock' && !/блок/i.test(String(m.title || '') + String(m.objective || ''))) continue;
+    if (String(m.client || '').toLowerCase() !== name) continue;
+    const pid = m.phoneId || m.targetPhoneId || m.boundPhoneId;
+    if (!pid) continue;
+    const acc = state.phoneWorld?.access?.[pid] || state.phoneWorld?.access?.[String(pid).toUpperCase()];
+    const blocked = !!(acc && acc.blocked);
+    if (!blocked) continue;
+    // payout
+    m.status = 'completed';
+    m.completedAt = now;
+    const reward = Math.max(0, Number(m.reward) || 0);
+    addCredits(state, reward, 'Контракт: ' + (m.title || m.id));
+    if (state.player) {
+      state.player.totalEarned = (Number(state.player.totalEarned) || 0) + reward;
+      state.player.contractsCompleted = (Number(state.player.contractsCompleted) || 0) + 1;
+      state.player.xp = (Number(state.player.xp) || 0) + (Number(m.xp) || 25);
+    }
+    if (!state.mail) state.mail = { messages: [], pendingDelivery: [] };
+    state.mail.messages.unshift({
+      id: 'mail_ok_' + now.toString(36),
+      direction: 'in',
+      from: m.client,
+      to: state.player?.nickname || 'operator',
+      subject: 'Контракт выполнен: ' + (m.title || m.id),
+      body: 'Телефон ' + pid + ' заблокирован. Перевод ' + reward + ' CR на ваш кошелёк подтверждён.\\n— ' + m.client,
+      at: now,
+      attachments: [],
+      status: 'unread'
+    });
+    done.push(m.id);
+  }
+  return done;
+}
+
 export function processMailDeliveries(state, now = Date.now()) {
   if (!state.mail?.pendingDelivery?.length) return [];
   const done = [];
@@ -2182,7 +2658,18 @@ export function processMailDeliveries(state, now = Date.now()) {
     if (d.checked) continue;
     d.checked = true;
 
-    const file = (state.computer?.files || []).find(f => f.id === d.fileId);
+    const file = d.fileId ? (state.computer?.files || []).find(f => f.id === d.fileId) : null;
+    // Lock contracts may arrive without attachment
+    const lockMissions = (state.missions?.items || []).filter(m => {
+      const st = String(m.status || '');
+      if (!(st === 'accepted' || st === 'active' || st === 'in_progress')) return false;
+      if (String(m.client || '').toLowerCase() !== String(d.to || '').toLowerCase()) return false;
+      return String(m.task || '') === 'lock' || /блок/i.test(String(m.title || ''));
+    });
+    if (!file && lockMissions.length) {
+      tryCompleteLockMissions(state, d.to);
+      continue;
+    }
     if (!file) {
       state.mail.messages.unshift({
         id: 'mail_fail_' + Date.now().toString(36),
@@ -2252,17 +2739,12 @@ export function processMailDeliveries(state, now = Date.now()) {
       if (!match) continue;
 
       m.status = 'completed';
+      m.completedAt = now;
       const reward = Number(m.reward) || 0;
       const xp = Number(m.xp) || 50;
-      if (!state.economy) state.economy = { balance: 0, transactions: [] };
-      state.economy.balance = (Number(state.economy.balance) || 0) + reward;
-      state.economy.transactions = state.economy.transactions || [];
-      state.economy.transactions.unshift({
-        id: 'tx_mail_' + Date.now().toString(36),
-        at: now,
-        amount: reward,
-        note: `N-Mail: ${m.title || m.id}`
-      });
+      addCredits(state, reward, `Контракт: ${m.title || m.id}`);
+      try { if (typeof grantXp === 'function') grantXp(state, xp); else { state.player.xp = (Number(state.player.xp)||0)+xp; } } catch(e){}
+      if (state.player) { state.player.totalEarned = (Number(state.player.totalEarned)||0)+reward; state.player.contractsCompleted = (Number(state.player.contractsCompleted)||0)+1; }
       if (state.player) {
         state.player.xp = (Number(state.player.xp) || 0) + xp;
         // level up soft
